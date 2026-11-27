@@ -10,7 +10,17 @@ interface Driver extends Node {
     leaveVehicle(): boolean
     /** Thrown out at speed: its reactions take its body (false when it has none, or is not seated). */
     bailOut?(velocity: ArrayLike<number>, exitDirection: ArrayLike<number>, vehicle: Node): boolean
+    /** Whether it drives at all: only a character that does is let in (the player, not an NPC). */
+    readonly canDrive?: boolean
     cameraRig(): CameraRigNode | null
+}
+
+/** What the car asks of a character it hits or bears down on (SandboxCharacter, SandboxNpc). */
+interface Pedestrian extends Node {
+    /** Hit at `speed` m/s closing: its reactions throw it (true when they did). */
+    struckByVehicle?(vehicle: Node, velocity: ArrayLike<number>, speed: number): boolean
+    /** The car is coming at it, going `velocity`: get out of the way (an NPC). */
+    dodgeVehicle?(vehicle: Node, velocity: ArrayLike<number>): void
 }
 
 /** What the car asks of its camera rig (SandboxCarCamera). */
@@ -39,7 +49,11 @@ interface CarCamera extends Node {
  * again: the car brakes to a stop if it is moving, then the driver gets out (if the Exit Point is clear) and
  * takes its own Controller back; the view goes back to its camera. Faster than `bailSpeed`, the driver bails out
  * instead: thrown out of its door at the car's speed, its body its reactions' (it tumbles, comes to rest and gets
- * up), and the car, empty, brakes to a stop.
+ * up), and the car, empty, brakes to a stop. Only a character that drives (`canDrive`: the player) is let in.
+ *
+ * People in its way: a character it hits closing faster than `knockSpeed` is thrown by its reactions (its
+ * `struckByVehicle`: knocked off its feet and over the bonnet), and one ahead of it, within `warnSeconds` of its
+ * travel, is told to get out of the way (`dodgeVehicle`, an NPC's).
  *
  * The car decides when; the character decides how (its animator's triggers, its root motion). It plays nothing.
  *
@@ -63,6 +77,17 @@ export default class SandboxCarNode extends ColliderNode {
     /** Faster than this (m/s), Interact throws the driver out of the moving car rather than braking first. */
     @attribute('Driving', { min: 0, max: 50, step: 0.5 })
     private bailSpeed: number = 6
+
+    /** A character hit closing faster than this (m/s) is knocked down; slower, it is only pushed by the body. */
+    @attribute('Impacts', { min: 0, max: 20, step: 0.1 })
+    private knockSpeed: number = 2.5
+
+    /** Faster than this (m/s) the car warns who is ahead of it, as far as it goes in `warnSeconds`. */
+    @attribute('Impacts', { min: 0, max: 20, step: 0.1 })
+    private warnSpeed: number = 3
+
+    @attribute('Impacts', { min: 0, max: 5, step: 0.05 })
+    private warnSeconds: number = 2
 
     @child('Vehicle')
     private _vehicle: VehicleNode = null
@@ -97,6 +122,8 @@ export default class SandboxCarNode extends ColliderNode {
     /** Parked (empty), entering (the driver getting in), driving, stopping (braking to let the driver out), exiting. */
     private _state: 'parked' | 'entering' | 'driving' | 'stopping' | 'exiting' = 'parked'
     private _driver: Driver | null = null
+    /** Seconds to the next look ahead for people in the way. */
+    private _warnWait: number = 0
 
     onUpdate(delta: number) {
         const vehicle = this._vehicle
@@ -145,6 +172,7 @@ export default class SandboxCarNode extends ColliderNode {
                 break
         }
         this._updateLamps(delta)
+        this._warnAhead(delta)
     }
 
     /** The lamps toward what the car is doing: off when empty; on, braking and reversing with a driver. */
@@ -198,9 +226,54 @@ export default class SandboxCarNode extends ColliderNode {
         const layerMask = physics.layer(this.driverLayer) || undefined
         for (const hit of physics.overlapBox(zone.worldPosition, half, zone.worldQuaternion, { layerMask, ignore: this })) {
             const character = hit.node?.character as unknown as Partial<Driver> | null | undefined
-            if (character && typeof character.boardVehicle === 'function' && !character.inVehicle) return character as Driver
+            if (character && character.canDrive === true && typeof character.boardVehicle === 'function' && !character.inVehicle) return character as Driver
         }
         return null
+    }
+
+    /**
+     * The car's body meets another: a character's capsule hit closing at `knockSpeed` or faster is knocked down by its
+     * reactions (`struckByVehicle`). Not the driver, and not a body already down (its ragdoll is pushed by the car
+     * itself).
+     */
+    onCollision(other: Node) {
+        const character = (other as any)?.character as Pedestrian | null | undefined
+        if (!character || typeof character.struckByVehicle !== 'function' || character === (this._driver as unknown)) return
+        const v = this.velocity, p = this.worldPosition, q = character.worldPosition
+        const dx = q[0] - p[0], dz = q[2] - p[2], n = Math.hypot(dx, dz)
+        // Closing speed: the car's velocity toward the one it hit.
+        const closing = n > 1e-3 ? (v[0] * dx + v[2] * dz) / n : Math.hypot(v[0], v[2])
+        if (closing < this.knockSpeed) return
+        character.struckByVehicle(this, [v[0], v[1], v[2]], closing)
+    }
+
+    /**
+     * Every 0.1 s while it goes faster than `warnSpeed`: a box ahead along its travel, as long as it goes in
+     * `warnSeconds` and a little wider than the car, and every character in it but the driver told to get out of
+     * the way (`dodgeVehicle`).
+     */
+    private _warnAhead(delta: number) {
+        this._warnWait -= delta
+        if (this._warnWait > 0) return
+        this._warnWait = 0.1
+        const physics = this.scene?.physics
+        const v = this.velocity
+        const speed = Math.hypot(v[0], v[2])
+        if (!physics || speed < this.warnSpeed) return
+        const length = speed * this.warnSeconds
+        const dir = [v[0] / speed, v[2] / speed]
+        const p = this.worldPosition
+        const center = [p[0] + dir[0] * (length / 2 + 2), p[1] + 1, p[2] + dir[1] * (length / 2 + 2)]
+        const yaw = Math.atan2(dir[0], dir[1])
+        const q = [0, Math.sin(yaw / 2), 0, Math.cos(yaw / 2)]
+        const layerMask = physics.layer(this.driverLayer) || undefined
+        const warned = new Set<Node>()
+        for (const hit of physics.overlapBox(center, [1.4, 1.2, length / 2], q, { layerMask, ignore: this })) {
+            const character = hit.node?.character as Pedestrian | null | undefined
+            if (!character || warned.has(character) || character === (this._driver as unknown) || typeof character.dodgeVehicle !== 'function') continue
+            warned.add(character)
+            character.dodgeVehicle(this, [v[0], v[1], v[2]])
+        }
     }
 
     /** Out through the driver's door, level: from the Seat toward the Door Zone. */

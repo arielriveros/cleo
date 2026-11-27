@@ -21,10 +21,15 @@ does. It can:
 - aim them where the camera looks, fire them, the body taking each shot's recoil, and reload them, their shots
   raycasts that push what they hit (see [The weapons](#the-weapons));
 - switch to first person and back: Firing Line's viewmodels and its shooter's mechanics, the body still casting its
-  shadow (see [First person](#first-person)).
+  shadow (see [First person](#first-person));
+- share the course with people on the same body: six blue **civilians** who wander it, stop to look at things, look
+  at you and move on, and run from shots and from the car, and four red **enemies** who patrol it in pairs with
+  rifles, shoot you on sight and take cover when shot at. Every one of them reacts with its whole body when it is
+  shot or run over, and gets up again (see [The NPCs](#the-npcs)).
 
-Everything that is the character is one **Player** template, placed once; the sky is the **Environment** template,
-the course the **Course** template, and the car the **Car** template.
+The body every character has is one **Sandbox Character** template; the player is its **Player** variant, placed
+once, and the people are its **Civilian** and **Enemy** variants. The sky is the **Environment** template, the
+course the **Course** template, and the car the **Car** template.
 
 The course stands on an open **Ocean** whose surface is 2 m under the ground. It starts at dusk: the sun 9 degrees
 under the horizon, under sunset clouds (the Environment's Volumetric Clouds, the Sunset preset with more and
@@ -54,10 +59,13 @@ It uses only what the engine has:
 - foot placement and foot locking on the skeleton;
 - one script on the Character, which handles input and writes the values the animator reads.
 
-The character is one template, **Player** (`/Characters/Mannequin/Player.tpl`): the Collider, the Character and
-its script, the Camera Rig and its script, the Mannequin, the Controller, and its own **HUD** (a screen canvas: the
-crosshair, the ammunition and the reload, so every copy of the Player brings and drives its own). The level is two
-more:
+The body is one template, **Sandbox Character** (`/Characters/Mannequin/Sandbox Character.tpl`): the Collider, the
+Character and its script (`SandboxCharacter`), the Mannequin, the weapons in its hands and their sounds. On its own it
+stands idle. The player is its variant **Player** (`/Characters/Mannequin/Player.tpl`): the Character's script is
+`SandboxPlayer` (input on top of the body's), and it adds the Camera Rig and its script, the Controller, and its own
+**HUD** (a screen canvas: the crosshair, the ammunition and the reload, so every copy of the Player brings and drives
+its own). An edit to the base (a weapon's grip, the Mannequin's machine) reaches the Player and every NPC. The level is
+two more:
 **Environment** (`/Level/Environment.tpl`: the sun, the sky atmosphere and the sky light) and **Course**
 (`/Level/Course.tpl`: the merged Static Collision collider with every piece of the course, placed under that name,
 and inside it the parts merged apart for their [collision layers](#collision-layers-stairs-bumps-and-pillars): the
@@ -417,8 +425,12 @@ foot sticking to the floor.
 
 ### The script
 
-`SandboxPlayer.ts` sits on the Character. Each frame, before the Character acts, it adjusts what the Controller asked
-for:
+The Character's script is two classes. `SandboxCharacter.ts` is the body every Sandbox character shares: everything
+below, the weapons' stance, aim and fire, the car and the reactions. It asks its subclass what it wants (to walk, to
+aim, to fire, to reload, which weapon, where its shot comes from and goes) and does nothing on its own.
+`SandboxPlayer.ts`, the Player's, extends it and answers from the input and the camera; it also owns the camera, first
+person and its viewmodels, the depth of field and the HUD. The NPCs' scripts answer from their brains (see
+[The NPCs](#the-npcs)). Each frame, before the Character acts, the body adjusts what the Controller asked for:
 
 - **The gait.** Walk scales speed down to the walk. A stick walks below `walkDeflection` and jogs above it. Sprint
   works in any direction with the stick all the way, and sets `sprinting`.
@@ -562,21 +574,95 @@ the wheel with the steering, and the seated feet go through the floor (no leg IK
 
 ## Reactions
 
-The mannequin reacts with its whole body, with the [reactions](reactions.md) of its skeleton (the built-in
-**Default** set: the Mannequin rig has no sets of its own yet; give it some in its **Reactions** tab):
+The mannequin reacts with its whole body, with the [reactions](reactions.md) of its skeleton: the Mannequin rig's
+**Default** set (its **Reactions** tab), the same for the player and every NPC:
 
 - **T** trips it: its feet stop, it falls forward onto its hands, lies a moment and gets up.
 - **G** shoves it back: it steps back to keep its balance, tiring with each step, and falls if it cannot.
 - **Bailing out** of the car at speed (above) throws it out to tumble along the ground.
 - **A shot** that strikes a character (its capsule, or a limb of a body already reacting) is its reactions'
-  (SandboxGun hands it to `physics.applyHit`), on the limb the shot meets: a flinch and a hand to the wound, a
-  stagger, or a fall, by how hard it lands. The Player cannot shoot itself, so it takes a second character to see:
-  place one (a Collider with a Character under it and the Mannequin model under that) and shoot it.
+  (SandboxGun hands it to `physics.applyHit`), on the limb the shot meets: a flinch and a hand to the wound, a stumble
+  of a step or two for a rifle round in the trunk, a stagger, or a fall, by how hard it lands. Shoot an NPC to see
+  it. The player is not moved by shots at all (its `reactsToShots` is false): an enemy's rounds hit it, and it plays
+  on.
+- **The car** hitting a character faster than its **Knock Speed** (2.5 m/s, closing) throws it (`struckByVehicle`,
+  the reactions' `impact`): the legs are taken out first and the body pivots over the bonnet, its knees and hips
+  bent and its arms up round its head, and it rolls when it lands.
 
 While a reaction has the body (it staggers, falls, lies or gets up) the stick does nothing and the weapon is put
-away; a flinch it stands through keeps it in hand. It gets up without a clip of its own: the strings lift the body
-back onto its idle. Mixamo's *Getting Up* (face down) and *Stand Up* (face up), imported onto the Mannequin rig and
-given to the set's **Get up** behaviour, would give it a real one.
+away; a flinch it stands through keeps it in hand. Foot placement, foot locking and the support hand's IK fade out
+while the body reacts and back in after. Nothing in the Sandbox has health: a body that falls always gets up. It gets
+up on Mixamo's *Getting Up* lying face down and *Stand Up* lying face up (the set's **Get up** clips, in
+`/Characters/Mannequin/Animation/Clips/Get Up`). The clip is turned to lie the way the body lies, and the skin blends
+from the body onto its first frame before it plays, so the body does not turn round to meet it. A hit while it gets
+up knocks it back down (or off balance, if it was nearly up).
+
+The course's surfaces have a friction of 0.7, so a falling body grips the ground and rolls; the props keep their own
+0.3 (a pair of surfaces takes the smaller), so they slide as before.
+
+## The NPCs
+
+The people share the player's body: each is a variant of **Sandbox Character** (`/Characters/NPCs`), with the same
+Mannequin, machine, clips and reactions, its own material, and an **AI Controller** under its Character for a brain.
+They are placed under the scene's **NPCs** node: six **Civilian**s over the map and four **Enemy**s, two by the
+pillars and two by the crates.
+
+**The classes.** `SandboxNpc.ts` (`/Characters/NPCs/Scripts`) extends SandboxCharacter with what both kinds need:
+
+- **Moving.** `goTo(point, gait)` walks the nav mesh there (the AI Controller's path goal), `stop()` stands,
+  `moveWorld(x, z, gait)` steps the body itself (a strafe, a dodge), `face` and `lookAt` turn the head, and the body
+  past its turn delay, `crouch` crouches. It writes the Controller's intent each frame: the pace (walk, jog or
+  sprint), the crouch and where it looks.
+- **Senses.** Sight is its AI Controller's perception (range, cone and reaction time from its **Senses**
+  attributes), of the character whose `team` is the player's. A shot fired within **Hearing** (35 m) is heard, one
+  whose line passes within **Near Miss** (2.5 m) nearly hit it, one that struck it hit it; a car bearing down on it
+  warns it (the car's `dodgeVehicle`) and it steps off the car's line at a sprint. Each comes to its subclass as a
+  threat.
+- **Knock-downs.** One round is a flinch. Hits add up (**Stagger Shock**, **Knockdown Shock**, fading by half every
+  **Shock Half Life**): past the first it staggers, past the second, or hit in the legs running, it falls.
+- **It never dies.** Its health is kept full, a body lying longer than **Down Seconds** is got up, and one reacting
+  longer than **Stuck Seconds** is put back on its feet. While a reaction has the body the brain waits.
+
+`SandboxCivilian.ts` (blue) waits at a **Look Point** a few seconds, its head sweeping round what is there, then
+walks 10 to 40 m off to somewhere else, often another Look Point. The player close by (**Watch Distance**, 6 m) and
+in sight, on foot, is looked at for a few seconds, and not again for **Watch Cooldown**. It is an ordinary person,
+slow to react: it notices someone after **Notice Seconds** (0.9 s), and answers a shot heard or one that nearly hit
+it after a startle (**Startle Min** to **Startle Max**, 0.4 to 0.8 s). A shot heard makes it look toward it for
+**Alert Seconds**, then run if it was close (**Flee Distance**) or walk off quicker; a near miss, a hit or a car
+sends it sprinting away from the danger, somewhere reachable and not past it, and it crouches there facing the danger
+before it calms down. Once up after a fall, it runs.
+
+`SandboxEnemy.ts` (red) carries its **Preferred Weapon** (the rifle) from the start, at the low ready.
+
+- **Patrol.** It walks the nav mesh route nearest where it was placed (or the one its **Route** names), stopping at
+  each point to look round. Two placed within 10 m of each other patrol as a pair: one leads, the other keeps behind
+  it to the right.
+- **Engage.** The player in sight: it aims, fires in bursts, keeps between **Nearest** and **Farthest** (8 to 22 m),
+  side-steps now and then, and holds fire with someone else in the line. It aims worse far away and at a moving
+  target, and better the longer it holds the player in its sights. It tells its partner.
+- **Cover.** Hit, or nearly hit twice: it sprints to the best spot the shooter cannot see (a **Cover Point** within
+  15 m, or a ring of probes round it; hidden for a crouched head and a shoulder's width to either side, reachable
+  without a long way round, not taken by another enemy), crouches, reloads, and stands up to fire a burst now and
+  then. After a few, or once the spot is seen, it moves.
+- **Search** where the player was last seen, then **return** to its route.
+
+Its magazine is topped up from a reserve that never runs out. Its rounds hit the player but do not move it, and the
+player has no health.
+
+**The points.** Under the scene's **NPC Points**: nodes named `Look Point ...` (what there is to look at: the props,
+the stairs, the balls, the car, the crates) and `Cover Point ...` (where to crouch: by the pillars, the wall, the
+crates and the barrels). The scripts find them by name, anywhere in the scene.
+
+**The nav mesh.** The scene's **NavMesh** node covers the ground (an agent radius of 0.35 m, slopes up to 35
+degrees, steps up to 0.35 m), baked from the course, and holds the two routes, **Patrol Pillars** and
+**Patrol Crates**. Re-bake it (the NavMesh node's **Bake**) after changing the course.
+
+**The car** lets only the player drive it (`canDrive`: an NPC by the door is not let in), knocks down whoever it hits
+fast enough, and warns whoever is ahead of it within **Warn Seconds** of its travel.
+
+**To add one,** place a copy of the **Civilian** or **Enemy** template on the nav mesh (under NPCs, to keep them
+together). An enemy patrols the route nearest it: add a route to the NavMesh node, or name one in its **Route**. A
+new kind of NPC is a variant of Sandbox Character with a script that extends `SandboxNpc` and decides in `think`.
 
 ## The weapons
 
@@ -930,6 +1016,10 @@ it replaces. An armed clip goes in its weapon set's blend space or variant state
 fork on Stance.
 
 ## Limits
+
+- **The NPCs** have no health and do not die, and no hearing but of shots: footsteps and the car's engine go
+  unheard. Their sight is the AI Controller's, a ray to each character every few frames, so a crowd costs. A cover
+  spot is good against one shooter only, and the probes find none where the course has nothing to crouch behind.
 
 - **No stride or orientation warping.** The forward diagonals are blends, and their feet slide more than the
   cardinal directions do (the test reports both).

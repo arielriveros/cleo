@@ -1,0 +1,2093 @@
+{
+  "cleo": 1,
+  "guid": "1ca79619fc18da18acdaf47a610810ac",
+  "kind": "script",
+  "created": 0,
+  "record": {
+    "id": "1ca79619fc18da18acdaf47a610810ac",
+    "name": "SandboxEnemy",
+    "baseType": "character",
+    "source": {
+      "$file": 1
+    },
+    "kind": "class",
+    "variables": [
+      {
+        "name": "walkScale",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 0.38,
+        "hidden": false,
+        "attribute": {
+          "group": "Gait",
+          "min": 0,
+          "max": 1,
+          "step": 0.01,
+          "tooltip": "Walk speed as a share of the jog (the Character's walkSpeed): the walk clips' speed over the jog's."
+        }
+      },
+      {
+        "name": "walkDeflection",
+        "type": {
+          "kind": "number"
+        },
+        "access": "protected",
+        "default": 0.6,
+        "hidden": false,
+        "attribute": {
+          "group": "Gait",
+          "min": 0,
+          "max": 1,
+          "step": 0.05,
+          "tooltip": "A stick pushed less than this walks; past it, it jogs."
+        }
+      },
+      {
+        "name": "backScale",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 0.73,
+        "hidden": false,
+        "attribute": {
+          "group": "Gait",
+          "min": 0.1,
+          "max": 1,
+          "step": 0.01,
+          "tooltip": "Speed share travelling straight back: the backward clips cover less ground than the forward ones."
+        }
+      },
+      {
+        "name": "backDiagonalScale",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 0.48,
+        "hidden": false,
+        "attribute": {
+          "group": "Gait",
+          "min": 0.1,
+          "max": 1,
+          "step": 0.01,
+          "tooltip": "Speed share travelling diagonally back at a jog (the back-diagonal clip's speed), and at a walk."
+        }
+      },
+      {
+        "name": "walkBackDiagonalScale",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 0.86,
+        "hidden": false,
+        "attribute": {
+          "group": "Gait",
+          "min": 0.1,
+          "max": 1,
+          "step": 0.01
+        }
+      },
+      {
+        "name": "directionEase",
+        "type": {
+          "kind": "number"
+        },
+        "access": "protected",
+        "default": 0.15,
+        "hidden": false,
+        "attribute": {
+          "group": "Gait",
+          "min": 0,
+          "max": 1,
+          "step": 0.01,
+          "tooltip": "Seconds the speed share takes to follow a change of direction."
+        }
+      },
+      {
+        "name": "runTurnSpeed",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 3.5,
+        "hidden": false,
+        "attribute": {
+          "group": "Running Turn",
+          "min": 0,
+          "max": 10,
+          "step": 0.1,
+          "tooltip": "A sprint faster than this (m/s) that is asked to go more than `runTurnAngle` the other way turns round."
+        }
+      },
+      {
+        "name": "sprintTakeoff",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 5,
+        "hidden": false,
+        "attribute": {
+          "group": "Gait",
+          "min": 0.5,
+          "max": 30,
+          "step": 0.1,
+          "tooltip": "The acceleration (m/s2) a sprint takes off at, from a standstill or speeding up the way it already goes: the start clip's own, so it plays at its own speed and is seen. Everything else (a jog, a walk, braking, a turn) keeps the Character's Acceleration."
+        }
+      },
+      {
+        "name": "runTurnAngle",
+        "type": {
+          "kind": "number"
+        },
+        "access": "protected",
+        "default": 135,
+        "hidden": false,
+        "attribute": {
+          "group": "Running Turn",
+          "min": 90,
+          "max": 180,
+          "step": 1
+        }
+      },
+      {
+        "name": "runTurnRelease",
+        "type": {
+          "kind": "number"
+        },
+        "access": "protected",
+        "default": 30,
+        "hidden": false,
+        "attribute": {
+          "group": "Running Turn",
+          "min": 0,
+          "max": 90,
+          "step": 1,
+          "tooltip": "The turn lets go once the body is this close to the way it is asked to go (degrees), or after `runTurnSeconds`."
+        }
+      },
+      {
+        "name": "runTurnSeconds",
+        "type": {
+          "kind": "number"
+        },
+        "access": "protected",
+        "default": 1.2,
+        "hidden": false,
+        "attribute": {
+          "group": "Running Turn",
+          "min": 0.2,
+          "max": 3,
+          "step": 0.05
+        }
+      },
+      {
+        "name": "jumpTurnSpeed",
+        "type": {
+          "kind": "number"
+        },
+        "access": "protected",
+        "default": 1,
+        "hidden": false,
+        "attribute": {
+          "group": "Jump",
+          "min": 0,
+          "max": 5,
+          "step": 0.1,
+          "tooltip": "Taking off faster than this over the ground (m/s), a jump faces the way it flies; slower, as it stood."
+        }
+      },
+      {
+        "name": "leanAcceleration",
+        "type": {
+          "kind": "number"
+        },
+        "access": "protected",
+        "default": 4,
+        "hidden": false,
+        "attribute": {
+          "group": "Lean",
+          "min": 0.5,
+          "max": 20,
+          "step": 0.5,
+          "tooltip": "Sideways acceleration (m/s2) that leans the body all the way."
+        }
+      },
+      {
+        "name": "leanSpeed",
+        "type": {
+          "kind": "number"
+        },
+        "access": "protected",
+        "default": 4,
+        "hidden": false,
+        "attribute": {
+          "group": "Lean",
+          "min": 0.5,
+          "max": 20,
+          "step": 0.5,
+          "tooltip": "How fast the lean follows, per second (ALS's lean interpolation speed)."
+        }
+      },
+      {
+        "name": "leanForwardAcceleration",
+        "type": {
+          "kind": "number"
+        },
+        "access": "protected",
+        "default": 8,
+        "hidden": false,
+        "attribute": {
+          "group": "Lean",
+          "min": 0.5,
+          "max": 30,
+          "step": 0.5,
+          "tooltip": "Forward acceleration (m/s2) that leans the body forward all the way: setting off, speeding up."
+        }
+      },
+      {
+        "name": "leanForwardSpeed",
+        "type": {
+          "kind": "number"
+        },
+        "access": "protected",
+        "default": 8,
+        "hidden": false,
+        "attribute": {
+          "group": "Lean",
+          "min": 0.5,
+          "max": 30,
+          "step": 0.5,
+          "tooltip": "How fast the forward lean follows, per second: a start is over in half a second."
+        }
+      },
+      {
+        "name": "lookAroundAngle",
+        "type": {
+          "kind": "number"
+        },
+        "access": "protected",
+        "default": 20,
+        "hidden": false,
+        "attribute": {
+          "group": "Turn In Place",
+          "min": 0,
+          "max": 180,
+          "step": 1,
+          "tooltip": "After a sprint, how far the camera must swing (degrees) before standing still turns to face it again."
+        }
+      },
+      {
+        "name": "turnDelay",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 1,
+        "hidden": false,
+        "attribute": {
+          "group": "Turn In Place",
+          "min": 0,
+          "max": 3,
+          "step": 0.05,
+          "tooltip": "Seconds the camera must stay round past the turn threshold before the body turns in place to it: meanwhile the head looks round (the Look layer). A character's own reaction time, so public."
+        }
+      },
+      {
+        "name": "farTurnShare",
+        "type": {
+          "kind": "number"
+        },
+        "access": "protected",
+        "default": 0.35,
+        "hidden": false,
+        "attribute": {
+          "group": "Turn In Place",
+          "min": 0,
+          "max": 1,
+          "step": 0.05,
+          "tooltip": "The share of `turnDelay` waited before a turn to a camera swung right round behind (past 135 degrees)."
+        }
+      },
+      {
+        "name": "lookSpeed",
+        "type": {
+          "kind": "number"
+        },
+        "access": "protected",
+        "default": 5,
+        "hidden": false,
+        "attribute": {
+          "group": "Look",
+          "min": 0.5,
+          "max": 20,
+          "step": 0.5,
+          "tooltip": "How fast the look-at comes in standing still, and goes as the body moves off, per second."
+        }
+      },
+      {
+        "name": "lookPitchRest",
+        "type": {
+          "kind": "number"
+        },
+        "access": "protected",
+        "default": 12,
+        "hidden": false,
+        "attribute": {
+          "group": "Look",
+          "min": -45,
+          "max": 45,
+          "step": 1,
+          "tooltip": "The camera pitch (degrees, down +) that is a level look: the rig's resting pitch, which looks a little down at the character. Pitched further down the head looks down, pitched up it looks up."
+        }
+      },
+      {
+        "name": "walkFootSpeed",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 1.9,
+        "hidden": false,
+        "attribute": {
+          "group": "Foot Placement",
+          "min": 0,
+          "max": 10,
+          "step": 0.1,
+          "tooltip": "Foot placement is full up to this speed (m/s)..."
+        }
+      },
+      {
+        "name": "runFootSpeed",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 3.8,
+        "hidden": false,
+        "attribute": {
+          "group": "Foot Placement",
+          "min": 0,
+          "max": 10,
+          "step": 0.1,
+          "tooltip": "...and down to `runFootWeight` from this one. The lean fades in over the same range."
+        }
+      },
+      {
+        "name": "runFootWeight",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 0.3,
+        "hidden": false,
+        "attribute": {
+          "group": "Foot Placement",
+          "min": 0,
+          "max": 1,
+          "step": 0.05
+        }
+      },
+      {
+        "name": "stairsLayer",
+        "type": {
+          "kind": "name",
+          "name": "layer"
+        },
+        "access": "public",
+        "default": "Stair Ramp",
+        "hidden": false,
+        "attribute": {
+          "group": "Stairs",
+          "tooltip": "The collision layer of the ramps laid over flights of stairs: what the capsule climbs, and how a flight is known."
+        }
+      },
+      {
+        "name": "stairUpWalkSpeed",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 0.55,
+        "hidden": false,
+        "attribute": {
+          "group": "Stairs",
+          "min": 0.1,
+          "max": 5,
+          "step": 0.01,
+          "tooltip": "A flight's pace, horizontal m/s, walking and running, up and down: one tread a step at the stair clips' rate (the build fits them to the clips and the course's treads). Faster, and the feet slide on the treads."
+        }
+      },
+      {
+        "name": "stairUpRunSpeed",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 1.25,
+        "hidden": false,
+        "attribute": {
+          "group": "Stairs",
+          "min": 0.1,
+          "max": 5,
+          "step": 0.01
+        }
+      },
+      {
+        "name": "stairDownWalkSpeed",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 0.8,
+        "hidden": false,
+        "attribute": {
+          "group": "Stairs",
+          "min": 0.1,
+          "max": 5,
+          "step": 0.01
+        }
+      },
+      {
+        "name": "stairDownRunSpeed",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 1.88,
+        "hidden": false,
+        "attribute": {
+          "group": "Stairs",
+          "min": 0.1,
+          "max": 5,
+          "step": 0.01
+        }
+      },
+      {
+        "name": "stairGrade",
+        "type": {
+          "kind": "number"
+        },
+        "access": "protected",
+        "default": 0.25,
+        "hidden": false,
+        "attribute": {
+          "group": "Stairs",
+          "min": 0.05,
+          "max": 1,
+          "step": 0.01,
+          "tooltip": "The climb along the travel (rise over run) that counts as going up or down a flight; it lets go at 60% of it."
+        }
+      },
+      {
+        "name": "stairGrace",
+        "type": {
+          "kind": "number"
+        },
+        "access": "protected",
+        "default": 0.15,
+        "hidden": false,
+        "attribute": {
+          "group": "Stairs",
+          "min": 0,
+          "max": 1,
+          "step": 0.01,
+          "tooltip": "Seconds a flight still counts after the ramp last showed under the body (it meets the ground at its foot)."
+        }
+      },
+      {
+        "name": "stairBrake",
+        "type": {
+          "kind": "number"
+        },
+        "access": "protected",
+        "default": 1.5,
+        "hidden": false,
+        "attribute": {
+          "group": "Stairs",
+          "min": 1,
+          "max": 4,
+          "step": 0.05,
+          "tooltip": "How much harder than its Acceleration the body brakes for a flight ahead: it starts slowing that much later, and still reaches the flight's pace by its first step."
+        }
+      },
+      {
+        "name": "enterTrigger",
+        "type": {
+          "kind": "name",
+          "name": "trigger"
+        },
+        "access": "public",
+        "default": "EnterCar",
+        "hidden": false,
+        "attribute": {
+          "group": "Car",
+          "tooltip": "The animator's trigger that plays getting into a car, and the one that plays getting out of it."
+        }
+      },
+      {
+        "name": "exitTrigger",
+        "type": {
+          "kind": "name",
+          "name": "trigger"
+        },
+        "access": "public",
+        "default": "ExitCar",
+        "hidden": false,
+        "attribute": {
+          "group": "Car"
+        }
+      },
+      {
+        "name": "equipSeconds",
+        "type": {
+          "kind": "number"
+        },
+        "access": "protected",
+        "default": 0.3,
+        "hidden": false,
+        "attribute": {
+          "group": "Weapons",
+          "min": 0.05,
+          "max": 2,
+          "step": 0.05,
+          "tooltip": "Seconds a weapon takes to come up into the hands, and to go down out of them."
+        }
+      },
+      {
+        "name": "aimSeconds",
+        "type": {
+          "kind": "number"
+        },
+        "access": "protected",
+        "default": 0.15,
+        "hidden": false,
+        "attribute": {
+          "group": "Weapons",
+          "min": 0.02,
+          "max": 1,
+          "step": 0.01,
+          "tooltip": "Seconds the aim takes to come up, and to go down."
+        }
+      },
+      {
+        "name": "aimTurnThreshold",
+        "type": {
+          "kind": "number"
+        },
+        "access": "protected",
+        "default": 45,
+        "hidden": false,
+        "attribute": {
+          "group": "Weapons",
+          "min": 10,
+          "max": 120,
+          "step": 1,
+          "tooltip": "Aiming and standing still, the camera turned further than this (degrees) turns the body in place to it, at once."
+        }
+      },
+      {
+        "name": "fireAimHold",
+        "type": {
+          "kind": "number"
+        },
+        "access": "protected",
+        "default": 0.6,
+        "hidden": false,
+        "attribute": {
+          "group": "Weapons",
+          "min": 0,
+          "max": 3,
+          "step": 0.05,
+          "tooltip": "Fired from the hip, the weapon stays up (aimed) this many seconds after the last shot."
+        }
+      },
+      {
+        "name": "fireAimReady",
+        "type": {
+          "kind": "number"
+        },
+        "access": "protected",
+        "default": 0.7,
+        "hidden": false,
+        "attribute": {
+          "group": "Weapons",
+          "min": 0,
+          "max": 1,
+          "step": 0.05,
+          "tooltip": "How far up the weapon must be (its aim's weight) before a shot goes."
+        }
+      },
+      {
+        "name": "alignSeconds",
+        "type": {
+          "kind": "number"
+        },
+        "access": "protected",
+        "default": 0.35,
+        "hidden": false,
+        "attribute": {
+          "group": "Car",
+          "min": 0,
+          "max": 2,
+          "step": 0.05
+        }
+      },
+      {
+        "name": "alignMaxSeconds",
+        "type": {
+          "kind": "number"
+        },
+        "access": "protected",
+        "default": 0.6,
+        "hidden": false,
+        "attribute": {
+          "group": "Car",
+          "min": 0,
+          "max": 2,
+          "step": 0.05
+        }
+      },
+      {
+        "name": "settleSeconds",
+        "type": {
+          "kind": "number"
+        },
+        "access": "protected",
+        "default": 0.3,
+        "hidden": false,
+        "attribute": {
+          "group": "Car",
+          "min": 0,
+          "max": 2,
+          "step": 0.05,
+          "tooltip": "Seconds what is left of getting in (a few millimetres) eases out over once seated."
+        }
+      },
+      {
+        "name": "inVehicle",
+        "type": {
+          "kind": "boolean"
+        },
+        "access": "public",
+        "default": false,
+        "hidden": true
+      },
+      {
+        "name": "seated",
+        "type": {
+          "kind": "boolean"
+        },
+        "access": "public",
+        "default": false,
+        "hidden": true
+      },
+      {
+        "name": "hasMoveInput",
+        "type": {
+          "kind": "boolean"
+        },
+        "access": "public",
+        "default": false,
+        "hidden": true
+      },
+      {
+        "name": "groundSpeed",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 0,
+        "hidden": true
+      },
+      {
+        "name": "running",
+        "type": {
+          "kind": "boolean"
+        },
+        "access": "public",
+        "default": false,
+        "hidden": true
+      },
+      {
+        "name": "sprinting",
+        "type": {
+          "kind": "boolean"
+        },
+        "access": "public",
+        "default": false,
+        "hidden": true
+      },
+      {
+        "name": "moveAngle",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 0,
+        "hidden": true
+      },
+      {
+        "name": "runTurn",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 0,
+        "hidden": true
+      },
+      {
+        "name": "leanLeft",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 0,
+        "hidden": true
+      },
+      {
+        "name": "leanRight",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 0,
+        "hidden": true
+      },
+      {
+        "name": "leanForward",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 0,
+        "hidden": true
+      },
+      {
+        "name": "footPlacement",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 1,
+        "hidden": true
+      },
+      {
+        "name": "lookYaw",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 0,
+        "hidden": true
+      },
+      {
+        "name": "lookPitch",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 0,
+        "hidden": true
+      },
+      {
+        "name": "lookWeight",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 0,
+        "hidden": true
+      },
+      {
+        "name": "lookHeadWeight",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 0,
+        "hidden": true
+      },
+      {
+        "name": "onStairs",
+        "type": {
+          "kind": "boolean"
+        },
+        "access": "public",
+        "default": false,
+        "hidden": true
+      },
+      {
+        "name": "stairs",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 0,
+        "hidden": true
+      },
+      {
+        "name": "stairRate",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 1,
+        "hidden": true
+      },
+      {
+        "name": "weapon",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 0,
+        "hidden": true
+      },
+      {
+        "name": "pistolWeight",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 0,
+        "hidden": true
+      },
+      {
+        "name": "rifleWeight",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 0,
+        "hidden": true
+      },
+      {
+        "name": "shotgunWeight",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 0,
+        "hidden": true
+      },
+      {
+        "name": "stance",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 0,
+        "hidden": true
+      },
+      {
+        "name": "aiming",
+        "type": {
+          "kind": "boolean"
+        },
+        "access": "public",
+        "default": false,
+        "hidden": true
+      },
+      {
+        "name": "pistolAimWeight",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 0,
+        "hidden": true
+      },
+      {
+        "name": "rifleAimWeight",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 0,
+        "hidden": true
+      },
+      {
+        "name": "shotgunAimWeight",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 0,
+        "hidden": true
+      },
+      {
+        "name": "loweredWeight",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 0,
+        "hidden": true
+      },
+      {
+        "name": "supportHand",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 1,
+        "hidden": true
+      },
+      {
+        "name": "reloading",
+        "type": {
+          "kind": "boolean"
+        },
+        "access": "public",
+        "default": false,
+        "hidden": true
+      },
+      {
+        "name": "spreadNow",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 0,
+        "hidden": true
+      },
+      {
+        "name": "aimYaw",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 0,
+        "hidden": true
+      },
+      {
+        "name": "aimPitch",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 0,
+        "hidden": true
+      },
+      {
+        "name": "_directionScale",
+        "type": {
+          "kind": "number"
+        },
+        "access": "protected",
+        "default": 1,
+        "hidden": true
+      },
+      {
+        "name": "_lean",
+        "type": {
+          "kind": "number"
+        },
+        "access": "protected",
+        "default": 0,
+        "hidden": true
+      },
+      {
+        "name": "_lastVelocity",
+        "type": {
+          "kind": "vector",
+          "size": 2
+        },
+        "access": "protected",
+        "default": [0, 0],
+        "hidden": true
+      },
+      {
+        "name": "_turnTime",
+        "type": {
+          "kind": "number"
+        },
+        "access": "protected",
+        "default": 0,
+        "hidden": true
+      },
+      {
+        "name": "_wasSprinting",
+        "type": {
+          "kind": "boolean"
+        },
+        "access": "protected",
+        "default": false,
+        "hidden": true
+      },
+      {
+        "name": "_afterSprint",
+        "type": {
+          "kind": "boolean"
+        },
+        "access": "protected",
+        "default": false,
+        "hidden": true
+      },
+      {
+        "name": "_stopYaw",
+        "type": {
+          "kind": "number"
+        },
+        "access": "protected",
+        "default": 0,
+        "hidden": true
+      },
+      {
+        "name": "_jumpYaw",
+        "type": {
+          "kind": "number"
+        },
+        "access": "protected",
+        "default": 0,
+        "hidden": true
+      },
+      {
+        "name": "_acceleration",
+        "type": {
+          "kind": "number"
+        },
+        "access": "protected",
+        "default": -1,
+        "hidden": true
+      },
+      {
+        "name": "_stairBit",
+        "type": {
+          "kind": "number"
+        },
+        "access": "protected",
+        "default": -1,
+        "hidden": true
+      },
+      {
+        "name": "_stairPace",
+        "type": {
+          "kind": "number"
+        },
+        "access": "protected",
+        "default": 0,
+        "hidden": true
+      },
+      {
+        "name": "_offStairs",
+        "type": {
+          "kind": "number"
+        },
+        "access": "protected",
+        "default": 0,
+        "hidden": true
+      },
+      {
+        "name": "_stairNormal",
+        "type": {
+          "kind": "vector",
+          "size": 3
+        },
+        "access": "protected",
+        "default": [0, 1, 0],
+        "hidden": true
+      },
+      {
+        "name": "_carPhase",
+        "type": {
+          "kind": "choice",
+          "values": [
+            "none",
+            "entering",
+            "seated",
+            "exiting"
+          ]
+        },
+        "access": "protected",
+        "default": "none",
+        "hidden": true
+      },
+      {
+        "name": "_seat",
+        "type": {
+          "kind": "node",
+          "className": "Node"
+        },
+        "access": "protected",
+        "default": null,
+        "hidden": true
+      },
+      {
+        "name": "_ownController",
+        "type": {
+          "kind": "node",
+          "className": "ControllerNode"
+        },
+        "access": "protected",
+        "default": null,
+        "hidden": true
+      },
+      {
+        "name": "_alignFrom",
+        "type": {
+          "kind": "vector",
+          "size": 4
+        },
+        "access": "protected",
+        "default": [0, 0, 0, 0],
+        "hidden": true
+      },
+      {
+        "name": "_alignStep",
+        "type": {
+          "kind": "vector",
+          "size": 4
+        },
+        "access": "protected",
+        "default": [0, 0, 0, 0],
+        "hidden": true
+      },
+      {
+        "name": "_alignT",
+        "type": {
+          "kind": "number"
+        },
+        "access": "protected",
+        "default": 1,
+        "hidden": true
+      },
+      {
+        "name": "_alignTime",
+        "type": {
+          "kind": "number"
+        },
+        "access": "protected",
+        "default": 0,
+        "hidden": true
+      },
+      {
+        "name": "_carTime",
+        "type": {
+          "kind": "number"
+        },
+        "access": "protected",
+        "default": 0,
+        "hidden": true
+      },
+      {
+        "name": "_enterSeconds",
+        "type": {
+          "kind": "number"
+        },
+        "access": "protected",
+        "default": 0,
+        "hidden": true
+      },
+      {
+        "name": "_weaponWanted",
+        "type": {
+          "kind": "number"
+        },
+        "access": "protected",
+        "default": 0,
+        "hidden": true
+      },
+      {
+        "name": "_aim",
+        "type": {
+          "kind": "number"
+        },
+        "access": "protected",
+        "default": 0,
+        "hidden": true
+      },
+      {
+        "name": "_lookAmount",
+        "type": {
+          "kind": "number"
+        },
+        "access": "protected",
+        "default": 0,
+        "hidden": true
+      },
+      {
+        "name": "_lookCrouch",
+        "type": {
+          "kind": "number"
+        },
+        "access": "protected",
+        "default": 0,
+        "hidden": true
+      },
+      {
+        "name": "_turnThreshold",
+        "type": {
+          "kind": "number"
+        },
+        "access": "protected",
+        "default": -1,
+        "hidden": true
+      },
+      {
+        "name": "_time",
+        "type": {
+          "kind": "number"
+        },
+        "access": "protected",
+        "default": 0,
+        "hidden": true
+      },
+      {
+        "name": "_busyUntil",
+        "type": {
+          "kind": "number"
+        },
+        "access": "protected",
+        "default": 0,
+        "hidden": true
+      },
+      {
+        "name": "_reloadToken",
+        "type": {
+          "kind": "number"
+        },
+        "access": "protected",
+        "default": 0,
+        "hidden": true
+      },
+      {
+        "name": "_fireHold",
+        "type": {
+          "kind": "number"
+        },
+        "access": "protected",
+        "default": 0,
+        "hidden": true
+      },
+      {
+        "name": "_look",
+        "type": {
+          "kind": "vector",
+          "size": 3
+        },
+        "access": "protected",
+        "default": [0, 0, 1],
+        "hidden": true
+      },
+      {
+        "name": "_eye",
+        "type": {
+          "kind": "vector",
+          "size": 3
+        },
+        "access": "protected",
+        "default": [0, 0, 0],
+        "hidden": true
+      },
+      {
+        "name": "hearing",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 35,
+        "hidden": false,
+        "attribute": {
+          "group": "Senses",
+          "min": 0,
+          "max": 120,
+          "step": 1,
+          "tooltip": "Shots fired within this distance (m) are heard."
+        }
+      },
+      {
+        "name": "nearMiss",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 2.5,
+        "hidden": false,
+        "attribute": {
+          "group": "Senses",
+          "min": 0,
+          "max": 10,
+          "step": 0.1,
+          "tooltip": "A shot whose line passes within this distance (m) of it nearly hit it."
+        }
+      },
+      {
+        "name": "sightRange",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 20,
+        "hidden": false,
+        "attribute": {
+          "group": "Senses",
+          "min": 1,
+          "max": 100,
+          "step": 1,
+          "tooltip": "Its controller's sight: how far (m), how wide a cone (degrees, the full angle), how long before it notices (s)."
+        }
+      },
+      {
+        "name": "sightAngle",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 140,
+        "hidden": false,
+        "attribute": {
+          "group": "Senses",
+          "min": 10,
+          "max": 360,
+          "step": 5
+        }
+      },
+      {
+        "name": "noticeSeconds",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 0.35,
+        "hidden": false,
+        "attribute": {
+          "group": "Senses",
+          "min": 0,
+          "max": 3,
+          "step": 0.05
+        }
+      },
+      {
+        "name": "staggerShock",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 24,
+        "hidden": false,
+        "attribute": {
+          "group": "Knock-downs",
+          "min": 0,
+          "max": 400,
+          "step": 1,
+          "tooltip": "Hits within the last moments (N·s, fading by half every `shockHalfLife` s) past which it staggers, and falls."
+        }
+      },
+      {
+        "name": "knockdownShock",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 48,
+        "hidden": false,
+        "attribute": {
+          "group": "Knock-downs",
+          "min": 0,
+          "max": 400,
+          "step": 1
+        }
+      },
+      {
+        "name": "shockHalfLife",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 0.6,
+        "hidden": false,
+        "attribute": {
+          "group": "Knock-downs",
+          "min": 0.05,
+          "max": 5,
+          "step": 0.05
+        }
+      },
+      {
+        "name": "downSeconds",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 7,
+        "hidden": false,
+        "attribute": {
+          "group": "Knock-downs",
+          "min": 1,
+          "max": 60,
+          "step": 0.5,
+          "tooltip": "Lying down longer than this (s), it is got up; reacting longer than `stuckSeconds`, put back on its feet."
+        }
+      },
+      {
+        "name": "stuckSeconds",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 18,
+        "hidden": false,
+        "attribute": {
+          "group": "Knock-downs",
+          "min": 5,
+          "max": 120,
+          "step": 1
+        }
+      },
+      {
+        "name": "state",
+        "type": {
+          "kind": "string"
+        },
+        "access": "public",
+        "default": "idle",
+        "hidden": true
+      },
+      {
+        "name": "_brain",
+        "type": {
+          "kind": "node",
+          "className": "ControllerNode"
+        },
+        "access": "protected",
+        "default": null,
+        "hidden": true
+      },
+      {
+        "name": "_now",
+        "type": {
+          "kind": "number"
+        },
+        "access": "protected",
+        "default": 0,
+        "hidden": true
+      },
+      {
+        "name": "_stateTime",
+        "type": {
+          "kind": "number"
+        },
+        "access": "protected",
+        "default": 0,
+        "hidden": true
+      },
+      {
+        "name": "_gait",
+        "type": {
+          "kind": "string"
+        },
+        "access": "protected",
+        "default": "stand",
+        "hidden": true
+      },
+      {
+        "name": "_faceYaw",
+        "type": {
+          "kind": "number"
+        },
+        "access": "protected",
+        "default": 0,
+        "hidden": true
+      },
+      {
+        "name": "_lookPitch",
+        "type": {
+          "kind": "number"
+        },
+        "access": "protected",
+        "default": 0,
+        "hidden": true
+      },
+      {
+        "name": "_crouch",
+        "type": {
+          "kind": "boolean"
+        },
+        "access": "protected",
+        "default": false,
+        "hidden": true
+      },
+      {
+        "name": "_step",
+        "type": {
+          "kind": "list",
+          "of": {
+            "kind": "number"
+          }
+        },
+        "access": "protected",
+        "default": [],
+        "hidden": true
+      },
+      {
+        "name": "_player",
+        "type": {
+          "kind": "node",
+          "className": "SandboxCharacterNode",
+          "script": true
+        },
+        "access": "protected",
+        "default": null,
+        "hidden": true
+      },
+      {
+        "name": "_sees",
+        "type": {
+          "kind": "boolean"
+        },
+        "access": "protected",
+        "default": false,
+        "hidden": true
+      },
+      {
+        "name": "_seenAt",
+        "type": {
+          "kind": "number"
+        },
+        "access": "protected",
+        "default": -999,
+        "hidden": true
+      },
+      {
+        "name": "_lastSeen",
+        "type": {
+          "kind": "list",
+          "of": {
+            "kind": "number"
+          }
+        },
+        "access": "protected",
+        "default": [],
+        "hidden": true
+      },
+      {
+        "name": "_goal",
+        "type": {
+          "kind": "list",
+          "of": {
+            "kind": "number"
+          }
+        },
+        "access": "protected",
+        "default": [],
+        "hidden": true
+      },
+      {
+        "name": "_bestDistance",
+        "type": {
+          "kind": "number"
+        },
+        "access": "protected",
+        "default": 0,
+        "hidden": true
+      },
+      {
+        "name": "_progressAt",
+        "type": {
+          "kind": "number"
+        },
+        "access": "protected",
+        "default": 0,
+        "hidden": true
+      },
+      {
+        "name": "_threatKind",
+        "type": {
+          "kind": "number"
+        },
+        "access": "protected",
+        "default": 0,
+        "hidden": true
+      },
+      {
+        "name": "_threatAt",
+        "type": {
+          "kind": "list",
+          "of": {
+            "kind": "number"
+          }
+        },
+        "access": "protected",
+        "default": [],
+        "hidden": true
+      },
+      {
+        "name": "_threatFrom",
+        "type": {
+          "kind": "node",
+          "className": "Node"
+        },
+        "access": "protected",
+        "default": null,
+        "hidden": true
+      },
+      {
+        "name": "_threatTime",
+        "type": {
+          "kind": "number"
+        },
+        "access": "protected",
+        "default": -999,
+        "hidden": true
+      },
+      {
+        "name": "_shock",
+        "type": {
+          "kind": "number"
+        },
+        "access": "protected",
+        "default": 0,
+        "hidden": true
+      },
+      {
+        "name": "_downFor",
+        "type": {
+          "kind": "number"
+        },
+        "access": "protected",
+        "default": 0,
+        "hidden": true
+      },
+      {
+        "name": "_reactingFor",
+        "type": {
+          "kind": "number"
+        },
+        "access": "protected",
+        "default": 0,
+        "hidden": true
+      },
+      {
+        "name": "_wasKnocked",
+        "type": {
+          "kind": "boolean"
+        },
+        "access": "private",
+        "default": false,
+        "hidden": true
+      },
+      {
+        "name": "_dodgeUntil",
+        "type": {
+          "kind": "number"
+        },
+        "access": "protected",
+        "default": 0,
+        "hidden": true
+      },
+      {
+        "name": "_dodgeDir",
+        "type": {
+          "kind": "vector",
+          "size": 2
+        },
+        "access": "protected",
+        "default": [0, 0],
+        "hidden": true
+      },
+      {
+        "name": "_dodging",
+        "type": {
+          "kind": "boolean"
+        },
+        "access": "private",
+        "default": false,
+        "hidden": true
+      },
+      {
+        "name": "preferredWeapon",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 2,
+        "hidden": false,
+        "attribute": {
+          "group": "Combat",
+          "min": 1,
+          "max": 3,
+          "step": 1,
+          "tooltip": "The weapon it carries: 1 the pistol, 2 the rifle, 3 the shotgun."
+        }
+      },
+      {
+        "name": "nearest",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 8,
+        "hidden": false,
+        "attribute": {
+          "group": "Combat",
+          "min": 2,
+          "max": 40,
+          "step": 0.5,
+          "tooltip": "The distance it keeps from the player while it fights in the open (m)."
+        }
+      },
+      {
+        "name": "farthest",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 22,
+        "hidden": false,
+        "attribute": {
+          "group": "Combat",
+          "min": 2,
+          "max": 60,
+          "step": 0.5
+        }
+      },
+      {
+        "name": "burstMin",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 0.3,
+        "hidden": false,
+        "attribute": {
+          "group": "Combat",
+          "min": 0.05,
+          "max": 3,
+          "step": 0.05,
+          "tooltip": "A burst: how long the trigger is held (s), and the gap between two."
+        }
+      },
+      {
+        "name": "burstMax",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 0.6,
+        "hidden": false,
+        "attribute": {
+          "group": "Combat",
+          "min": 0.05,
+          "max": 3,
+          "step": 0.05
+        }
+      },
+      {
+        "name": "gapMin",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 0.5,
+        "hidden": false,
+        "attribute": {
+          "group": "Combat",
+          "min": 0,
+          "max": 5,
+          "step": 0.05
+        }
+      },
+      {
+        "name": "gapMax",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 1.2,
+        "hidden": false,
+        "attribute": {
+          "group": "Combat",
+          "min": 0,
+          "max": 5,
+          "step": 0.05
+        }
+      },
+      {
+        "name": "aimError",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 0.6,
+        "hidden": false,
+        "attribute": {
+          "group": "Combat",
+          "min": 0,
+          "max": 5,
+          "step": 0.05,
+          "tooltip": "The aim's error at 15 m (m, off the target), and how much a moving target adds a m/s."
+        }
+      },
+      {
+        "name": "movingError",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 0.25,
+        "hidden": false,
+        "attribute": {
+          "group": "Combat",
+          "min": 0,
+          "max": 2,
+          "step": 0.05
+        }
+      },
+      {
+        "name": "coverMin",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 1.5,
+        "hidden": false,
+        "attribute": {
+          "group": "Combat",
+          "min": 0.2,
+          "max": 10,
+          "step": 0.1,
+          "tooltip": "Seconds behind cover before it looks out, and the most looks before it moves."
+        }
+      },
+      {
+        "name": "coverMax",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 3,
+        "hidden": false,
+        "attribute": {
+          "group": "Combat",
+          "min": 0.2,
+          "max": 10,
+          "step": 0.1
+        }
+      },
+      {
+        "name": "peeks",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 3,
+        "hidden": false,
+        "attribute": {
+          "group": "Combat",
+          "min": 1,
+          "max": 10,
+          "step": 1
+        }
+      },
+      {
+        "name": "route",
+        "type": {
+          "kind": "string"
+        },
+        "access": "public",
+        "default": "",
+        "hidden": false,
+        "attribute": {
+          "group": "Patrol",
+          "tooltip": "The route it patrols, by name ('': the one nearest where it was placed)."
+        }
+      },
+      {
+        "name": "_route",
+        "type": {
+          "kind": "vector",
+          "size": 3
+        },
+        "access": "private",
+        "default": [],
+        "hidden": true
+      },
+      {
+        "name": "_routeIndex",
+        "type": {
+          "kind": "number"
+        },
+        "access": "private",
+        "default": 0,
+        "hidden": true
+      },
+      {
+        "name": "_pause",
+        "type": {
+          "kind": "number"
+        },
+        "access": "private",
+        "default": 0,
+        "hidden": true
+      },
+      {
+        "name": "_partner",
+        "type": {
+          "kind": "node",
+          "className": "SandboxEnemyNode"
+        },
+        "access": "private",
+        "default": null,
+        "hidden": true
+      },
+      {
+        "name": "_leads",
+        "type": {
+          "kind": "boolean"
+        },
+        "access": "private",
+        "default": true,
+        "hidden": true
+      },
+      {
+        "name": "_paired",
+        "type": {
+          "kind": "boolean"
+        },
+        "access": "private",
+        "default": false,
+        "hidden": true
+      },
+      {
+        "name": "_firing",
+        "type": {
+          "kind": "boolean"
+        },
+        "access": "private",
+        "default": false,
+        "hidden": true
+      },
+      {
+        "name": "_burstUntil",
+        "type": {
+          "kind": "number"
+        },
+        "access": "private",
+        "default": 0,
+        "hidden": true
+      },
+      {
+        "name": "_nextBurst",
+        "type": {
+          "kind": "number"
+        },
+        "access": "private",
+        "default": 0,
+        "hidden": true
+      },
+      {
+        "name": "_error",
+        "type": {
+          "kind": "vector",
+          "size": 3
+        },
+        "access": "private",
+        "default": [0, 0, 0],
+        "hidden": true
+      },
+      {
+        "name": "_onTarget",
+        "type": {
+          "kind": "number"
+        },
+        "access": "private",
+        "default": 0,
+        "hidden": true
+      },
+      {
+        "name": "_sideUntil",
+        "type": {
+          "kind": "number"
+        },
+        "access": "private",
+        "default": 0,
+        "hidden": true
+      },
+      {
+        "name": "_side",
+        "type": {
+          "kind": "number"
+        },
+        "access": "private",
+        "default": 1,
+        "hidden": true
+      },
+      {
+        "name": "_nearMisses",
+        "type": {
+          "kind": "list",
+          "of": {
+            "kind": "number"
+          }
+        },
+        "access": "private",
+        "default": [],
+        "hidden": true
+      },
+      {
+        "name": "_cover",
+        "type": {
+          "kind": "list",
+          "of": {
+            "kind": "number"
+          }
+        },
+        "access": "private",
+        "default": [],
+        "hidden": true
+      },
+      {
+        "name": "_coverKey",
+        "type": {
+          "kind": "string"
+        },
+        "access": "private",
+        "default": "",
+        "hidden": true
+      },
+      {
+        "name": "_coverFor",
+        "type": {
+          "kind": "number"
+        },
+        "access": "private",
+        "default": 0,
+        "hidden": true
+      },
+      {
+        "name": "_peeksDone",
+        "type": {
+          "kind": "number"
+        },
+        "access": "private",
+        "default": 0,
+        "hidden": true
+      },
+      {
+        "name": "_followAt",
+        "type": {
+          "kind": "number"
+        },
+        "access": "private",
+        "default": 0,
+        "hidden": true
+      },
+      {
+        "name": "_pauseYaw",
+        "type": {
+          "kind": "number"
+        },
+        "access": "private",
+        "default": 0,
+        "hidden": true
+      }
+    ],
+    "reflect": 3
+  }
+}

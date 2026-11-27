@@ -40,6 +40,24 @@ in a hand. Turn-in-place picks the right clip when the camera swings behind.
     reactions.
   - Player contract 54 (reaction sets travel in the skin).
 
+- **The Sandbox gets people: blue civilians who go about the course and run from danger, red enemies who patrol it in
+  pairs and fight, all on the player's own body.**
+  - The player's animated body is a template of its own, **Sandbox Character** (its script `SandboxCharacter`: the
+    gait, the stairs, the lean, the look, the weapons, the car, the reactions), and the **Player** is its variant,
+    `SandboxPlayer` adding the input, the camera, first person and the HUD on top. The **Civilian** and **Enemy**
+    variants are the same Mannequin, machine, clips and reactions, in blue and red, with an AI Controller for a brain
+    (`SandboxNpc`: walking the nav mesh, sight, hearing shots, near misses, hits adding up to a fall, never dying).
+  - Six civilians wait at things to look at, walk off elsewhere, look at the player close by and move on, and run
+    from shots, hits and the car. Four enemies patrol two routes in pairs with rifles, shoot the player on sight in
+    bursts (their rounds do not knock the player about, and it has no health), and take cover from a shooter,
+    crouched where it cannot see them, peeking out to fire. Civilians are slow to react, as people are: most of a
+    second to notice someone, a startle before they answer a shot.
+  - A NavMesh over the course with the patrol routes, and Look Points and Cover Points to look at and hide behind.
+  - The car knocks down whoever it hits faster than 2.5 m/s, warns whoever is ahead of it (an NPC steps off its line),
+    and lets only the player drive.
+  - Every body gets up on Mixamo's *Getting Up* (face down) and *Stand Up* (face up), the Mannequin rig's Default set.
+  - tests/npcs.test.ts plays them headless on every physics backend.
+
 - **Reactions look like a body's.**
   - A rifle round in the trunk stumbles a character a step or two (the set's **Stumble at**, **Stumble speed**), its
     hand going to the wound sooner and holding it longer.

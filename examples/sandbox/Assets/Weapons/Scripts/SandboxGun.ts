@@ -333,10 +333,12 @@ export default class SandboxGunNode extends Node {
     /**
      * A dynamic body hit is pushed along the shot, at the point hit (measured from its centre). A character hit (its
      * capsule, or a limb of a body already reacting) takes the shot with its whole body instead: its reactions, on
-     * the limb the shot meets (`physics.applyHit`), flinch, stagger or fall by how hard it lands.
+     * the limb the shot meets (`physics.applyHit`), flinch, stumble, stagger or fall by how hard it lands. Not one
+     * that shots do not move (`reactsToShots` false: the player): neither its reactions nor its limbs are pushed.
      */
     private _push(hit: any, way: number[], impulse: number): void {
         const physics = this.scene?.physics as any
+        if (this._unmoved(physics, hit)) return
         if (impulse > 0 && physics?.reactionsFor?.(hit.body) && physics.applyHit(hit, way, impulse)) return
         const body = hit.body
         if (!body || !body.isDynamic || impulse <= 0) return
@@ -387,6 +389,14 @@ export default class SandboxGunNode extends Node {
     }
 
     /** Spawn an effect template, or nothing (and a warning, once) when the scene has none of that name. */
+    /** Whether `hit` struck a character that shots do not move (its capsule, or a limb of its reacting body). */
+    private _unmoved(physics: any, hit: any): boolean {
+        const reactions = physics?.reactionsFor?.(hit.body) ?? (hit.node ? physics?.reactionsFor?.(hit.node) : null)
+        let character: any = hit.node?.character ?? null
+        for (let n: Node | null = reactions?.node ?? null; n && !character; n = n.parent) if (n.nodeType === 'character') character = n
+        return !!character && character.reactsToShots === false
+    }
+
     private _spawn(template: string, position: number[], rotation: number[]): Node | null {
         if (!template || this._missing.has(template)) return null
         const node = (this.scene as any)?.instantiate(template, { position, rotation }) ?? null

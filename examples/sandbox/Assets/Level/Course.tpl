@@ -2,259 +2,21 @@
   "id": "2983e4a9e16d64eec0b55da45504c9f3",
   "name": "Course",
   "nodeJson": {
-    "id": "404f5c5a6672252176ef3da07c51ec5f",
+    "id": "95dc526d562dade5e0c46333dee638ca",
     "name": "Course",
     "type": "collider",
     "position": [0, 0, 0],
     "rotation": [0, 0, 0],
     "scale": [1, 1, 1],
-    "variables": {},
-    "spawnOnStart": true,
-    "collider": {
-      "linearDamping": 0.25,
-      "angularDamping": 0.25,
-      "linearConstraints": [1, 1, 1],
-      "angularConstraints": [1, 1, 1],
-      "friction": 0.3,
-      "restitution": 0,
-      "simulatePhysics": true,
-      "groundProbeDistance": 0,
-      "motionSmoothing": 0,
-      "simulationMode": "project",
-      "simulationRange": 0,
-      "canSleep": false,
-      "layer": 1,
-      "mask": -1,
-      "mass": 0,
-      "shapes": [
-        {
-          "type": "box",
-          "width": 120,
-          "height": 1,
-          "depth": 120,
-          "offset": [0, -0.5, 0],
-          "rotation": [0, 0, 0]
-        },
-        {
-          "type": "box",
-          "width": 120,
-          "height": 1,
-          "depth": 0.5,
-          "offset": [0, 0.5, 59.75],
-          "rotation": [0, 0, 0]
-        },
-        {
-          "type": "box",
-          "width": 120,
-          "height": 1,
-          "depth": 0.5,
-          "offset": [0, 0.5, -59.75],
-          "rotation": [0, 0, 0]
-        },
-        {
-          "type": "box",
-          "width": 0.5,
-          "height": 1,
-          "depth": 119,
-          "offset": [-59.75, 0.5, 0],
-          "rotation": [0, 0, 0]
-        },
-        {
-          "type": "box",
-          "width": 0.5,
-          "height": 1,
-          "depth": 119,
-          "offset": [59.75, 0.5, 0],
-          "rotation": [0, 0, 0]
-        },
-        {
-          "type": "box",
-          "width": 3,
-          "height": 0.4,
-          "depth": 8.63815572471545,
-          "offset": [-12, 0.553038477897644, 10.288191795349121],
-          "rotation": [-10.000000413479448, 0, 0]
-        },
-        {
-          "type": "box",
-          "width": 3,
-          "height": 1.5,
-          "depth": 4,
-          "offset": [-12, 0.75, 16.50692367553711],
-          "rotation": [0, 0, 0]
-        },
-        {
-          "type": "box",
-          "width": 3,
-          "height": 0.4,
-          "depth": 4.385706600244631,
-          "offset": [-16, 0.5620614886283875, 8.129012107849121],
-          "rotation": [-19.999999673434996, 0, 0]
-        },
-        {
-          "type": "box",
-          "width": 3,
-          "height": 1.5,
-          "depth": 4,
-          "offset": [-16, 0.75, 12.1212158203125],
-          "rotation": [0, 0, 0]
-        },
-        {
-          "type": "box",
-          "width": 3,
-          "height": 0.4,
-          "depth": 3,
-          "offset": [-20, 0.5767949223518372, 7.399037837982178],
-          "rotation": [-29.999999467479046, 0, 0]
-        },
-        {
-          "type": "box",
-          "width": 3,
-          "height": 1.5,
-          "depth": 4,
-          "offset": [-20, 0.75, 10.598075866699219],
-          "rotation": [0, 0, 0]
-        },
-        {
-          "type": "box",
-          "width": 3,
-          "height": 0.4,
-          "depth": 2.333585740290619,
-          "offset": [-24, 0.59679114818573, 7.022372722625732],
-          "rotation": [-40.000001288448495, 0, 0]
-        },
-        {
-          "type": "box",
-          "width": 3,
-          "height": 1.5,
-          "depth": 4,
-          "offset": [-24, 0.75, 9.787630081176758],
-          "rotation": [0, 0, 0]
-        },
-        {
-          "type": "box",
-          "width": 2.5,
-          "height": 1.5,
-          "depth": 3,
-          "offset": [-5, 0.75, 10.5],
-          "rotation": [0, 0, 0]
-        },
-        {
-          "type": "box",
-          "width": 2.5,
-          "height": 1.600000023841858,
-          "depth": 3,
-          "offset": [-1, 0.800000011920929, 9.899999618530273],
-          "rotation": [0, 0, 0]
-        },
-        {
-          "type": "box",
-          "width": 3,
-          "height": 0.30000001192092896,
-          "depth": 3,
-          "offset": [10, 0.15000000596046448, 9.5],
-          "rotation": [0, 0, 0]
-        },
-        {
-          "type": "box",
-          "width": 3,
-          "height": 0.6000000238418579,
-          "depth": 3,
-          "offset": [14.5, 0.30000001192092896, 9.5],
-          "rotation": [0, 0, 0]
-        },
-        {
-          "type": "box",
-          "width": 3,
-          "height": 1,
-          "depth": 3,
-          "offset": [19, 0.5, 9.5],
-          "rotation": [0, 0, 0]
-        },
-        {
-          "type": "box",
-          "width": 3,
-          "height": 0.4,
-          "depth": 2.3662015831524985,
-          "offset": [19, 0.3187384605407715, 11.987730026245117],
-          "rotation": [-25.00000054320276, 180, 0]
-        },
-        {
-          "type": "box",
-          "width": 3,
-          "height": 2,
-          "depth": 3,
-          "offset": [23.5, 1, 9.5],
-          "rotation": [0, 0, 0]
-        },
-        {
-          "type": "box",
-          "width": 3,
-          "height": 0.4,
-          "depth": 4.732403166304997,
-          "offset": [23.5, 0.8187384605407715, 13.059983253479004],
-          "rotation": [-25.00000054320276, 180, 0]
-        },
-        {
-          "type": "box",
-          "width": 3,
-          "height": 3.5,
-          "depth": 3,
-          "offset": [28, 1.75, 9.5],
-          "rotation": [0, 0, 0]
-        },
-        {
-          "type": "box",
-          "width": 3,
-          "height": 0.4,
-          "depth": 8.281705541033745,
-          "offset": [28, 1.5687384605407715, 14.668363571166992],
-          "rotation": [-25.00000054320276, 180, 0]
-        },
-        {
-          "type": "box",
-          "width": 3,
-          "height": 0.4,
-          "depth": 2.923804400163087,
-          "offset": [8.377077266186838e-18, 0.31206148862838745, -4.442142963409424],
-          "rotation": [-20.0000014589873, 180, 0]
-        },
-        {
-          "type": "box",
-          "width": 3,
-          "height": 1,
-          "depth": 6,
-          "offset": [0, 0.5, -8.747477531433105],
-          "rotation": [0, 0, 0]
-        },
-        {
-          "type": "box",
-          "width": 3,
-          "height": 1,
-          "depth": 6,
-          "offset": [0, 0.5, -16.74747657775879],
-          "rotation": [0, 0, 0]
-        },
-        {
-          "type": "box",
-          "width": 8,
-          "height": 3,
-          "depth": 0.4000000059604645,
-          "offset": [-10, 1.5, -6],
-          "rotation": [0, 0, 0]
-        }
-      ]
-    },
     "children": [
       {
-        "id": "1dd5cb756a5b79b2ce56539bd475e350",
+        "id": "77a95402c5fdd3e5f0c41b6b0248c2bd",
         "name": "Ground",
         "type": "model",
         "position": [0, -0.5, 0],
         "rotation": [0, 0, 0],
         "scale": [120, 1, 120],
         "children": [],
-        "spawnOnStart": true,
         "variables": {
           "__materialId": {
             "type": "string",
@@ -262,6 +24,7 @@
             "access": "public"
           }
         },
+        "spawnOnStart": true,
         "model": {
           "geometry": {
             "$geo": {
@@ -292,8 +55,17 @@
             "baseColor": [0.55, 0.56, 0.58],
             "metallic": 0,
             "roughness": 0.9,
+            "reflectance": 0.5,
             "opacity": 1,
+            "alphaCutoff": 0,
             "emissiveFactor": [0, 0, 0],
+            "emissiveIntensity": 1,
+            "displacementScale": 0.05,
+            "depthSpace": "uv",
+            "invertHeight": false,
+            "clipSilhouette": false,
+            "uvProjection": "box",
+            "uvSpace": "world",
             "textures": {
               "baseColorTexture": "d4a96a210b1af85c70925ceced937cb7"
             },
@@ -303,22 +75,21 @@
               "transparent": false,
               "castShadow": true,
               "probeable": true
-            },
-            "uvProjection": "box",
-            "uvSpace": "world",
-            "uvWorldSize": 1
+            }
           }
-        }
+        },
+        "animationMappings": null,
+        "stateMachine": null,
+        "ragdoll": null
       },
       {
-        "id": "c16c0172d63608f77a566be86ddf6125",
+        "id": "5eca0d77f4a8f6e88ec695a09bc81129",
         "name": "Barrier North",
         "type": "model",
         "position": [0, 0.5, 59.75],
         "rotation": [0, 0, 0],
         "scale": [120, 1, 0.5],
         "children": [],
-        "spawnOnStart": true,
         "variables": {
           "__materialId": {
             "type": "string",
@@ -326,6 +97,7 @@
             "access": "public"
           }
         },
+        "spawnOnStart": true,
         "model": {
           "geometry": {
             "$geo": {
@@ -356,8 +128,17 @@
             "baseColor": [0.42, 0.55, 0.75],
             "metallic": 0,
             "roughness": 0.9,
+            "reflectance": 0.5,
             "opacity": 1,
+            "alphaCutoff": 0,
             "emissiveFactor": [0, 0, 0],
+            "emissiveIntensity": 1,
+            "displacementScale": 0.05,
+            "depthSpace": "uv",
+            "invertHeight": false,
+            "clipSilhouette": false,
+            "uvProjection": "box",
+            "uvSpace": "world",
             "textures": {
               "baseColorTexture": "d4a96a210b1af85c70925ceced937cb7"
             },
@@ -367,22 +148,21 @@
               "transparent": false,
               "castShadow": true,
               "probeable": true
-            },
-            "uvProjection": "box",
-            "uvSpace": "world",
-            "uvWorldSize": 1
+            }
           }
-        }
+        },
+        "animationMappings": null,
+        "stateMachine": null,
+        "ragdoll": null
       },
       {
-        "id": "dea90654ed98b7f51351e40e27471e0f",
+        "id": "39660af87332b860e51957d91a2ef643",
         "name": "Barrier South",
         "type": "model",
         "position": [0, 0.5, -59.75],
         "rotation": [0, 0, 0],
         "scale": [120, 1, 0.5],
         "children": [],
-        "spawnOnStart": true,
         "variables": {
           "__materialId": {
             "type": "string",
@@ -390,6 +170,7 @@
             "access": "public"
           }
         },
+        "spawnOnStart": true,
         "model": {
           "geometry": {
             "$geo": {
@@ -420,8 +201,17 @@
             "baseColor": [0.42, 0.55, 0.75],
             "metallic": 0,
             "roughness": 0.9,
+            "reflectance": 0.5,
             "opacity": 1,
+            "alphaCutoff": 0,
             "emissiveFactor": [0, 0, 0],
+            "emissiveIntensity": 1,
+            "displacementScale": 0.05,
+            "depthSpace": "uv",
+            "invertHeight": false,
+            "clipSilhouette": false,
+            "uvProjection": "box",
+            "uvSpace": "world",
             "textures": {
               "baseColorTexture": "d4a96a210b1af85c70925ceced937cb7"
             },
@@ -431,22 +221,21 @@
               "transparent": false,
               "castShadow": true,
               "probeable": true
-            },
-            "uvProjection": "box",
-            "uvSpace": "world",
-            "uvWorldSize": 1
+            }
           }
-        }
+        },
+        "animationMappings": null,
+        "stateMachine": null,
+        "ragdoll": null
       },
       {
-        "id": "32e3f18e992aaee11296709059039d93",
+        "id": "e040d611b2582855fd71941d19e7292d",
         "name": "Barrier East",
         "type": "model",
         "position": [-59.75, 0.5, 0],
         "rotation": [0, 0, 0],
         "scale": [0.5, 1, 119],
         "children": [],
-        "spawnOnStart": true,
         "variables": {
           "__materialId": {
             "type": "string",
@@ -454,6 +243,7 @@
             "access": "public"
           }
         },
+        "spawnOnStart": true,
         "model": {
           "geometry": {
             "$geo": {
@@ -484,8 +274,17 @@
             "baseColor": [0.42, 0.55, 0.75],
             "metallic": 0,
             "roughness": 0.9,
+            "reflectance": 0.5,
             "opacity": 1,
+            "alphaCutoff": 0,
             "emissiveFactor": [0, 0, 0],
+            "emissiveIntensity": 1,
+            "displacementScale": 0.05,
+            "depthSpace": "uv",
+            "invertHeight": false,
+            "clipSilhouette": false,
+            "uvProjection": "box",
+            "uvSpace": "world",
             "textures": {
               "baseColorTexture": "d4a96a210b1af85c70925ceced937cb7"
             },
@@ -495,22 +294,21 @@
               "transparent": false,
               "castShadow": true,
               "probeable": true
-            },
-            "uvProjection": "box",
-            "uvSpace": "world",
-            "uvWorldSize": 1
+            }
           }
-        }
+        },
+        "animationMappings": null,
+        "stateMachine": null,
+        "ragdoll": null
       },
       {
-        "id": "a77f6c0442850d63663d97ea684785f1",
+        "id": "1c0ea4ebc678f73a3e5cdd02989d37dd",
         "name": "Barrier West",
         "type": "model",
         "position": [59.75, 0.5, 0],
         "rotation": [0, 0, 0],
         "scale": [0.5, 1, 119],
         "children": [],
-        "spawnOnStart": true,
         "variables": {
           "__materialId": {
             "type": "string",
@@ -518,6 +316,7 @@
             "access": "public"
           }
         },
+        "spawnOnStart": true,
         "model": {
           "geometry": {
             "$geo": {
@@ -548,8 +347,17 @@
             "baseColor": [0.42, 0.55, 0.75],
             "metallic": 0,
             "roughness": 0.9,
+            "reflectance": 0.5,
             "opacity": 1,
+            "alphaCutoff": 0,
             "emissiveFactor": [0, 0, 0],
+            "emissiveIntensity": 1,
+            "displacementScale": 0.05,
+            "depthSpace": "uv",
+            "invertHeight": false,
+            "clipSilhouette": false,
+            "uvProjection": "box",
+            "uvSpace": "world",
             "textures": {
               "baseColorTexture": "d4a96a210b1af85c70925ceced937cb7"
             },
@@ -559,22 +367,21 @@
               "transparent": false,
               "castShadow": true,
               "probeable": true
-            },
-            "uvProjection": "box",
-            "uvSpace": "world",
-            "uvWorldSize": 1
+            }
           }
-        }
+        },
+        "animationMappings": null,
+        "stateMachine": null,
+        "ragdoll": null
       },
       {
-        "id": "d9b9b77b91551e2641d6192126fc6dd4",
+        "id": "6061d262c863ab8f3d9da2da6a4cdb89",
         "name": "Ramp 10",
         "type": "model",
         "position": [-12, 0.75, 10.253461837768555],
         "rotation": [0, 0, 0],
         "scale": [3, 1.5, 8.506922721862793],
         "children": [],
-        "spawnOnStart": true,
         "variables": {
           "__materialId": {
             "type": "string",
@@ -582,6 +389,7 @@
             "access": "public"
           }
         },
+        "spawnOnStart": true,
         "model": {
           "geometry": {
             "$geo": {
@@ -612,8 +420,17 @@
             "baseColor": [0.85, 0.55, 0.32],
             "metallic": 0,
             "roughness": 0.9,
+            "reflectance": 0.5,
             "opacity": 1,
+            "alphaCutoff": 0,
             "emissiveFactor": [0, 0, 0],
+            "emissiveIntensity": 1,
+            "displacementScale": 0.05,
+            "depthSpace": "uv",
+            "invertHeight": false,
+            "clipSilhouette": false,
+            "uvProjection": "box",
+            "uvSpace": "world",
             "textures": {
               "baseColorTexture": "d4a96a210b1af85c70925ceced937cb7"
             },
@@ -623,22 +440,21 @@
               "transparent": false,
               "castShadow": true,
               "probeable": true
-            },
-            "uvProjection": "box",
-            "uvSpace": "world",
-            "uvWorldSize": 1
+            }
           }
-        }
+        },
+        "animationMappings": null,
+        "stateMachine": null,
+        "ragdoll": null
       },
       {
-        "id": "843ac7f04761e3d5c024e82a1517e07f",
+        "id": "79630535a61655ab262480d948222da3",
         "name": "Ramp 10 Top",
         "type": "model",
         "position": [-12, 0.75, 16.50692367553711],
         "rotation": [0, 0, 0],
         "scale": [3, 1.5, 4],
         "children": [],
-        "spawnOnStart": true,
         "variables": {
           "__materialId": {
             "type": "string",
@@ -646,6 +462,7 @@
             "access": "public"
           }
         },
+        "spawnOnStart": true,
         "model": {
           "geometry": {
             "$geo": {
@@ -676,8 +493,17 @@
             "baseColor": [0.85, 0.55, 0.32],
             "metallic": 0,
             "roughness": 0.9,
+            "reflectance": 0.5,
             "opacity": 1,
+            "alphaCutoff": 0,
             "emissiveFactor": [0, 0, 0],
+            "emissiveIntensity": 1,
+            "displacementScale": 0.05,
+            "depthSpace": "uv",
+            "invertHeight": false,
+            "clipSilhouette": false,
+            "uvProjection": "box",
+            "uvSpace": "world",
             "textures": {
               "baseColorTexture": "d4a96a210b1af85c70925ceced937cb7"
             },
@@ -687,22 +513,21 @@
               "transparent": false,
               "castShadow": true,
               "probeable": true
-            },
-            "uvProjection": "box",
-            "uvSpace": "world",
-            "uvWorldSize": 1
+            }
           }
-        }
+        },
+        "animationMappings": null,
+        "stateMachine": null,
+        "ragdoll": null
       },
       {
-        "id": "47b215e0ab53087d47d8612a9903dd0f",
+        "id": "7b529d8cd2c1834026f5fd6d1d51ca26",
         "name": "Ramp 20",
         "type": "model",
         "position": [-16, 0.75, 8.06060791015625],
         "rotation": [0, 0, 0],
         "scale": [3, 1.5, 4.121216297149658],
         "children": [],
-        "spawnOnStart": true,
         "variables": {
           "__materialId": {
             "type": "string",
@@ -710,6 +535,7 @@
             "access": "public"
           }
         },
+        "spawnOnStart": true,
         "model": {
           "geometry": {
             "$geo": {
@@ -740,8 +566,17 @@
             "baseColor": [0.85, 0.55, 0.32],
             "metallic": 0,
             "roughness": 0.9,
+            "reflectance": 0.5,
             "opacity": 1,
+            "alphaCutoff": 0,
             "emissiveFactor": [0, 0, 0],
+            "emissiveIntensity": 1,
+            "displacementScale": 0.05,
+            "depthSpace": "uv",
+            "invertHeight": false,
+            "clipSilhouette": false,
+            "uvProjection": "box",
+            "uvSpace": "world",
             "textures": {
               "baseColorTexture": "d4a96a210b1af85c70925ceced937cb7"
             },
@@ -751,22 +586,21 @@
               "transparent": false,
               "castShadow": true,
               "probeable": true
-            },
-            "uvProjection": "box",
-            "uvSpace": "world",
-            "uvWorldSize": 1
+            }
           }
-        }
+        },
+        "animationMappings": null,
+        "stateMachine": null,
+        "ragdoll": null
       },
       {
-        "id": "9c822ddb265afe06242f7fa913ed7d14",
+        "id": "a13003b348b8f6ba504b6971e99b3ed1",
         "name": "Ramp 20 Top",
         "type": "model",
         "position": [-16, 0.75, 12.1212158203125],
         "rotation": [0, 0, 0],
         "scale": [3, 1.5, 4],
         "children": [],
-        "spawnOnStart": true,
         "variables": {
           "__materialId": {
             "type": "string",
@@ -774,6 +608,7 @@
             "access": "public"
           }
         },
+        "spawnOnStart": true,
         "model": {
           "geometry": {
             "$geo": {
@@ -804,8 +639,17 @@
             "baseColor": [0.85, 0.55, 0.32],
             "metallic": 0,
             "roughness": 0.9,
+            "reflectance": 0.5,
             "opacity": 1,
+            "alphaCutoff": 0,
             "emissiveFactor": [0, 0, 0],
+            "emissiveIntensity": 1,
+            "displacementScale": 0.05,
+            "depthSpace": "uv",
+            "invertHeight": false,
+            "clipSilhouette": false,
+            "uvProjection": "box",
+            "uvSpace": "world",
             "textures": {
               "baseColorTexture": "d4a96a210b1af85c70925ceced937cb7"
             },
@@ -815,22 +659,21 @@
               "transparent": false,
               "castShadow": true,
               "probeable": true
-            },
-            "uvProjection": "box",
-            "uvSpace": "world",
-            "uvWorldSize": 1
+            }
           }
-        }
+        },
+        "animationMappings": null,
+        "stateMachine": null,
+        "ragdoll": null
       },
       {
-        "id": "4db45de9a550c0742dda76d393019506",
+        "id": "40acb6858f8dec04e3b6cd14390beb27",
         "name": "Ramp 30",
         "type": "model",
         "position": [-20, 0.75, 7.299037933349609],
         "rotation": [0, 0, 0],
         "scale": [3, 1.5, 2.598076105117798],
         "children": [],
-        "spawnOnStart": true,
         "variables": {
           "__materialId": {
             "type": "string",
@@ -838,6 +681,7 @@
             "access": "public"
           }
         },
+        "spawnOnStart": true,
         "model": {
           "geometry": {
             "$geo": {
@@ -868,8 +712,17 @@
             "baseColor": [0.85, 0.55, 0.32],
             "metallic": 0,
             "roughness": 0.9,
+            "reflectance": 0.5,
             "opacity": 1,
+            "alphaCutoff": 0,
             "emissiveFactor": [0, 0, 0],
+            "emissiveIntensity": 1,
+            "displacementScale": 0.05,
+            "depthSpace": "uv",
+            "invertHeight": false,
+            "clipSilhouette": false,
+            "uvProjection": "box",
+            "uvSpace": "world",
             "textures": {
               "baseColorTexture": "d4a96a210b1af85c70925ceced937cb7"
             },
@@ -879,22 +732,21 @@
               "transparent": false,
               "castShadow": true,
               "probeable": true
-            },
-            "uvProjection": "box",
-            "uvSpace": "world",
-            "uvWorldSize": 1
+            }
           }
-        }
+        },
+        "animationMappings": null,
+        "stateMachine": null,
+        "ragdoll": null
       },
       {
-        "id": "79276d22221464df095398b88e07adf5",
+        "id": "f84fd2a06f586fe6804ab4ef7db4457d",
         "name": "Ramp 30 Top",
         "type": "model",
         "position": [-20, 0.75, 10.598075866699219],
         "rotation": [0, 0, 0],
         "scale": [3, 1.5, 4],
         "children": [],
-        "spawnOnStart": true,
         "variables": {
           "__materialId": {
             "type": "string",
@@ -902,6 +754,7 @@
             "access": "public"
           }
         },
+        "spawnOnStart": true,
         "model": {
           "geometry": {
             "$geo": {
@@ -932,8 +785,17 @@
             "baseColor": [0.85, 0.55, 0.32],
             "metallic": 0,
             "roughness": 0.9,
+            "reflectance": 0.5,
             "opacity": 1,
+            "alphaCutoff": 0,
             "emissiveFactor": [0, 0, 0],
+            "emissiveIntensity": 1,
+            "displacementScale": 0.05,
+            "depthSpace": "uv",
+            "invertHeight": false,
+            "clipSilhouette": false,
+            "uvProjection": "box",
+            "uvSpace": "world",
             "textures": {
               "baseColorTexture": "d4a96a210b1af85c70925ceced937cb7"
             },
@@ -943,22 +805,21 @@
               "transparent": false,
               "castShadow": true,
               "probeable": true
-            },
-            "uvProjection": "box",
-            "uvSpace": "world",
-            "uvWorldSize": 1
+            }
           }
-        }
+        },
+        "animationMappings": null,
+        "stateMachine": null,
+        "ragdoll": null
       },
       {
-        "id": "4bc126b61f4daeebb3dd885c94f4cc39",
+        "id": "e3e0f94eae449d9e27dbf84c4862e398",
         "name": "Ramp 40",
         "type": "model",
         "position": [-24, 0.75, 6.893815040588379],
         "rotation": [0, 0, 0],
         "scale": [3, 1.5, 1.7876304388046265],
         "children": [],
-        "spawnOnStart": true,
         "variables": {
           "__materialId": {
             "type": "string",
@@ -966,6 +827,7 @@
             "access": "public"
           }
         },
+        "spawnOnStart": true,
         "model": {
           "geometry": {
             "$geo": {
@@ -996,8 +858,17 @@
             "baseColor": [0.85, 0.55, 0.32],
             "metallic": 0,
             "roughness": 0.9,
+            "reflectance": 0.5,
             "opacity": 1,
+            "alphaCutoff": 0,
             "emissiveFactor": [0, 0, 0],
+            "emissiveIntensity": 1,
+            "displacementScale": 0.05,
+            "depthSpace": "uv",
+            "invertHeight": false,
+            "clipSilhouette": false,
+            "uvProjection": "box",
+            "uvSpace": "world",
             "textures": {
               "baseColorTexture": "d4a96a210b1af85c70925ceced937cb7"
             },
@@ -1007,22 +878,21 @@
               "transparent": false,
               "castShadow": true,
               "probeable": true
-            },
-            "uvProjection": "box",
-            "uvSpace": "world",
-            "uvWorldSize": 1
+            }
           }
-        }
+        },
+        "animationMappings": null,
+        "stateMachine": null,
+        "ragdoll": null
       },
       {
-        "id": "6798f8654ab56b6045b792d7891c6ef2",
+        "id": "a995f9219e24555ef7e36ef679e29365",
         "name": "Ramp 40 Top",
         "type": "model",
         "position": [-24, 0.75, 9.787630081176758],
         "rotation": [0, 0, 0],
         "scale": [3, 1.5, 4],
         "children": [],
-        "spawnOnStart": true,
         "variables": {
           "__materialId": {
             "type": "string",
@@ -1030,6 +900,7 @@
             "access": "public"
           }
         },
+        "spawnOnStart": true,
         "model": {
           "geometry": {
             "$geo": {
@@ -1060,8 +931,17 @@
             "baseColor": [0.85, 0.55, 0.32],
             "metallic": 0,
             "roughness": 0.9,
+            "reflectance": 0.5,
             "opacity": 1,
+            "alphaCutoff": 0,
             "emissiveFactor": [0, 0, 0],
+            "emissiveIntensity": 1,
+            "displacementScale": 0.05,
+            "depthSpace": "uv",
+            "invertHeight": false,
+            "clipSilhouette": false,
+            "uvProjection": "box",
+            "uvSpace": "world",
             "textures": {
               "baseColorTexture": "d4a96a210b1af85c70925ceced937cb7"
             },
@@ -1071,22 +951,21 @@
               "transparent": false,
               "castShadow": true,
               "probeable": true
-            },
-            "uvProjection": "box",
-            "uvSpace": "world",
-            "uvWorldSize": 1
+            }
           }
-        }
+        },
+        "animationMappings": null,
+        "stateMachine": null,
+        "ragdoll": null
       },
       {
-        "id": "168527592069b2067b1397f3ffdba9b8",
+        "id": "5a989acd8fef0e1b9819c7bdc8482486",
         "name": "Stairs 15 cm Top",
         "type": "model",
         "position": [-5, 0.75, 10.5],
         "rotation": [0, 0, 0],
         "scale": [2.5, 1.5, 3],
         "children": [],
-        "spawnOnStart": true,
         "variables": {
           "__materialId": {
             "type": "string",
@@ -1094,6 +973,7 @@
             "access": "public"
           }
         },
+        "spawnOnStart": true,
         "model": {
           "geometry": {
             "$geo": {
@@ -1124,8 +1004,17 @@
             "baseColor": [0.85, 0.55, 0.32],
             "metallic": 0,
             "roughness": 0.9,
+            "reflectance": 0.5,
             "opacity": 1,
+            "alphaCutoff": 0,
             "emissiveFactor": [0, 0, 0],
+            "emissiveIntensity": 1,
+            "displacementScale": 0.05,
+            "depthSpace": "uv",
+            "invertHeight": false,
+            "clipSilhouette": false,
+            "uvProjection": "box",
+            "uvSpace": "world",
             "textures": {
               "baseColorTexture": "d4a96a210b1af85c70925ceced937cb7"
             },
@@ -1135,22 +1024,21 @@
               "transparent": false,
               "castShadow": true,
               "probeable": true
-            },
-            "uvProjection": "box",
-            "uvSpace": "world",
-            "uvWorldSize": 1
+            }
           }
-        }
+        },
+        "animationMappings": null,
+        "stateMachine": null,
+        "ragdoll": null
       },
       {
-        "id": "bd886e3164c76022082017afe624c940",
+        "id": "851bbfe174565340f592e029b8921d59",
         "name": "Stairs 20 cm Top",
         "type": "model",
         "position": [-1, 0.800000011920929, 9.899999618530273],
         "rotation": [0, 0, 0],
         "scale": [2.5, 1.600000023841858, 3],
         "children": [],
-        "spawnOnStart": true,
         "variables": {
           "__materialId": {
             "type": "string",
@@ -1158,6 +1046,7 @@
             "access": "public"
           }
         },
+        "spawnOnStart": true,
         "model": {
           "geometry": {
             "$geo": {
@@ -1188,8 +1077,17 @@
             "baseColor": [0.85, 0.55, 0.32],
             "metallic": 0,
             "roughness": 0.9,
+            "reflectance": 0.5,
             "opacity": 1,
+            "alphaCutoff": 0,
             "emissiveFactor": [0, 0, 0],
+            "emissiveIntensity": 1,
+            "displacementScale": 0.05,
+            "depthSpace": "uv",
+            "invertHeight": false,
+            "clipSilhouette": false,
+            "uvProjection": "box",
+            "uvSpace": "world",
             "textures": {
               "baseColorTexture": "d4a96a210b1af85c70925ceced937cb7"
             },
@@ -1199,22 +1097,21 @@
               "transparent": false,
               "castShadow": true,
               "probeable": true
-            },
-            "uvProjection": "box",
-            "uvSpace": "world",
-            "uvWorldSize": 1
+            }
           }
-        }
+        },
+        "animationMappings": null,
+        "stateMachine": null,
+        "ragdoll": null
       },
       {
-        "id": "8e503c81433d2e6aee29f6db525ce854",
+        "id": "5580810f48fe8aafc81d166aee1b9a1f",
         "name": "Platform 0.3 m",
         "type": "model",
         "position": [10, 0.15000000596046448, 9.5],
         "rotation": [0, 0, 0],
         "scale": [3, 0.30000001192092896, 3],
         "children": [],
-        "spawnOnStart": true,
         "variables": {
           "__materialId": {
             "type": "string",
@@ -1222,6 +1119,7 @@
             "access": "public"
           }
         },
+        "spawnOnStart": true,
         "model": {
           "geometry": {
             "$geo": {
@@ -1252,8 +1150,17 @@
             "baseColor": [0.85, 0.55, 0.32],
             "metallic": 0,
             "roughness": 0.9,
+            "reflectance": 0.5,
             "opacity": 1,
+            "alphaCutoff": 0,
             "emissiveFactor": [0, 0, 0],
+            "emissiveIntensity": 1,
+            "displacementScale": 0.05,
+            "depthSpace": "uv",
+            "invertHeight": false,
+            "clipSilhouette": false,
+            "uvProjection": "box",
+            "uvSpace": "world",
             "textures": {
               "baseColorTexture": "d4a96a210b1af85c70925ceced937cb7"
             },
@@ -1263,22 +1170,21 @@
               "transparent": false,
               "castShadow": true,
               "probeable": true
-            },
-            "uvProjection": "box",
-            "uvSpace": "world",
-            "uvWorldSize": 1
+            }
           }
-        }
+        },
+        "animationMappings": null,
+        "stateMachine": null,
+        "ragdoll": null
       },
       {
-        "id": "479cdc62a9f0c0e9a6d732fc79101613",
+        "id": "2cbbbef9bf4c5a0bcec0d89e20d9ff32",
         "name": "Platform 0.6 m",
         "type": "model",
         "position": [14.5, 0.30000001192092896, 9.5],
         "rotation": [0, 0, 0],
         "scale": [3, 0.6000000238418579, 3],
         "children": [],
-        "spawnOnStart": true,
         "variables": {
           "__materialId": {
             "type": "string",
@@ -1286,6 +1192,7 @@
             "access": "public"
           }
         },
+        "spawnOnStart": true,
         "model": {
           "geometry": {
             "$geo": {
@@ -1316,8 +1223,17 @@
             "baseColor": [0.85, 0.55, 0.32],
             "metallic": 0,
             "roughness": 0.9,
+            "reflectance": 0.5,
             "opacity": 1,
+            "alphaCutoff": 0,
             "emissiveFactor": [0, 0, 0],
+            "emissiveIntensity": 1,
+            "displacementScale": 0.05,
+            "depthSpace": "uv",
+            "invertHeight": false,
+            "clipSilhouette": false,
+            "uvProjection": "box",
+            "uvSpace": "world",
             "textures": {
               "baseColorTexture": "d4a96a210b1af85c70925ceced937cb7"
             },
@@ -1327,22 +1243,21 @@
               "transparent": false,
               "castShadow": true,
               "probeable": true
-            },
-            "uvProjection": "box",
-            "uvSpace": "world",
-            "uvWorldSize": 1
+            }
           }
-        }
+        },
+        "animationMappings": null,
+        "stateMachine": null,
+        "ragdoll": null
       },
       {
-        "id": "2ebeea2d4e0451024af5fe37e232473c",
+        "id": "eece620c9696833ca884deb9a81a5446",
         "name": "Platform 1 m",
         "type": "model",
         "position": [19, 0.5, 9.5],
         "rotation": [0, 0, 0],
         "scale": [3, 1, 3],
         "children": [],
-        "spawnOnStart": true,
         "variables": {
           "__materialId": {
             "type": "string",
@@ -1350,6 +1265,7 @@
             "access": "public"
           }
         },
+        "spawnOnStart": true,
         "model": {
           "geometry": {
             "$geo": {
@@ -1380,8 +1296,17 @@
             "baseColor": [0.85, 0.55, 0.32],
             "metallic": 0,
             "roughness": 0.9,
+            "reflectance": 0.5,
             "opacity": 1,
+            "alphaCutoff": 0,
             "emissiveFactor": [0, 0, 0],
+            "emissiveIntensity": 1,
+            "displacementScale": 0.05,
+            "depthSpace": "uv",
+            "invertHeight": false,
+            "clipSilhouette": false,
+            "uvProjection": "box",
+            "uvSpace": "world",
             "textures": {
               "baseColorTexture": "d4a96a210b1af85c70925ceced937cb7"
             },
@@ -1391,22 +1316,21 @@
               "transparent": false,
               "castShadow": true,
               "probeable": true
-            },
-            "uvProjection": "box",
-            "uvSpace": "world",
-            "uvWorldSize": 1
+            }
           }
-        }
+        },
+        "animationMappings": null,
+        "stateMachine": null,
+        "ragdoll": null
       },
       {
-        "id": "179f281fa34a2fca5340b1f97fedf5b4",
+        "id": "9ef3624e04393dc545d803d49a4a63f8",
         "name": "Platform 1 m Ramp",
         "type": "model",
         "position": [19, 0.5, 12.072253227233887],
         "rotation": [0, 180, 0],
         "scale": [3, 1, 2.1445069313049316],
         "children": [],
-        "spawnOnStart": true,
         "variables": {
           "__materialId": {
             "type": "string",
@@ -1414,6 +1338,7 @@
             "access": "public"
           }
         },
+        "spawnOnStart": true,
         "model": {
           "geometry": {
             "$geo": {
@@ -1444,8 +1369,17 @@
             "baseColor": [0.85, 0.55, 0.32],
             "metallic": 0,
             "roughness": 0.9,
+            "reflectance": 0.5,
             "opacity": 1,
+            "alphaCutoff": 0,
             "emissiveFactor": [0, 0, 0],
+            "emissiveIntensity": 1,
+            "displacementScale": 0.05,
+            "depthSpace": "uv",
+            "invertHeight": false,
+            "clipSilhouette": false,
+            "uvProjection": "box",
+            "uvSpace": "world",
             "textures": {
               "baseColorTexture": "d4a96a210b1af85c70925ceced937cb7"
             },
@@ -1455,22 +1389,21 @@
               "transparent": false,
               "castShadow": true,
               "probeable": true
-            },
-            "uvProjection": "box",
-            "uvSpace": "world",
-            "uvWorldSize": 1
+            }
           }
-        }
+        },
+        "animationMappings": null,
+        "stateMachine": null,
+        "ragdoll": null
       },
       {
-        "id": "9d39e50ce3ee88f7b50bc642331916dd",
+        "id": "9126ea9365b20bc4a55e85b0b3f09817",
         "name": "Platform 2 m",
         "type": "model",
         "position": [23.5, 1, 9.5],
         "rotation": [0, 0, 0],
         "scale": [3, 2, 3],
         "children": [],
-        "spawnOnStart": true,
         "variables": {
           "__materialId": {
             "type": "string",
@@ -1478,6 +1411,7 @@
             "access": "public"
           }
         },
+        "spawnOnStart": true,
         "model": {
           "geometry": {
             "$geo": {
@@ -1508,8 +1442,17 @@
             "baseColor": [0.85, 0.55, 0.32],
             "metallic": 0,
             "roughness": 0.9,
+            "reflectance": 0.5,
             "opacity": 1,
+            "alphaCutoff": 0,
             "emissiveFactor": [0, 0, 0],
+            "emissiveIntensity": 1,
+            "displacementScale": 0.05,
+            "depthSpace": "uv",
+            "invertHeight": false,
+            "clipSilhouette": false,
+            "uvProjection": "box",
+            "uvSpace": "world",
             "textures": {
               "baseColorTexture": "d4a96a210b1af85c70925ceced937cb7"
             },
@@ -1519,22 +1462,21 @@
               "transparent": false,
               "castShadow": true,
               "probeable": true
-            },
-            "uvProjection": "box",
-            "uvSpace": "world",
-            "uvWorldSize": 1
+            }
           }
-        }
+        },
+        "animationMappings": null,
+        "stateMachine": null,
+        "ragdoll": null
       },
       {
-        "id": "9e2b9064bf96763924007c8afbc7a9ef",
+        "id": "4b760d932c3d4636b5d58c582f33b6ae",
         "name": "Platform 2 m Ramp",
         "type": "model",
         "position": [23.5, 1, 13.144506454467773],
         "rotation": [0, 180, 0],
         "scale": [3, 2, 4.289013862609863],
         "children": [],
-        "spawnOnStart": true,
         "variables": {
           "__materialId": {
             "type": "string",
@@ -1542,6 +1484,7 @@
             "access": "public"
           }
         },
+        "spawnOnStart": true,
         "model": {
           "geometry": {
             "$geo": {
@@ -1572,8 +1515,17 @@
             "baseColor": [0.85, 0.55, 0.32],
             "metallic": 0,
             "roughness": 0.9,
+            "reflectance": 0.5,
             "opacity": 1,
+            "alphaCutoff": 0,
             "emissiveFactor": [0, 0, 0],
+            "emissiveIntensity": 1,
+            "displacementScale": 0.05,
+            "depthSpace": "uv",
+            "invertHeight": false,
+            "clipSilhouette": false,
+            "uvProjection": "box",
+            "uvSpace": "world",
             "textures": {
               "baseColorTexture": "d4a96a210b1af85c70925ceced937cb7"
             },
@@ -1583,22 +1535,21 @@
               "transparent": false,
               "castShadow": true,
               "probeable": true
-            },
-            "uvProjection": "box",
-            "uvSpace": "world",
-            "uvWorldSize": 1
+            }
           }
-        }
+        },
+        "animationMappings": null,
+        "stateMachine": null,
+        "ragdoll": null
       },
       {
-        "id": "87e1f4aeb0a8da5d80bfdde8cc7f00e7",
+        "id": "89ebbd4204d24553f0bfd6c8529a643b",
         "name": "Platform 3.5 m",
         "type": "model",
         "position": [28, 1.75, 9.5],
         "rotation": [0, 0, 0],
         "scale": [3, 3.5, 3],
         "children": [],
-        "spawnOnStart": true,
         "variables": {
           "__materialId": {
             "type": "string",
@@ -1606,6 +1557,7 @@
             "access": "public"
           }
         },
+        "spawnOnStart": true,
         "model": {
           "geometry": {
             "$geo": {
@@ -1636,8 +1588,17 @@
             "baseColor": [0.85, 0.55, 0.32],
             "metallic": 0,
             "roughness": 0.9,
+            "reflectance": 0.5,
             "opacity": 1,
+            "alphaCutoff": 0,
             "emissiveFactor": [0, 0, 0],
+            "emissiveIntensity": 1,
+            "displacementScale": 0.05,
+            "depthSpace": "uv",
+            "invertHeight": false,
+            "clipSilhouette": false,
+            "uvProjection": "box",
+            "uvSpace": "world",
             "textures": {
               "baseColorTexture": "d4a96a210b1af85c70925ceced937cb7"
             },
@@ -1647,22 +1608,21 @@
               "transparent": false,
               "castShadow": true,
               "probeable": true
-            },
-            "uvProjection": "box",
-            "uvSpace": "world",
-            "uvWorldSize": 1
+            }
           }
-        }
+        },
+        "animationMappings": null,
+        "stateMachine": null,
+        "ragdoll": null
       },
       {
-        "id": "1d1bd4060802146fd7304870adf6e489",
+        "id": "9253c00ad7154b1d1120c10f13b4679d",
         "name": "Platform 3.5 m Ramp",
         "type": "model",
         "position": [28, 1.75, 14.752886772155762],
         "rotation": [0, 180, 0],
         "scale": [3, 3.5, 7.505774021148682],
         "children": [],
-        "spawnOnStart": true,
         "variables": {
           "__materialId": {
             "type": "string",
@@ -1670,6 +1630,7 @@
             "access": "public"
           }
         },
+        "spawnOnStart": true,
         "model": {
           "geometry": {
             "$geo": {
@@ -1700,8 +1661,17 @@
             "baseColor": [0.85, 0.55, 0.32],
             "metallic": 0,
             "roughness": 0.9,
+            "reflectance": 0.5,
             "opacity": 1,
+            "alphaCutoff": 0,
             "emissiveFactor": [0, 0, 0],
+            "emissiveIntensity": 1,
+            "displacementScale": 0.05,
+            "depthSpace": "uv",
+            "invertHeight": false,
+            "clipSilhouette": false,
+            "uvProjection": "box",
+            "uvSpace": "world",
             "textures": {
               "baseColorTexture": "d4a96a210b1af85c70925ceced937cb7"
             },
@@ -1711,22 +1681,21 @@
               "transparent": false,
               "castShadow": true,
               "probeable": true
-            },
-            "uvProjection": "box",
-            "uvSpace": "world",
-            "uvWorldSize": 1
+            }
           }
-        }
+        },
+        "animationMappings": null,
+        "stateMachine": null,
+        "ragdoll": null
       },
       {
-        "id": "29b0515ef0d2eb0d1013ffcc8f3369a3",
+        "id": "518003e916db18476d821d07233e72a3",
         "name": "Gap Ramp",
         "type": "model",
         "position": [0, 0.5, -4.373738765716553],
         "rotation": [0, 180, 0],
         "scale": [3, 1, 2.7474775314331055],
         "children": [],
-        "spawnOnStart": true,
         "variables": {
           "__materialId": {
             "type": "string",
@@ -1734,6 +1703,7 @@
             "access": "public"
           }
         },
+        "spawnOnStart": true,
         "model": {
           "geometry": {
             "$geo": {
@@ -1764,8 +1734,17 @@
             "baseColor": [0.85, 0.55, 0.32],
             "metallic": 0,
             "roughness": 0.9,
+            "reflectance": 0.5,
             "opacity": 1,
+            "alphaCutoff": 0,
             "emissiveFactor": [0, 0, 0],
+            "emissiveIntensity": 1,
+            "displacementScale": 0.05,
+            "depthSpace": "uv",
+            "invertHeight": false,
+            "clipSilhouette": false,
+            "uvProjection": "box",
+            "uvSpace": "world",
             "textures": {
               "baseColorTexture": "d4a96a210b1af85c70925ceced937cb7"
             },
@@ -1775,22 +1754,21 @@
               "transparent": false,
               "castShadow": true,
               "probeable": true
-            },
-            "uvProjection": "box",
-            "uvSpace": "world",
-            "uvWorldSize": 1
+            }
           }
-        }
+        },
+        "animationMappings": null,
+        "stateMachine": null,
+        "ragdoll": null
       },
       {
-        "id": "ca0b475cf5bbb19bc305199e08b8c915",
+        "id": "5b72ab560f702e854b396f35383c68cc",
         "name": "Gap Near",
         "type": "model",
         "position": [0, 0.5, -8.747477531433105],
         "rotation": [0, 0, 0],
         "scale": [3, 1, 6],
         "children": [],
-        "spawnOnStart": true,
         "variables": {
           "__materialId": {
             "type": "string",
@@ -1798,6 +1776,7 @@
             "access": "public"
           }
         },
+        "spawnOnStart": true,
         "model": {
           "geometry": {
             "$geo": {
@@ -1828,8 +1807,17 @@
             "baseColor": [0.85, 0.55, 0.32],
             "metallic": 0,
             "roughness": 0.9,
+            "reflectance": 0.5,
             "opacity": 1,
+            "alphaCutoff": 0,
             "emissiveFactor": [0, 0, 0],
+            "emissiveIntensity": 1,
+            "displacementScale": 0.05,
+            "depthSpace": "uv",
+            "invertHeight": false,
+            "clipSilhouette": false,
+            "uvProjection": "box",
+            "uvSpace": "world",
             "textures": {
               "baseColorTexture": "d4a96a210b1af85c70925ceced937cb7"
             },
@@ -1839,22 +1827,21 @@
               "transparent": false,
               "castShadow": true,
               "probeable": true
-            },
-            "uvProjection": "box",
-            "uvSpace": "world",
-            "uvWorldSize": 1
+            }
           }
-        }
+        },
+        "animationMappings": null,
+        "stateMachine": null,
+        "ragdoll": null
       },
       {
-        "id": "8c4adc6fa71a1eba42cc869ded898848",
+        "id": "adcf0584b5aad376946d86d3ba06bb65",
         "name": "Gap Far",
         "type": "model",
         "position": [0, 0.5, -16.74747657775879],
         "rotation": [0, 0, 0],
         "scale": [3, 1, 6],
         "children": [],
-        "spawnOnStart": true,
         "variables": {
           "__materialId": {
             "type": "string",
@@ -1862,6 +1849,7 @@
             "access": "public"
           }
         },
+        "spawnOnStart": true,
         "model": {
           "geometry": {
             "$geo": {
@@ -1892,8 +1880,17 @@
             "baseColor": [0.85, 0.55, 0.32],
             "metallic": 0,
             "roughness": 0.9,
+            "reflectance": 0.5,
             "opacity": 1,
+            "alphaCutoff": 0,
             "emissiveFactor": [0, 0, 0],
+            "emissiveIntensity": 1,
+            "displacementScale": 0.05,
+            "depthSpace": "uv",
+            "invertHeight": false,
+            "clipSilhouette": false,
+            "uvProjection": "box",
+            "uvSpace": "world",
             "textures": {
               "baseColorTexture": "d4a96a210b1af85c70925ceced937cb7"
             },
@@ -1903,22 +1900,21 @@
               "transparent": false,
               "castShadow": true,
               "probeable": true
-            },
-            "uvProjection": "box",
-            "uvSpace": "world",
-            "uvWorldSize": 1
+            }
           }
-        }
+        },
+        "animationMappings": null,
+        "stateMachine": null,
+        "ragdoll": null
       },
       {
-        "id": "3e2b31d25408edf9646d69b49c58fb9b",
+        "id": "9082055215b76f57154fa56c0cdc655a",
         "name": "Wall",
         "type": "model",
         "position": [-10, 1.5, -6],
         "rotation": [0, 0, 0],
         "scale": [8, 3, 0.4000000059604645],
         "children": [],
-        "spawnOnStart": true,
         "variables": {
           "__materialId": {
             "type": "string",
@@ -1926,6 +1922,7 @@
             "access": "public"
           }
         },
+        "spawnOnStart": true,
         "model": {
           "geometry": {
             "$geo": {
@@ -1956,8 +1953,17 @@
             "baseColor": [0.42, 0.55, 0.75],
             "metallic": 0,
             "roughness": 0.9,
+            "reflectance": 0.5,
             "opacity": 1,
+            "alphaCutoff": 0,
             "emissiveFactor": [0, 0, 0],
+            "emissiveIntensity": 1,
+            "displacementScale": 0.05,
+            "depthSpace": "uv",
+            "invertHeight": false,
+            "clipSilhouette": false,
+            "uvProjection": "box",
+            "uvSpace": "world",
             "textures": {
               "baseColorTexture": "d4a96a210b1af85c70925ceced937cb7"
             },
@@ -1967,28 +1973,1929 @@
               "transparent": false,
               "castShadow": true,
               "probeable": true
-            },
-            "uvProjection": "box",
-            "uvSpace": "world",
-            "uvWorldSize": 1
+            }
           }
-        }
+        },
+        "animationMappings": null,
+        "stateMachine": null,
+        "ragdoll": null
       },
       {
-        "id": "e416a85411618397fe761f22ddd78425",
+        "id": "664f9f90a66f048ff2bfa4940a8d91d5",
         "name": "Static Collision (Foot Detail)",
         "type": "collider",
         "position": [0, 0, 0],
         "rotation": [0, 0, 0],
         "scale": [1, 1, 1],
+        "children": [
+          {
+            "id": "28763cf5d7520f65bb8f766d520bcb09",
+            "name": "Stairs 15 cm",
+            "type": "model",
+            "position": [-5, 0.75, 7.5],
+            "rotation": [0, 0, 0],
+            "scale": [2.5, 1.5, 3],
+            "children": [],
+            "variables": {
+              "__materialId": {
+                "type": "string",
+                "value": "30bd88eb2dd6719a3fbfe29ebc48047a",
+                "access": "public"
+              }
+            },
+            "spawnOnStart": true,
+            "model": {
+              "geometry": {
+                "$geo": {
+                  "positions": {
+                    "n": [0.5, -0.5, -0.5, -0.5, -0.5, -0.5, -0.5, -0.4000000059604645, -0.5, 0.5, -0.4000000059604645, -0.5, -0.5, -0.4000000059604645, -0.5, -0.5, -0.4000000059604645, -0.4000000059604645, 0.5, -0.4000000059604645, -0.4000000059604645, 0.5, -0.4000000059604645, -0.5, -0.5, -0.5, -0.5, -0.5, -0.5, -0.4000000059604645, -0.5, -0.4000000059604645, -0.4000000059604645, -0.5, -0.4000000059604645, -0.5, 0.5, -0.5, -0.5, 0.5, -0.4000000059604645, -0.5, 0.5, -0.4000000059604645, -0.4000000059604645, 0.5, -0.5, -0.4000000059604645, 0.5, -0.4000000059604645, -0.4000000059604645, -0.5, -0.4000000059604645, -0.4000000059604645, -0.5, -0.30000001192092896, -0.4000000059604645, 0.5, -0.30000001192092896, -0.4000000059604645, -0.5, -0.30000001192092896, -0.4000000059604645, -0.5, -0.30000001192092896, -0.30000001192092896, 0.5, -0.30000001192092896, -0.30000001192092896, 0.5, -0.30000001192092896, -0.4000000059604645, -0.5, -0.5, -0.4000000059604645, -0.5, -0.5, -0.30000001192092896, -0.5, -0.30000001192092896, -0.30000001192092896, -0.5, -0.30000001192092896, -0.4000000059604645, 0.5, -0.5, -0.4000000059604645, 0.5, -0.30000001192092896, -0.4000000059604645, 0.5, -0.30000001192092896, -0.30000001192092896, 0.5, -0.5, -0.30000001192092896, 0.5, -0.30000001192092896, -0.30000001192092896, -0.5, -0.30000001192092896, -0.30000001192092896, -0.5, -0.20000000298023224, -0.30000001192092896, 0.5, -0.20000000298023224, -0.30000001192092896, -0.5, -0.20000000298023224, -0.30000001192092896, -0.5, -0.20000000298023224, -0.20000000298023224, 0.5, -0.20000000298023224, -0.20000000298023224, 0.5, -0.20000000298023224, -0.30000001192092896, -0.5, -0.5, -0.30000001192092896, -0.5, -0.5, -0.20000000298023224, -0.5, -0.20000000298023224, -0.20000000298023224, -0.5, -0.20000000298023224, -0.30000001192092896, 0.5, -0.5, -0.30000001192092896, 0.5, -0.20000000298023224, -0.30000001192092896, 0.5, -0.20000000298023224, -0.20000000298023224, 0.5, -0.5, -0.20000000298023224, 0.5, -0.20000000298023224, -0.20000000298023224, -0.5, -0.20000000298023224, -0.20000000298023224, -0.5, -0.10000000149011612, -0.20000000298023224, 0.5, -0.10000000149011612, -0.20000000298023224, -0.5, -0.10000000149011612, -0.20000000298023224, -0.5, -0.10000000149011612, -0.10000000149011612, 0.5, -0.10000000149011612, -0.10000000149011612, 0.5, -0.10000000149011612, -0.20000000298023224, -0.5, -0.5, -0.20000000298023224, -0.5, -0.5, -0.10000000149011612, -0.5, -0.10000000149011612, -0.10000000149011612, -0.5, -0.10000000149011612, -0.20000000298023224, 0.5, -0.5, -0.20000000298023224, 0.5, -0.10000000149011612, -0.20000000298023224, 0.5, -0.10000000149011612, -0.10000000149011612, 0.5, -0.5, -0.10000000149011612, 0.5, -0.10000000149011612, -0.10000000149011612, -0.5, -0.10000000149011612, -0.10000000149011612, -0.5, 0, -0.10000000149011612, 0.5, 0, -0.10000000149011612, -0.5, 0, -0.10000000149011612, -0.5, 0, 0, 0.5, 0, 0, 0.5, 0, -0.10000000149011612, -0.5, -0.5, -0.10000000149011612, -0.5, -0.5, 0, -0.5, 0, 0, -0.5, 0, -0.10000000149011612, 0.5, -0.5, -0.10000000149011612, 0.5, 0, -0.10000000149011612, 0.5, 0, 0, 0.5, -0.5, 0, 0.5, 0, 0, -0.5, 0, 0, -0.5, 0.10000000149011612, 0, 0.5, 0.10000000149011612, 0, -0.5, 0.10000000149011612, 0, -0.5, 0.10000000149011612, 0.10000000149011612, 0.5, 0.10000000149011612, 0.10000000149011612, 0.5, 0.10000000149011612, 0, -0.5, -0.5, 0, -0.5, -0.5, 0.10000000149011612, -0.5, 0.10000000149011612, 0.10000000149011612, -0.5, 0.10000000149011612, 0, 0.5, -0.5, 0, 0.5, 0.10000000149011612, 0, 0.5, 0.10000000149011612, 0.10000000149011612, 0.5, -0.5, 0.10000000149011612, 0.5, 0.10000000149011612, 0.10000000149011612, -0.5, 0.10000000149011612, 0.10000000149011612, -0.5, 0.20000000298023224, 0.10000000149011612, 0.5, 0.20000000298023224, 0.10000000149011612, -0.5, 0.20000000298023224, 0.10000000149011612, -0.5, 0.20000000298023224, 0.20000000298023224, 0.5, 0.20000000298023224, 0.20000000298023224, 0.5, 0.20000000298023224, 0.10000000149011612, -0.5, -0.5, 0.10000000149011612, -0.5, -0.5, 0.20000000298023224, -0.5, 0.20000000298023224, 0.20000000298023224, -0.5, 0.20000000298023224, 0.10000000149011612, 0.5, -0.5, 0.10000000149011612, 0.5, 0.20000000298023224, 0.10000000149011612, 0.5, 0.20000000298023224, 0.20000000298023224, 0.5, -0.5, 0.20000000298023224, 0.5, 0.20000000298023224, 0.20000000298023224, -0.5, 0.20000000298023224, 0.20000000298023224, -0.5, 0.30000001192092896, 0.20000000298023224, 0.5, 0.30000001192092896, 0.20000000298023224, -0.5, 0.30000001192092896, 0.20000000298023224, -0.5, 0.30000001192092896, 0.30000001192092896, 0.5, 0.30000001192092896, 0.30000001192092896, 0.5, 0.30000001192092896, 0.20000000298023224, -0.5, -0.5, 0.20000000298023224, -0.5, -0.5, 0.30000001192092896, -0.5, 0.30000001192092896, 0.30000001192092896, -0.5, 0.30000001192092896, 0.20000000298023224, 0.5, -0.5, 0.20000000298023224, 0.5, 0.30000001192092896, 0.20000000298023224, 0.5, 0.30000001192092896, 0.30000001192092896, 0.5, -0.5, 0.30000001192092896, 0.5, 0.30000001192092896, 0.30000001192092896, -0.5, 0.30000001192092896, 0.30000001192092896, -0.5, 0.4000000059604645, 0.30000001192092896, 0.5, 0.4000000059604645, 0.30000001192092896, -0.5, 0.4000000059604645, 0.30000001192092896, -0.5, 0.4000000059604645, 0.4000000059604645, 0.5, 0.4000000059604645, 0.4000000059604645, 0.5, 0.4000000059604645, 0.30000001192092896, -0.5, -0.5, 0.30000001192092896, -0.5, -0.5, 0.4000000059604645, -0.5, 0.4000000059604645, 0.4000000059604645, -0.5, 0.4000000059604645, 0.30000001192092896, 0.5, -0.5, 0.30000001192092896, 0.5, 0.4000000059604645, 0.30000001192092896, 0.5, 0.4000000059604645, 0.4000000059604645, 0.5, -0.5, 0.4000000059604645, 0.5, 0.4000000059604645, 0.4000000059604645, -0.5, 0.4000000059604645, 0.4000000059604645, -0.5, 0.5, 0.4000000059604645, 0.5, 0.5, 0.4000000059604645, -0.5, 0.5, 0.4000000059604645, -0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.4000000059604645, -0.5, -0.5, 0.4000000059604645, -0.5, -0.5, 0.5, -0.5, 0.5, 0.5, -0.5, 0.5, 0.4000000059604645, 0.5, -0.5, 0.4000000059604645, 0.5, 0.5, 0.4000000059604645, 0.5, 0.5, 0.5, 0.5, -0.5, 0.5, -0.5, -0.5, 0.5, 0.5, -0.5, 0.5, 0.5, 0.5, 0.5, -0.5, 0.5, 0.5, -0.5, -0.5, -0.5, 0.5, -0.5, -0.5, 0.5, -0.5, 0.5, -0.5, -0.5, 0.5]
+                  },
+                  "normals": {
+                    "n": [0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0]
+                  },
+                  "tangents": {
+                    "n": [-1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0]
+                  },
+                  "bitangents": {
+                    "n": [0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1]
+                  },
+                  "texCoords": {
+                    "n": [0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1]
+                  },
+                  "indices": {
+                    "n": [0, 1, 2, 0, 2, 3, 4, 5, 6, 4, 6, 7, 8, 9, 10, 8, 10, 11, 12, 13, 14, 12, 14, 15, 16, 17, 18, 16, 18, 19, 20, 21, 22, 20, 22, 23, 24, 25, 26, 24, 26, 27, 28, 29, 30, 28, 30, 31, 32, 33, 34, 32, 34, 35, 36, 37, 38, 36, 38, 39, 40, 41, 42, 40, 42, 43, 44, 45, 46, 44, 46, 47, 48, 49, 50, 48, 50, 51, 52, 53, 54, 52, 54, 55, 56, 57, 58, 56, 58, 59, 60, 61, 62, 60, 62, 63, 64, 65, 66, 64, 66, 67, 68, 69, 70, 68, 70, 71, 72, 73, 74, 72, 74, 75, 76, 77, 78, 76, 78, 79, 80, 81, 82, 80, 82, 83, 84, 85, 86, 84, 86, 87, 88, 89, 90, 88, 90, 91, 92, 93, 94, 92, 94, 95, 96, 97, 98, 96, 98, 99, 100, 101, 102, 100, 102, 103, 104, 105, 106, 104, 106, 107, 108, 109, 110, 108, 110, 111, 112, 113, 114, 112, 114, 115, 116, 117, 118, 116, 118, 119, 120, 121, 122, 120, 122, 123, 124, 125, 126, 124, 126, 127, 128, 129, 130, 128, 130, 131, 132, 133, 134, 132, 134, 135, 136, 137, 138, 136, 138, 139, 140, 141, 142, 140, 142, 143, 144, 145, 146, 144, 146, 147, 148, 149, 150, 148, 150, 151, 152, 153, 154, 152, 154, 155, 156, 157, 158, 156, 158, 159, 160, 161, 162, 160, 162, 163, 164, 165, 166, 164, 166, 167],
+                    "bits": 16
+                  },
+                  "typed": true
+                }
+              },
+              "material": {
+                "type": "pbr",
+                "baseColor": [0.85, 0.55, 0.32],
+                "metallic": 0,
+                "roughness": 0.9,
+                "reflectance": 0.5,
+                "opacity": 1,
+                "alphaCutoff": 0,
+                "emissiveFactor": [0, 0, 0],
+                "emissiveIntensity": 1,
+                "displacementScale": 0.05,
+                "depthSpace": "uv",
+                "invertHeight": false,
+                "clipSilhouette": false,
+                "uvProjection": "box",
+                "uvSpace": "world",
+                "textures": {
+                  "baseColorTexture": "d4a96a210b1af85c70925ceced937cb7"
+                },
+                "config": {
+                  "side": "front",
+                  "wireframe": false,
+                  "transparent": false,
+                  "castShadow": true,
+                  "probeable": true
+                }
+              }
+            },
+            "animationMappings": null,
+            "stateMachine": null,
+            "ragdoll": null
+          },
+          {
+            "id": "96945fe3d6300965c1225c77cb2d35f4",
+            "name": "Stairs 20 cm",
+            "type": "model",
+            "position": [-1, 0.800000011920929, 7.199999809265137],
+            "rotation": [0, 0, 0],
+            "scale": [2.5, 1.600000023841858, 2.4000000953674316],
+            "children": [],
+            "variables": {
+              "__materialId": {
+                "type": "string",
+                "value": "30bd88eb2dd6719a3fbfe29ebc48047a",
+                "access": "public"
+              }
+            },
+            "spawnOnStart": true,
+            "model": {
+              "geometry": {
+                "$geo": {
+                  "positions": {
+                    "n": [0.5, -0.5, -0.5, -0.5, -0.5, -0.5, -0.5, -0.375, -0.5, 0.5, -0.375, -0.5, -0.5, -0.375, -0.5, -0.5, -0.375, -0.375, 0.5, -0.375, -0.375, 0.5, -0.375, -0.5, -0.5, -0.5, -0.5, -0.5, -0.5, -0.375, -0.5, -0.375, -0.375, -0.5, -0.375, -0.5, 0.5, -0.5, -0.5, 0.5, -0.375, -0.5, 0.5, -0.375, -0.375, 0.5, -0.5, -0.375, 0.5, -0.375, -0.375, -0.5, -0.375, -0.375, -0.5, -0.25, -0.375, 0.5, -0.25, -0.375, -0.5, -0.25, -0.375, -0.5, -0.25, -0.25, 0.5, -0.25, -0.25, 0.5, -0.25, -0.375, -0.5, -0.5, -0.375, -0.5, -0.5, -0.25, -0.5, -0.25, -0.25, -0.5, -0.25, -0.375, 0.5, -0.5, -0.375, 0.5, -0.25, -0.375, 0.5, -0.25, -0.25, 0.5, -0.5, -0.25, 0.5, -0.25, -0.25, -0.5, -0.25, -0.25, -0.5, -0.125, -0.25, 0.5, -0.125, -0.25, -0.5, -0.125, -0.25, -0.5, -0.125, -0.125, 0.5, -0.125, -0.125, 0.5, -0.125, -0.25, -0.5, -0.5, -0.25, -0.5, -0.5, -0.125, -0.5, -0.125, -0.125, -0.5, -0.125, -0.25, 0.5, -0.5, -0.25, 0.5, -0.125, -0.25, 0.5, -0.125, -0.125, 0.5, -0.5, -0.125, 0.5, -0.125, -0.125, -0.5, -0.125, -0.125, -0.5, 0, -0.125, 0.5, 0, -0.125, -0.5, 0, -0.125, -0.5, 0, 0, 0.5, 0, 0, 0.5, 0, -0.125, -0.5, -0.5, -0.125, -0.5, -0.5, 0, -0.5, 0, 0, -0.5, 0, -0.125, 0.5, -0.5, -0.125, 0.5, 0, -0.125, 0.5, 0, 0, 0.5, -0.5, 0, 0.5, 0, 0, -0.5, 0, 0, -0.5, 0.125, 0, 0.5, 0.125, 0, -0.5, 0.125, 0, -0.5, 0.125, 0.125, 0.5, 0.125, 0.125, 0.5, 0.125, 0, -0.5, -0.5, 0, -0.5, -0.5, 0.125, -0.5, 0.125, 0.125, -0.5, 0.125, 0, 0.5, -0.5, 0, 0.5, 0.125, 0, 0.5, 0.125, 0.125, 0.5, -0.5, 0.125, 0.5, 0.125, 0.125, -0.5, 0.125, 0.125, -0.5, 0.25, 0.125, 0.5, 0.25, 0.125, -0.5, 0.25, 0.125, -0.5, 0.25, 0.25, 0.5, 0.25, 0.25, 0.5, 0.25, 0.125, -0.5, -0.5, 0.125, -0.5, -0.5, 0.25, -0.5, 0.25, 0.25, -0.5, 0.25, 0.125, 0.5, -0.5, 0.125, 0.5, 0.25, 0.125, 0.5, 0.25, 0.25, 0.5, -0.5, 0.25, 0.5, 0.25, 0.25, -0.5, 0.25, 0.25, -0.5, 0.375, 0.25, 0.5, 0.375, 0.25, -0.5, 0.375, 0.25, -0.5, 0.375, 0.375, 0.5, 0.375, 0.375, 0.5, 0.375, 0.25, -0.5, -0.5, 0.25, -0.5, -0.5, 0.375, -0.5, 0.375, 0.375, -0.5, 0.375, 0.25, 0.5, -0.5, 0.25, 0.5, 0.375, 0.25, 0.5, 0.375, 0.375, 0.5, -0.5, 0.375, 0.5, 0.375, 0.375, -0.5, 0.375, 0.375, -0.5, 0.5, 0.375, 0.5, 0.5, 0.375, -0.5, 0.5, 0.375, -0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.375, -0.5, -0.5, 0.375, -0.5, -0.5, 0.5, -0.5, 0.5, 0.5, -0.5, 0.5, 0.375, 0.5, -0.5, 0.375, 0.5, 0.5, 0.375, 0.5, 0.5, 0.5, 0.5, -0.5, 0.5, -0.5, -0.5, 0.5, 0.5, -0.5, 0.5, 0.5, 0.5, 0.5, -0.5, 0.5, 0.5, -0.5, -0.5, -0.5, 0.5, -0.5, -0.5, 0.5, -0.5, 0.5, -0.5, -0.5, 0.5]
+                  },
+                  "normals": {
+                    "n": [0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0]
+                  },
+                  "tangents": {
+                    "n": [-1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0]
+                  },
+                  "bitangents": {
+                    "n": [0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1]
+                  },
+                  "texCoords": {
+                    "n": [0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1]
+                  },
+                  "indices": {
+                    "n": [0, 1, 2, 0, 2, 3, 4, 5, 6, 4, 6, 7, 8, 9, 10, 8, 10, 11, 12, 13, 14, 12, 14, 15, 16, 17, 18, 16, 18, 19, 20, 21, 22, 20, 22, 23, 24, 25, 26, 24, 26, 27, 28, 29, 30, 28, 30, 31, 32, 33, 34, 32, 34, 35, 36, 37, 38, 36, 38, 39, 40, 41, 42, 40, 42, 43, 44, 45, 46, 44, 46, 47, 48, 49, 50, 48, 50, 51, 52, 53, 54, 52, 54, 55, 56, 57, 58, 56, 58, 59, 60, 61, 62, 60, 62, 63, 64, 65, 66, 64, 66, 67, 68, 69, 70, 68, 70, 71, 72, 73, 74, 72, 74, 75, 76, 77, 78, 76, 78, 79, 80, 81, 82, 80, 82, 83, 84, 85, 86, 84, 86, 87, 88, 89, 90, 88, 90, 91, 92, 93, 94, 92, 94, 95, 96, 97, 98, 96, 98, 99, 100, 101, 102, 100, 102, 103, 104, 105, 106, 104, 106, 107, 108, 109, 110, 108, 110, 111, 112, 113, 114, 112, 114, 115, 116, 117, 118, 116, 118, 119, 120, 121, 122, 120, 122, 123, 124, 125, 126, 124, 126, 127, 128, 129, 130, 128, 130, 131, 132, 133, 134, 132, 134, 135],
+                    "bits": 16
+                  },
+                  "typed": true
+                }
+              },
+              "material": {
+                "type": "pbr",
+                "baseColor": [0.85, 0.55, 0.32],
+                "metallic": 0,
+                "roughness": 0.9,
+                "reflectance": 0.5,
+                "opacity": 1,
+                "alphaCutoff": 0,
+                "emissiveFactor": [0, 0, 0],
+                "emissiveIntensity": 1,
+                "displacementScale": 0.05,
+                "depthSpace": "uv",
+                "invertHeight": false,
+                "clipSilhouette": false,
+                "uvProjection": "box",
+                "uvSpace": "world",
+                "textures": {
+                  "baseColorTexture": "d4a96a210b1af85c70925ceced937cb7"
+                },
+                "config": {
+                  "side": "front",
+                  "wireframe": false,
+                  "transparent": false,
+                  "castShadow": true,
+                  "probeable": true
+                }
+              }
+            },
+            "animationMappings": null,
+            "stateMachine": null,
+            "ragdoll": null
+          },
+          {
+            "id": "4966a19b5b7e544dc8180acbe72e562b",
+            "name": "Bump 1",
+            "type": "model",
+            "position": [3, 0, 6],
+            "rotation": [-2.5294301509857178, 18.949583053588867, 2.752749443054199],
+            "scale": [0.8999999761581421, 0.3381146788597107, 0.8999999761581421],
+            "children": [],
+            "variables": {
+              "__materialId": {
+                "type": "string",
+                "value": "8aa2f149c706ee8d1dd0cc8a3d19251d",
+                "access": "public"
+              }
+            },
+            "spawnOnStart": true,
+            "model": {
+              "geometry": {
+                "$geo": {
+                  "positions": {
+                    "n": [-0.5, -0.5, 0.5, 0.5, -0.5, 0.5, 0.5, 0.5, 0.5, -0.5, 0.5, 0.5, 0.5, -0.5, 0.5, 0.5, -0.5, -0.5, 0.5, 0.5, -0.5, 0.5, 0.5, 0.5, 0.5, -0.5, -0.5, -0.5, -0.5, -0.5, -0.5, 0.5, -0.5, 0.5, 0.5, -0.5, -0.5, -0.5, -0.5, -0.5, -0.5, 0.5, -0.5, 0.5, 0.5, -0.5, 0.5, -0.5, -0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, -0.5, -0.5, 0.5, -0.5, -0.5, -0.5, -0.5, 0.5, -0.5, -0.5, 0.5, -0.5, 0.5, -0.5, -0.5, 0.5]
+                  },
+                  "normals": {
+                    "n": [0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0]
+                  },
+                  "tangents": {
+                    "n": [1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0]
+                  },
+                  "bitangents": {
+                    "n": [0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1]
+                  },
+                  "texCoords": {
+                    "n": [0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1]
+                  },
+                  "indices": {
+                    "n": [0, 1, 2, 0, 2, 3, 4, 5, 6, 4, 6, 7, 8, 9, 10, 8, 10, 11, 12, 13, 14, 12, 14, 15, 16, 17, 18, 16, 18, 19, 20, 21, 22, 20, 22, 23],
+                    "bits": 16
+                  },
+                  "typed": true
+                }
+              },
+              "material": {
+                "type": "pbr",
+                "baseColor": [0.42, 0.55, 0.75],
+                "metallic": 0,
+                "roughness": 0.9,
+                "reflectance": 0.5,
+                "opacity": 1,
+                "alphaCutoff": 0,
+                "emissiveFactor": [0, 0, 0],
+                "emissiveIntensity": 1,
+                "displacementScale": 0.05,
+                "depthSpace": "uv",
+                "invertHeight": false,
+                "clipSilhouette": false,
+                "uvProjection": "box",
+                "uvSpace": "world",
+                "textures": {
+                  "baseColorTexture": "d4a96a210b1af85c70925ceced937cb7"
+                },
+                "config": {
+                  "side": "front",
+                  "wireframe": false,
+                  "transparent": false,
+                  "castShadow": true,
+                  "probeable": true
+                }
+              }
+            },
+            "animationMappings": null,
+            "stateMachine": null,
+            "ragdoll": null
+          },
+          {
+            "id": "417c89eecacffb4c001e426fe1a4a40a",
+            "name": "Bump 2",
+            "type": "model",
+            "position": [4.099999904632568, 0, 6],
+            "rotation": [6.2471699714660645, 67.95673370361328, 1.0620501041412354],
+            "scale": [0.8999999761581421, 0.24939684569835663, 0.8999999761581421],
+            "children": [],
+            "variables": {
+              "__materialId": {
+                "type": "string",
+                "value": "8aa2f149c706ee8d1dd0cc8a3d19251d",
+                "access": "public"
+              }
+            },
+            "spawnOnStart": true,
+            "model": {
+              "geometry": {
+                "$geo": {
+                  "positions": {
+                    "n": [-0.5, -0.5, 0.5, 0.5, -0.5, 0.5, 0.5, 0.5, 0.5, -0.5, 0.5, 0.5, 0.5, -0.5, 0.5, 0.5, -0.5, -0.5, 0.5, 0.5, -0.5, 0.5, 0.5, 0.5, 0.5, -0.5, -0.5, -0.5, -0.5, -0.5, -0.5, 0.5, -0.5, 0.5, 0.5, -0.5, -0.5, -0.5, -0.5, -0.5, -0.5, 0.5, -0.5, 0.5, 0.5, -0.5, 0.5, -0.5, -0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, -0.5, -0.5, 0.5, -0.5, -0.5, -0.5, -0.5, 0.5, -0.5, -0.5, 0.5, -0.5, 0.5, -0.5, -0.5, 0.5]
+                  },
+                  "normals": {
+                    "n": [0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0]
+                  },
+                  "tangents": {
+                    "n": [1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0]
+                  },
+                  "bitangents": {
+                    "n": [0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1]
+                  },
+                  "texCoords": {
+                    "n": [0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1]
+                  },
+                  "indices": {
+                    "n": [0, 1, 2, 0, 2, 3, 4, 5, 6, 4, 6, 7, 8, 9, 10, 8, 10, 11, 12, 13, 14, 12, 14, 15, 16, 17, 18, 16, 18, 19, 20, 21, 22, 20, 22, 23],
+                    "bits": 16
+                  },
+                  "typed": true
+                }
+              },
+              "material": {
+                "type": "pbr",
+                "baseColor": [0.42, 0.55, 0.75],
+                "metallic": 0,
+                "roughness": 0.9,
+                "reflectance": 0.5,
+                "opacity": 1,
+                "alphaCutoff": 0,
+                "emissiveFactor": [0, 0, 0],
+                "emissiveIntensity": 1,
+                "displacementScale": 0.05,
+                "depthSpace": "uv",
+                "invertHeight": false,
+                "clipSilhouette": false,
+                "uvProjection": "box",
+                "uvSpace": "world",
+                "textures": {
+                  "baseColorTexture": "d4a96a210b1af85c70925ceced937cb7"
+                },
+                "config": {
+                  "side": "front",
+                  "wireframe": false,
+                  "transparent": false,
+                  "castShadow": true,
+                  "probeable": true
+                }
+              }
+            },
+            "animationMappings": null,
+            "stateMachine": null,
+            "ragdoll": null
+          },
+          {
+            "id": "372f2c7e381f25cc7b2e374a95521808",
+            "name": "Bump 3",
+            "type": "model",
+            "position": [5.199999809265137, 0, 6],
+            "rotation": [9.004890441894531, 21.78042984008789, -3.575392484664917],
+            "scale": [0.8999999761581421, 0.2953871786594391, 0.8999999761581421],
+            "children": [],
+            "variables": {
+              "__materialId": {
+                "type": "string",
+                "value": "8aa2f149c706ee8d1dd0cc8a3d19251d",
+                "access": "public"
+              }
+            },
+            "spawnOnStart": true,
+            "model": {
+              "geometry": {
+                "$geo": {
+                  "positions": {
+                    "n": [-0.5, -0.5, 0.5, 0.5, -0.5, 0.5, 0.5, 0.5, 0.5, -0.5, 0.5, 0.5, 0.5, -0.5, 0.5, 0.5, -0.5, -0.5, 0.5, 0.5, -0.5, 0.5, 0.5, 0.5, 0.5, -0.5, -0.5, -0.5, -0.5, -0.5, -0.5, 0.5, -0.5, 0.5, 0.5, -0.5, -0.5, -0.5, -0.5, -0.5, -0.5, 0.5, -0.5, 0.5, 0.5, -0.5, 0.5, -0.5, -0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, -0.5, -0.5, 0.5, -0.5, -0.5, -0.5, -0.5, 0.5, -0.5, -0.5, 0.5, -0.5, 0.5, -0.5, -0.5, 0.5]
+                  },
+                  "normals": {
+                    "n": [0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0]
+                  },
+                  "tangents": {
+                    "n": [1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0]
+                  },
+                  "bitangents": {
+                    "n": [0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1]
+                  },
+                  "texCoords": {
+                    "n": [0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1]
+                  },
+                  "indices": {
+                    "n": [0, 1, 2, 0, 2, 3, 4, 5, 6, 4, 6, 7, 8, 9, 10, 8, 10, 11, 12, 13, 14, 12, 14, 15, 16, 17, 18, 16, 18, 19, 20, 21, 22, 20, 22, 23],
+                    "bits": 16
+                  },
+                  "typed": true
+                }
+              },
+              "material": {
+                "type": "pbr",
+                "baseColor": [0.42, 0.55, 0.75],
+                "metallic": 0,
+                "roughness": 0.9,
+                "reflectance": 0.5,
+                "opacity": 1,
+                "alphaCutoff": 0,
+                "emissiveFactor": [0, 0, 0],
+                "emissiveIntensity": 1,
+                "displacementScale": 0.05,
+                "depthSpace": "uv",
+                "invertHeight": false,
+                "clipSilhouette": false,
+                "uvProjection": "box",
+                "uvSpace": "world",
+                "textures": {
+                  "baseColorTexture": "d4a96a210b1af85c70925ceced937cb7"
+                },
+                "config": {
+                  "side": "front",
+                  "wireframe": false,
+                  "transparent": false,
+                  "castShadow": true,
+                  "probeable": true
+                }
+              }
+            },
+            "animationMappings": null,
+            "stateMachine": null,
+            "ragdoll": null
+          },
+          {
+            "id": "e66f355d9b18821c55bce90725fd8d11",
+            "name": "Bump 4",
+            "type": "model",
+            "position": [3, 0, 7.099999904632568],
+            "rotation": [-12.932642936706543, 61.55186080932617, -0.9306929707527161],
+            "scale": [0.8999999761581421, 0.3047068417072296, 0.8999999761581421],
+            "children": [],
+            "variables": {
+              "__materialId": {
+                "type": "string",
+                "value": "8aa2f149c706ee8d1dd0cc8a3d19251d",
+                "access": "public"
+              }
+            },
+            "spawnOnStart": true,
+            "model": {
+              "geometry": {
+                "$geo": {
+                  "positions": {
+                    "n": [-0.5, -0.5, 0.5, 0.5, -0.5, 0.5, 0.5, 0.5, 0.5, -0.5, 0.5, 0.5, 0.5, -0.5, 0.5, 0.5, -0.5, -0.5, 0.5, 0.5, -0.5, 0.5, 0.5, 0.5, 0.5, -0.5, -0.5, -0.5, -0.5, -0.5, -0.5, 0.5, -0.5, 0.5, 0.5, -0.5, -0.5, -0.5, -0.5, -0.5, -0.5, 0.5, -0.5, 0.5, 0.5, -0.5, 0.5, -0.5, -0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, -0.5, -0.5, 0.5, -0.5, -0.5, -0.5, -0.5, 0.5, -0.5, -0.5, 0.5, -0.5, 0.5, -0.5, -0.5, 0.5]
+                  },
+                  "normals": {
+                    "n": [0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0]
+                  },
+                  "tangents": {
+                    "n": [1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0]
+                  },
+                  "bitangents": {
+                    "n": [0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1]
+                  },
+                  "texCoords": {
+                    "n": [0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1]
+                  },
+                  "indices": {
+                    "n": [0, 1, 2, 0, 2, 3, 4, 5, 6, 4, 6, 7, 8, 9, 10, 8, 10, 11, 12, 13, 14, 12, 14, 15, 16, 17, 18, 16, 18, 19, 20, 21, 22, 20, 22, 23],
+                    "bits": 16
+                  },
+                  "typed": true
+                }
+              },
+              "material": {
+                "type": "pbr",
+                "baseColor": [0.42, 0.55, 0.75],
+                "metallic": 0,
+                "roughness": 0.9,
+                "reflectance": 0.5,
+                "opacity": 1,
+                "alphaCutoff": 0,
+                "emissiveFactor": [0, 0, 0],
+                "emissiveIntensity": 1,
+                "displacementScale": 0.05,
+                "depthSpace": "uv",
+                "invertHeight": false,
+                "clipSilhouette": false,
+                "uvProjection": "box",
+                "uvSpace": "world",
+                "textures": {
+                  "baseColorTexture": "d4a96a210b1af85c70925ceced937cb7"
+                },
+                "config": {
+                  "side": "front",
+                  "wireframe": false,
+                  "transparent": false,
+                  "castShadow": true,
+                  "probeable": true
+                }
+              }
+            },
+            "animationMappings": null,
+            "stateMachine": null,
+            "ragdoll": null
+          },
+          {
+            "id": "a26c71a6f458661a8a17899675af94ec",
+            "name": "Bump 5",
+            "type": "model",
+            "position": [4.099999904632568, 0, 7.099999904632568],
+            "rotation": [-12.875473022460938, 46.174991607666016, 14.445966720581055],
+            "scale": [0.8999999761581421, 0.3211113512516022, 0.8999999761581421],
+            "children": [],
+            "variables": {
+              "__materialId": {
+                "type": "string",
+                "value": "8aa2f149c706ee8d1dd0cc8a3d19251d",
+                "access": "public"
+              }
+            },
+            "spawnOnStart": true,
+            "model": {
+              "geometry": {
+                "$geo": {
+                  "positions": {
+                    "n": [-0.5, -0.5, 0.5, 0.5, -0.5, 0.5, 0.5, 0.5, 0.5, -0.5, 0.5, 0.5, 0.5, -0.5, 0.5, 0.5, -0.5, -0.5, 0.5, 0.5, -0.5, 0.5, 0.5, 0.5, 0.5, -0.5, -0.5, -0.5, -0.5, -0.5, -0.5, 0.5, -0.5, 0.5, 0.5, -0.5, -0.5, -0.5, -0.5, -0.5, -0.5, 0.5, -0.5, 0.5, 0.5, -0.5, 0.5, -0.5, -0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, -0.5, -0.5, 0.5, -0.5, -0.5, -0.5, -0.5, 0.5, -0.5, -0.5, 0.5, -0.5, 0.5, -0.5, -0.5, 0.5]
+                  },
+                  "normals": {
+                    "n": [0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0]
+                  },
+                  "tangents": {
+                    "n": [1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0]
+                  },
+                  "bitangents": {
+                    "n": [0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1]
+                  },
+                  "texCoords": {
+                    "n": [0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1]
+                  },
+                  "indices": {
+                    "n": [0, 1, 2, 0, 2, 3, 4, 5, 6, 4, 6, 7, 8, 9, 10, 8, 10, 11, 12, 13, 14, 12, 14, 15, 16, 17, 18, 16, 18, 19, 20, 21, 22, 20, 22, 23],
+                    "bits": 16
+                  },
+                  "typed": true
+                }
+              },
+              "material": {
+                "type": "pbr",
+                "baseColor": [0.42, 0.55, 0.75],
+                "metallic": 0,
+                "roughness": 0.9,
+                "reflectance": 0.5,
+                "opacity": 1,
+                "alphaCutoff": 0,
+                "emissiveFactor": [0, 0, 0],
+                "emissiveIntensity": 1,
+                "displacementScale": 0.05,
+                "depthSpace": "uv",
+                "invertHeight": false,
+                "clipSilhouette": false,
+                "uvProjection": "box",
+                "uvSpace": "world",
+                "textures": {
+                  "baseColorTexture": "d4a96a210b1af85c70925ceced937cb7"
+                },
+                "config": {
+                  "side": "front",
+                  "wireframe": false,
+                  "transparent": false,
+                  "castShadow": true,
+                  "probeable": true
+                }
+              }
+            },
+            "animationMappings": null,
+            "stateMachine": null,
+            "ragdoll": null
+          },
+          {
+            "id": "600399add105fff3657577f340b73f02",
+            "name": "Bump 6",
+            "type": "model",
+            "position": [5.199999809265137, 0, 7.099999904632568],
+            "rotation": [2.2086939811706543, 82.07959747314453, 11.647337913513184],
+            "scale": [0.8999999761581421, 0.29656314849853516, 0.8999999761581421],
+            "children": [],
+            "variables": {
+              "__materialId": {
+                "type": "string",
+                "value": "8aa2f149c706ee8d1dd0cc8a3d19251d",
+                "access": "public"
+              }
+            },
+            "spawnOnStart": true,
+            "model": {
+              "geometry": {
+                "$geo": {
+                  "positions": {
+                    "n": [-0.5, -0.5, 0.5, 0.5, -0.5, 0.5, 0.5, 0.5, 0.5, -0.5, 0.5, 0.5, 0.5, -0.5, 0.5, 0.5, -0.5, -0.5, 0.5, 0.5, -0.5, 0.5, 0.5, 0.5, 0.5, -0.5, -0.5, -0.5, -0.5, -0.5, -0.5, 0.5, -0.5, 0.5, 0.5, -0.5, -0.5, -0.5, -0.5, -0.5, -0.5, 0.5, -0.5, 0.5, 0.5, -0.5, 0.5, -0.5, -0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, -0.5, -0.5, 0.5, -0.5, -0.5, -0.5, -0.5, 0.5, -0.5, -0.5, 0.5, -0.5, 0.5, -0.5, -0.5, 0.5]
+                  },
+                  "normals": {
+                    "n": [0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0]
+                  },
+                  "tangents": {
+                    "n": [1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0]
+                  },
+                  "bitangents": {
+                    "n": [0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1]
+                  },
+                  "texCoords": {
+                    "n": [0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1]
+                  },
+                  "indices": {
+                    "n": [0, 1, 2, 0, 2, 3, 4, 5, 6, 4, 6, 7, 8, 9, 10, 8, 10, 11, 12, 13, 14, 12, 14, 15, 16, 17, 18, 16, 18, 19, 20, 21, 22, 20, 22, 23],
+                    "bits": 16
+                  },
+                  "typed": true
+                }
+              },
+              "material": {
+                "type": "pbr",
+                "baseColor": [0.42, 0.55, 0.75],
+                "metallic": 0,
+                "roughness": 0.9,
+                "reflectance": 0.5,
+                "opacity": 1,
+                "alphaCutoff": 0,
+                "emissiveFactor": [0, 0, 0],
+                "emissiveIntensity": 1,
+                "displacementScale": 0.05,
+                "depthSpace": "uv",
+                "invertHeight": false,
+                "clipSilhouette": false,
+                "uvProjection": "box",
+                "uvSpace": "world",
+                "textures": {
+                  "baseColorTexture": "d4a96a210b1af85c70925ceced937cb7"
+                },
+                "config": {
+                  "side": "front",
+                  "wireframe": false,
+                  "transparent": false,
+                  "castShadow": true,
+                  "probeable": true
+                }
+              }
+            },
+            "animationMappings": null,
+            "stateMachine": null,
+            "ragdoll": null
+          },
+          {
+            "id": "b9d3883b794aa510d840ff83e2103d19",
+            "name": "Bump 7",
+            "type": "model",
+            "position": [3, 0, 8.199999809265137],
+            "rotation": [7.058302879333496, 29.90264320373535, -7.272997856140137],
+            "scale": [0.8999999761581421, 0.25030794739723206, 0.8999999761581421],
+            "children": [],
+            "variables": {
+              "__materialId": {
+                "type": "string",
+                "value": "8aa2f149c706ee8d1dd0cc8a3d19251d",
+                "access": "public"
+              }
+            },
+            "spawnOnStart": true,
+            "model": {
+              "geometry": {
+                "$geo": {
+                  "positions": {
+                    "n": [-0.5, -0.5, 0.5, 0.5, -0.5, 0.5, 0.5, 0.5, 0.5, -0.5, 0.5, 0.5, 0.5, -0.5, 0.5, 0.5, -0.5, -0.5, 0.5, 0.5, -0.5, 0.5, 0.5, 0.5, 0.5, -0.5, -0.5, -0.5, -0.5, -0.5, -0.5, 0.5, -0.5, 0.5, 0.5, -0.5, -0.5, -0.5, -0.5, -0.5, -0.5, 0.5, -0.5, 0.5, 0.5, -0.5, 0.5, -0.5, -0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, -0.5, -0.5, 0.5, -0.5, -0.5, -0.5, -0.5, 0.5, -0.5, -0.5, 0.5, -0.5, 0.5, -0.5, -0.5, 0.5]
+                  },
+                  "normals": {
+                    "n": [0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0]
+                  },
+                  "tangents": {
+                    "n": [1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0]
+                  },
+                  "bitangents": {
+                    "n": [0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1]
+                  },
+                  "texCoords": {
+                    "n": [0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1]
+                  },
+                  "indices": {
+                    "n": [0, 1, 2, 0, 2, 3, 4, 5, 6, 4, 6, 7, 8, 9, 10, 8, 10, 11, 12, 13, 14, 12, 14, 15, 16, 17, 18, 16, 18, 19, 20, 21, 22, 20, 22, 23],
+                    "bits": 16
+                  },
+                  "typed": true
+                }
+              },
+              "material": {
+                "type": "pbr",
+                "baseColor": [0.42, 0.55, 0.75],
+                "metallic": 0,
+                "roughness": 0.9,
+                "reflectance": 0.5,
+                "opacity": 1,
+                "alphaCutoff": 0,
+                "emissiveFactor": [0, 0, 0],
+                "emissiveIntensity": 1,
+                "displacementScale": 0.05,
+                "depthSpace": "uv",
+                "invertHeight": false,
+                "clipSilhouette": false,
+                "uvProjection": "box",
+                "uvSpace": "world",
+                "textures": {
+                  "baseColorTexture": "d4a96a210b1af85c70925ceced937cb7"
+                },
+                "config": {
+                  "side": "front",
+                  "wireframe": false,
+                  "transparent": false,
+                  "castShadow": true,
+                  "probeable": true
+                }
+              }
+            },
+            "animationMappings": null,
+            "stateMachine": null,
+            "ragdoll": null
+          },
+          {
+            "id": "e23c4593d9b230b94817a7aa43c6565d",
+            "name": "Bump 8",
+            "type": "model",
+            "position": [4.099999904632568, 0, 8.199999809265137],
+            "rotation": [-3.9268102645874023, 84.35355377197266, 1.0982673168182373],
+            "scale": [0.8999999761581421, 0.26427048444747925, 0.8999999761581421],
+            "children": [],
+            "variables": {
+              "__materialId": {
+                "type": "string",
+                "value": "8aa2f149c706ee8d1dd0cc8a3d19251d",
+                "access": "public"
+              }
+            },
+            "spawnOnStart": true,
+            "model": {
+              "geometry": {
+                "$geo": {
+                  "positions": {
+                    "n": [-0.5, -0.5, 0.5, 0.5, -0.5, 0.5, 0.5, 0.5, 0.5, -0.5, 0.5, 0.5, 0.5, -0.5, 0.5, 0.5, -0.5, -0.5, 0.5, 0.5, -0.5, 0.5, 0.5, 0.5, 0.5, -0.5, -0.5, -0.5, -0.5, -0.5, -0.5, 0.5, -0.5, 0.5, 0.5, -0.5, -0.5, -0.5, -0.5, -0.5, -0.5, 0.5, -0.5, 0.5, 0.5, -0.5, 0.5, -0.5, -0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, -0.5, -0.5, 0.5, -0.5, -0.5, -0.5, -0.5, 0.5, -0.5, -0.5, 0.5, -0.5, 0.5, -0.5, -0.5, 0.5]
+                  },
+                  "normals": {
+                    "n": [0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0]
+                  },
+                  "tangents": {
+                    "n": [1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0]
+                  },
+                  "bitangents": {
+                    "n": [0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1]
+                  },
+                  "texCoords": {
+                    "n": [0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1]
+                  },
+                  "indices": {
+                    "n": [0, 1, 2, 0, 2, 3, 4, 5, 6, 4, 6, 7, 8, 9, 10, 8, 10, 11, 12, 13, 14, 12, 14, 15, 16, 17, 18, 16, 18, 19, 20, 21, 22, 20, 22, 23],
+                    "bits": 16
+                  },
+                  "typed": true
+                }
+              },
+              "material": {
+                "type": "pbr",
+                "baseColor": [0.42, 0.55, 0.75],
+                "metallic": 0,
+                "roughness": 0.9,
+                "reflectance": 0.5,
+                "opacity": 1,
+                "alphaCutoff": 0,
+                "emissiveFactor": [0, 0, 0],
+                "emissiveIntensity": 1,
+                "displacementScale": 0.05,
+                "depthSpace": "uv",
+                "invertHeight": false,
+                "clipSilhouette": false,
+                "uvProjection": "box",
+                "uvSpace": "world",
+                "textures": {
+                  "baseColorTexture": "d4a96a210b1af85c70925ceced937cb7"
+                },
+                "config": {
+                  "side": "front",
+                  "wireframe": false,
+                  "transparent": false,
+                  "castShadow": true,
+                  "probeable": true
+                }
+              }
+            },
+            "animationMappings": null,
+            "stateMachine": null,
+            "ragdoll": null
+          },
+          {
+            "id": "3ef335dfb1ea44092d251c4912255c4f",
+            "name": "Bump 9",
+            "type": "model",
+            "position": [5.199999809265137, 0, 8.199999809265137],
+            "rotation": [-13.021744728088379, 24.61417579650879, 1.7887392044067383],
+            "scale": [0.8999999761581421, 0.33167779445648193, 0.8999999761581421],
+            "children": [],
+            "variables": {
+              "__materialId": {
+                "type": "string",
+                "value": "8aa2f149c706ee8d1dd0cc8a3d19251d",
+                "access": "public"
+              }
+            },
+            "spawnOnStart": true,
+            "model": {
+              "geometry": {
+                "$geo": {
+                  "positions": {
+                    "n": [-0.5, -0.5, 0.5, 0.5, -0.5, 0.5, 0.5, 0.5, 0.5, -0.5, 0.5, 0.5, 0.5, -0.5, 0.5, 0.5, -0.5, -0.5, 0.5, 0.5, -0.5, 0.5, 0.5, 0.5, 0.5, -0.5, -0.5, -0.5, -0.5, -0.5, -0.5, 0.5, -0.5, 0.5, 0.5, -0.5, -0.5, -0.5, -0.5, -0.5, -0.5, 0.5, -0.5, 0.5, 0.5, -0.5, 0.5, -0.5, -0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, -0.5, -0.5, 0.5, -0.5, -0.5, -0.5, -0.5, 0.5, -0.5, -0.5, 0.5, -0.5, 0.5, -0.5, -0.5, 0.5]
+                  },
+                  "normals": {
+                    "n": [0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0]
+                  },
+                  "tangents": {
+                    "n": [1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0]
+                  },
+                  "bitangents": {
+                    "n": [0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1]
+                  },
+                  "texCoords": {
+                    "n": [0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1]
+                  },
+                  "indices": {
+                    "n": [0, 1, 2, 0, 2, 3, 4, 5, 6, 4, 6, 7, 8, 9, 10, 8, 10, 11, 12, 13, 14, 12, 14, 15, 16, 17, 18, 16, 18, 19, 20, 21, 22, 20, 22, 23],
+                    "bits": 16
+                  },
+                  "typed": true
+                }
+              },
+              "material": {
+                "type": "pbr",
+                "baseColor": [0.42, 0.55, 0.75],
+                "metallic": 0,
+                "roughness": 0.9,
+                "reflectance": 0.5,
+                "opacity": 1,
+                "alphaCutoff": 0,
+                "emissiveFactor": [0, 0, 0],
+                "emissiveIntensity": 1,
+                "displacementScale": 0.05,
+                "depthSpace": "uv",
+                "invertHeight": false,
+                "clipSilhouette": false,
+                "uvProjection": "box",
+                "uvSpace": "world",
+                "textures": {
+                  "baseColorTexture": "d4a96a210b1af85c70925ceced937cb7"
+                },
+                "config": {
+                  "side": "front",
+                  "wireframe": false,
+                  "transparent": false,
+                  "castShadow": true,
+                  "probeable": true
+                }
+              }
+            },
+            "animationMappings": null,
+            "stateMachine": null,
+            "ragdoll": null
+          },
+          {
+            "id": "f7eb4e52b4e80b867a6f46af5d860dce",
+            "name": "Bump 10",
+            "type": "model",
+            "position": [3, 0, 9.300000190734863],
+            "rotation": [-7.434060096740723, 81.80728149414062, -10.77690601348877],
+            "scale": [0.8999999761581421, 0.26321646571159363, 0.8999999761581421],
+            "children": [],
+            "variables": {
+              "__materialId": {
+                "type": "string",
+                "value": "8aa2f149c706ee8d1dd0cc8a3d19251d",
+                "access": "public"
+              }
+            },
+            "spawnOnStart": true,
+            "model": {
+              "geometry": {
+                "$geo": {
+                  "positions": {
+                    "n": [-0.5, -0.5, 0.5, 0.5, -0.5, 0.5, 0.5, 0.5, 0.5, -0.5, 0.5, 0.5, 0.5, -0.5, 0.5, 0.5, -0.5, -0.5, 0.5, 0.5, -0.5, 0.5, 0.5, 0.5, 0.5, -0.5, -0.5, -0.5, -0.5, -0.5, -0.5, 0.5, -0.5, 0.5, 0.5, -0.5, -0.5, -0.5, -0.5, -0.5, -0.5, 0.5, -0.5, 0.5, 0.5, -0.5, 0.5, -0.5, -0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, -0.5, -0.5, 0.5, -0.5, -0.5, -0.5, -0.5, 0.5, -0.5, -0.5, 0.5, -0.5, 0.5, -0.5, -0.5, 0.5]
+                  },
+                  "normals": {
+                    "n": [0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0]
+                  },
+                  "tangents": {
+                    "n": [1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0]
+                  },
+                  "bitangents": {
+                    "n": [0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1]
+                  },
+                  "texCoords": {
+                    "n": [0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1]
+                  },
+                  "indices": {
+                    "n": [0, 1, 2, 0, 2, 3, 4, 5, 6, 4, 6, 7, 8, 9, 10, 8, 10, 11, 12, 13, 14, 12, 14, 15, 16, 17, 18, 16, 18, 19, 20, 21, 22, 20, 22, 23],
+                    "bits": 16
+                  },
+                  "typed": true
+                }
+              },
+              "material": {
+                "type": "pbr",
+                "baseColor": [0.42, 0.55, 0.75],
+                "metallic": 0,
+                "roughness": 0.9,
+                "reflectance": 0.5,
+                "opacity": 1,
+                "alphaCutoff": 0,
+                "emissiveFactor": [0, 0, 0],
+                "emissiveIntensity": 1,
+                "displacementScale": 0.05,
+                "depthSpace": "uv",
+                "invertHeight": false,
+                "clipSilhouette": false,
+                "uvProjection": "box",
+                "uvSpace": "world",
+                "textures": {
+                  "baseColorTexture": "d4a96a210b1af85c70925ceced937cb7"
+                },
+                "config": {
+                  "side": "front",
+                  "wireframe": false,
+                  "transparent": false,
+                  "castShadow": true,
+                  "probeable": true
+                }
+              }
+            },
+            "animationMappings": null,
+            "stateMachine": null,
+            "ragdoll": null
+          },
+          {
+            "id": "805154ba0518496e2b2914a447b26984",
+            "name": "Bump 11",
+            "type": "model",
+            "position": [4.099999904632568, 0, 9.300000190734863],
+            "rotation": [3.4152095317840576, 83.1913070678711, 0.3085520267486572],
+            "scale": [0.8999999761581421, 0.251618355512619, 0.8999999761581421],
+            "children": [],
+            "variables": {
+              "__materialId": {
+                "type": "string",
+                "value": "8aa2f149c706ee8d1dd0cc8a3d19251d",
+                "access": "public"
+              }
+            },
+            "spawnOnStart": true,
+            "model": {
+              "geometry": {
+                "$geo": {
+                  "positions": {
+                    "n": [-0.5, -0.5, 0.5, 0.5, -0.5, 0.5, 0.5, 0.5, 0.5, -0.5, 0.5, 0.5, 0.5, -0.5, 0.5, 0.5, -0.5, -0.5, 0.5, 0.5, -0.5, 0.5, 0.5, 0.5, 0.5, -0.5, -0.5, -0.5, -0.5, -0.5, -0.5, 0.5, -0.5, 0.5, 0.5, -0.5, -0.5, -0.5, -0.5, -0.5, -0.5, 0.5, -0.5, 0.5, 0.5, -0.5, 0.5, -0.5, -0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, -0.5, -0.5, 0.5, -0.5, -0.5, -0.5, -0.5, 0.5, -0.5, -0.5, 0.5, -0.5, 0.5, -0.5, -0.5, 0.5]
+                  },
+                  "normals": {
+                    "n": [0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0]
+                  },
+                  "tangents": {
+                    "n": [1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0]
+                  },
+                  "bitangents": {
+                    "n": [0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1]
+                  },
+                  "texCoords": {
+                    "n": [0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1]
+                  },
+                  "indices": {
+                    "n": [0, 1, 2, 0, 2, 3, 4, 5, 6, 4, 6, 7, 8, 9, 10, 8, 10, 11, 12, 13, 14, 12, 14, 15, 16, 17, 18, 16, 18, 19, 20, 21, 22, 20, 22, 23],
+                    "bits": 16
+                  },
+                  "typed": true
+                }
+              },
+              "material": {
+                "type": "pbr",
+                "baseColor": [0.42, 0.55, 0.75],
+                "metallic": 0,
+                "roughness": 0.9,
+                "reflectance": 0.5,
+                "opacity": 1,
+                "alphaCutoff": 0,
+                "emissiveFactor": [0, 0, 0],
+                "emissiveIntensity": 1,
+                "displacementScale": 0.05,
+                "depthSpace": "uv",
+                "invertHeight": false,
+                "clipSilhouette": false,
+                "uvProjection": "box",
+                "uvSpace": "world",
+                "textures": {
+                  "baseColorTexture": "d4a96a210b1af85c70925ceced937cb7"
+                },
+                "config": {
+                  "side": "front",
+                  "wireframe": false,
+                  "transparent": false,
+                  "castShadow": true,
+                  "probeable": true
+                }
+              }
+            },
+            "animationMappings": null,
+            "stateMachine": null,
+            "ragdoll": null
+          },
+          {
+            "id": "489758b8c4dfd35a1ef7c932d2906bb7",
+            "name": "Bump 12",
+            "type": "model",
+            "position": [5.199999809265137, 0, 9.300000190734863],
+            "rotation": [-3.456698417663574, 32.80110549926758, -1.2147579193115234],
+            "scale": [0.8999999761581421, 0.2608432471752167, 0.8999999761581421],
+            "children": [],
+            "variables": {
+              "__materialId": {
+                "type": "string",
+                "value": "8aa2f149c706ee8d1dd0cc8a3d19251d",
+                "access": "public"
+              }
+            },
+            "spawnOnStart": true,
+            "model": {
+              "geometry": {
+                "$geo": {
+                  "positions": {
+                    "n": [-0.5, -0.5, 0.5, 0.5, -0.5, 0.5, 0.5, 0.5, 0.5, -0.5, 0.5, 0.5, 0.5, -0.5, 0.5, 0.5, -0.5, -0.5, 0.5, 0.5, -0.5, 0.5, 0.5, 0.5, 0.5, -0.5, -0.5, -0.5, -0.5, -0.5, -0.5, 0.5, -0.5, 0.5, 0.5, -0.5, -0.5, -0.5, -0.5, -0.5, -0.5, 0.5, -0.5, 0.5, 0.5, -0.5, 0.5, -0.5, -0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, -0.5, -0.5, 0.5, -0.5, -0.5, -0.5, -0.5, 0.5, -0.5, -0.5, 0.5, -0.5, 0.5, -0.5, -0.5, 0.5]
+                  },
+                  "normals": {
+                    "n": [0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0]
+                  },
+                  "tangents": {
+                    "n": [1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0]
+                  },
+                  "bitangents": {
+                    "n": [0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1]
+                  },
+                  "texCoords": {
+                    "n": [0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1]
+                  },
+                  "indices": {
+                    "n": [0, 1, 2, 0, 2, 3, 4, 5, 6, 4, 6, 7, 8, 9, 10, 8, 10, 11, 12, 13, 14, 12, 14, 15, 16, 17, 18, 16, 18, 19, 20, 21, 22, 20, 22, 23],
+                    "bits": 16
+                  },
+                  "typed": true
+                }
+              },
+              "material": {
+                "type": "pbr",
+                "baseColor": [0.42, 0.55, 0.75],
+                "metallic": 0,
+                "roughness": 0.9,
+                "reflectance": 0.5,
+                "opacity": 1,
+                "alphaCutoff": 0,
+                "emissiveFactor": [0, 0, 0],
+                "emissiveIntensity": 1,
+                "displacementScale": 0.05,
+                "depthSpace": "uv",
+                "invertHeight": false,
+                "clipSilhouette": false,
+                "uvProjection": "box",
+                "uvSpace": "world",
+                "textures": {
+                  "baseColorTexture": "d4a96a210b1af85c70925ceced937cb7"
+                },
+                "config": {
+                  "side": "front",
+                  "wireframe": false,
+                  "transparent": false,
+                  "castShadow": true,
+                  "probeable": true
+                }
+              }
+            },
+            "animationMappings": null,
+            "stateMachine": null,
+            "ragdoll": null
+          },
+          {
+            "id": "6024e465d43527ae9fe354c9202ca993",
+            "name": "Bump 13",
+            "type": "model",
+            "position": [3, 0, 10.399999618530273],
+            "rotation": [2.278790235519409, 20.990753173828125, 8.122465133666992],
+            "scale": [0.8999999761581421, 0.2797490358352661, 0.8999999761581421],
+            "children": [],
+            "variables": {
+              "__materialId": {
+                "type": "string",
+                "value": "8aa2f149c706ee8d1dd0cc8a3d19251d",
+                "access": "public"
+              }
+            },
+            "spawnOnStart": true,
+            "model": {
+              "geometry": {
+                "$geo": {
+                  "positions": {
+                    "n": [-0.5, -0.5, 0.5, 0.5, -0.5, 0.5, 0.5, 0.5, 0.5, -0.5, 0.5, 0.5, 0.5, -0.5, 0.5, 0.5, -0.5, -0.5, 0.5, 0.5, -0.5, 0.5, 0.5, 0.5, 0.5, -0.5, -0.5, -0.5, -0.5, -0.5, -0.5, 0.5, -0.5, 0.5, 0.5, -0.5, -0.5, -0.5, -0.5, -0.5, -0.5, 0.5, -0.5, 0.5, 0.5, -0.5, 0.5, -0.5, -0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, -0.5, -0.5, 0.5, -0.5, -0.5, -0.5, -0.5, 0.5, -0.5, -0.5, 0.5, -0.5, 0.5, -0.5, -0.5, 0.5]
+                  },
+                  "normals": {
+                    "n": [0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0]
+                  },
+                  "tangents": {
+                    "n": [1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0]
+                  },
+                  "bitangents": {
+                    "n": [0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1]
+                  },
+                  "texCoords": {
+                    "n": [0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1]
+                  },
+                  "indices": {
+                    "n": [0, 1, 2, 0, 2, 3, 4, 5, 6, 4, 6, 7, 8, 9, 10, 8, 10, 11, 12, 13, 14, 12, 14, 15, 16, 17, 18, 16, 18, 19, 20, 21, 22, 20, 22, 23],
+                    "bits": 16
+                  },
+                  "typed": true
+                }
+              },
+              "material": {
+                "type": "pbr",
+                "baseColor": [0.42, 0.55, 0.75],
+                "metallic": 0,
+                "roughness": 0.9,
+                "reflectance": 0.5,
+                "opacity": 1,
+                "alphaCutoff": 0,
+                "emissiveFactor": [0, 0, 0],
+                "emissiveIntensity": 1,
+                "displacementScale": 0.05,
+                "depthSpace": "uv",
+                "invertHeight": false,
+                "clipSilhouette": false,
+                "uvProjection": "box",
+                "uvSpace": "world",
+                "textures": {
+                  "baseColorTexture": "d4a96a210b1af85c70925ceced937cb7"
+                },
+                "config": {
+                  "side": "front",
+                  "wireframe": false,
+                  "transparent": false,
+                  "castShadow": true,
+                  "probeable": true
+                }
+              }
+            },
+            "animationMappings": null,
+            "stateMachine": null,
+            "ragdoll": null
+          },
+          {
+            "id": "14ca59f81688065daf52db674c907915",
+            "name": "Bump 14",
+            "type": "model",
+            "position": [4.099999904632568, 0, 10.399999618530273],
+            "rotation": [3.1063857078552246, 57.09147644042969, 0.3734075427055359],
+            "scale": [0.8999999761581421, 0.3294517397880554, 0.8999999761581421],
+            "children": [],
+            "variables": {
+              "__materialId": {
+                "type": "string",
+                "value": "8aa2f149c706ee8d1dd0cc8a3d19251d",
+                "access": "public"
+              }
+            },
+            "spawnOnStart": true,
+            "model": {
+              "geometry": {
+                "$geo": {
+                  "positions": {
+                    "n": [-0.5, -0.5, 0.5, 0.5, -0.5, 0.5, 0.5, 0.5, 0.5, -0.5, 0.5, 0.5, 0.5, -0.5, 0.5, 0.5, -0.5, -0.5, 0.5, 0.5, -0.5, 0.5, 0.5, 0.5, 0.5, -0.5, -0.5, -0.5, -0.5, -0.5, -0.5, 0.5, -0.5, 0.5, 0.5, -0.5, -0.5, -0.5, -0.5, -0.5, -0.5, 0.5, -0.5, 0.5, 0.5, -0.5, 0.5, -0.5, -0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, -0.5, -0.5, 0.5, -0.5, -0.5, -0.5, -0.5, 0.5, -0.5, -0.5, 0.5, -0.5, 0.5, -0.5, -0.5, 0.5]
+                  },
+                  "normals": {
+                    "n": [0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0]
+                  },
+                  "tangents": {
+                    "n": [1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0]
+                  },
+                  "bitangents": {
+                    "n": [0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1]
+                  },
+                  "texCoords": {
+                    "n": [0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1]
+                  },
+                  "indices": {
+                    "n": [0, 1, 2, 0, 2, 3, 4, 5, 6, 4, 6, 7, 8, 9, 10, 8, 10, 11, 12, 13, 14, 12, 14, 15, 16, 17, 18, 16, 18, 19, 20, 21, 22, 20, 22, 23],
+                    "bits": 16
+                  },
+                  "typed": true
+                }
+              },
+              "material": {
+                "type": "pbr",
+                "baseColor": [0.42, 0.55, 0.75],
+                "metallic": 0,
+                "roughness": 0.9,
+                "reflectance": 0.5,
+                "opacity": 1,
+                "alphaCutoff": 0,
+                "emissiveFactor": [0, 0, 0],
+                "emissiveIntensity": 1,
+                "displacementScale": 0.05,
+                "depthSpace": "uv",
+                "invertHeight": false,
+                "clipSilhouette": false,
+                "uvProjection": "box",
+                "uvSpace": "world",
+                "textures": {
+                  "baseColorTexture": "d4a96a210b1af85c70925ceced937cb7"
+                },
+                "config": {
+                  "side": "front",
+                  "wireframe": false,
+                  "transparent": false,
+                  "castShadow": true,
+                  "probeable": true
+                }
+              }
+            },
+            "animationMappings": null,
+            "stateMachine": null,
+            "ragdoll": null
+          },
+          {
+            "id": "9aea9e3105544415345d43bbdeb50aee",
+            "name": "Bump 15",
+            "type": "model",
+            "position": [5.199999809265137, 0, 10.399999618530273],
+            "rotation": [10.601960182189941, 35.704986572265625, 5.022298336029053],
+            "scale": [0.8999999761581421, 0.30334925651550293, 0.8999999761581421],
+            "children": [],
+            "variables": {
+              "__materialId": {
+                "type": "string",
+                "value": "8aa2f149c706ee8d1dd0cc8a3d19251d",
+                "access": "public"
+              }
+            },
+            "spawnOnStart": true,
+            "model": {
+              "geometry": {
+                "$geo": {
+                  "positions": {
+                    "n": [-0.5, -0.5, 0.5, 0.5, -0.5, 0.5, 0.5, 0.5, 0.5, -0.5, 0.5, 0.5, 0.5, -0.5, 0.5, 0.5, -0.5, -0.5, 0.5, 0.5, -0.5, 0.5, 0.5, 0.5, 0.5, -0.5, -0.5, -0.5, -0.5, -0.5, -0.5, 0.5, -0.5, 0.5, 0.5, -0.5, -0.5, -0.5, -0.5, -0.5, -0.5, 0.5, -0.5, 0.5, 0.5, -0.5, 0.5, -0.5, -0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, -0.5, -0.5, 0.5, -0.5, -0.5, -0.5, -0.5, 0.5, -0.5, -0.5, 0.5, -0.5, 0.5, -0.5, -0.5, 0.5]
+                  },
+                  "normals": {
+                    "n": [0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0]
+                  },
+                  "tangents": {
+                    "n": [1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0]
+                  },
+                  "bitangents": {
+                    "n": [0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1]
+                  },
+                  "texCoords": {
+                    "n": [0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1]
+                  },
+                  "indices": {
+                    "n": [0, 1, 2, 0, 2, 3, 4, 5, 6, 4, 6, 7, 8, 9, 10, 8, 10, 11, 12, 13, 14, 12, 14, 15, 16, 17, 18, 16, 18, 19, 20, 21, 22, 20, 22, 23],
+                    "bits": 16
+                  },
+                  "typed": true
+                }
+              },
+              "material": {
+                "type": "pbr",
+                "baseColor": [0.42, 0.55, 0.75],
+                "metallic": 0,
+                "roughness": 0.9,
+                "reflectance": 0.5,
+                "opacity": 1,
+                "alphaCutoff": 0,
+                "emissiveFactor": [0, 0, 0],
+                "emissiveIntensity": 1,
+                "displacementScale": 0.05,
+                "depthSpace": "uv",
+                "invertHeight": false,
+                "clipSilhouette": false,
+                "uvProjection": "box",
+                "uvSpace": "world",
+                "textures": {
+                  "baseColorTexture": "d4a96a210b1af85c70925ceced937cb7"
+                },
+                "config": {
+                  "side": "front",
+                  "wireframe": false,
+                  "transparent": false,
+                  "castShadow": true,
+                  "probeable": true
+                }
+              }
+            },
+            "animationMappings": null,
+            "stateMachine": null,
+            "ragdoll": null
+          },
+          {
+            "id": "08655e911fbaeaf1390ac41b7a816022",
+            "name": "Bump 16",
+            "type": "model",
+            "position": [3, 0, 11.5],
+            "rotation": [-2.693437099456787, 29.753984451293945, -1.957147479057312],
+            "scale": [0.8999999761581421, 0.2880289554595947, 0.8999999761581421],
+            "children": [],
+            "variables": {
+              "__materialId": {
+                "type": "string",
+                "value": "8aa2f149c706ee8d1dd0cc8a3d19251d",
+                "access": "public"
+              }
+            },
+            "spawnOnStart": true,
+            "model": {
+              "geometry": {
+                "$geo": {
+                  "positions": {
+                    "n": [-0.5, -0.5, 0.5, 0.5, -0.5, 0.5, 0.5, 0.5, 0.5, -0.5, 0.5, 0.5, 0.5, -0.5, 0.5, 0.5, -0.5, -0.5, 0.5, 0.5, -0.5, 0.5, 0.5, 0.5, 0.5, -0.5, -0.5, -0.5, -0.5, -0.5, -0.5, 0.5, -0.5, 0.5, 0.5, -0.5, -0.5, -0.5, -0.5, -0.5, -0.5, 0.5, -0.5, 0.5, 0.5, -0.5, 0.5, -0.5, -0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, -0.5, -0.5, 0.5, -0.5, -0.5, -0.5, -0.5, 0.5, -0.5, -0.5, 0.5, -0.5, 0.5, -0.5, -0.5, 0.5]
+                  },
+                  "normals": {
+                    "n": [0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0]
+                  },
+                  "tangents": {
+                    "n": [1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0]
+                  },
+                  "bitangents": {
+                    "n": [0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1]
+                  },
+                  "texCoords": {
+                    "n": [0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1]
+                  },
+                  "indices": {
+                    "n": [0, 1, 2, 0, 2, 3, 4, 5, 6, 4, 6, 7, 8, 9, 10, 8, 10, 11, 12, 13, 14, 12, 14, 15, 16, 17, 18, 16, 18, 19, 20, 21, 22, 20, 22, 23],
+                    "bits": 16
+                  },
+                  "typed": true
+                }
+              },
+              "material": {
+                "type": "pbr",
+                "baseColor": [0.42, 0.55, 0.75],
+                "metallic": 0,
+                "roughness": 0.9,
+                "reflectance": 0.5,
+                "opacity": 1,
+                "alphaCutoff": 0,
+                "emissiveFactor": [0, 0, 0],
+                "emissiveIntensity": 1,
+                "displacementScale": 0.05,
+                "depthSpace": "uv",
+                "invertHeight": false,
+                "clipSilhouette": false,
+                "uvProjection": "box",
+                "uvSpace": "world",
+                "textures": {
+                  "baseColorTexture": "d4a96a210b1af85c70925ceced937cb7"
+                },
+                "config": {
+                  "side": "front",
+                  "wireframe": false,
+                  "transparent": false,
+                  "castShadow": true,
+                  "probeable": true
+                }
+              }
+            },
+            "animationMappings": null,
+            "stateMachine": null,
+            "ragdoll": null
+          },
+          {
+            "id": "095404ed1c391b1a4bde39a73269d90d",
+            "name": "Bump 17",
+            "type": "model",
+            "position": [4.099999904632568, 0, 11.5],
+            "rotation": [-12.085219383239746, 73.72683715820312, -13.12132740020752],
+            "scale": [0.8999999761581421, 0.33163365721702576, 0.8999999761581421],
+            "children": [],
+            "variables": {
+              "__materialId": {
+                "type": "string",
+                "value": "8aa2f149c706ee8d1dd0cc8a3d19251d",
+                "access": "public"
+              }
+            },
+            "spawnOnStart": true,
+            "model": {
+              "geometry": {
+                "$geo": {
+                  "positions": {
+                    "n": [-0.5, -0.5, 0.5, 0.5, -0.5, 0.5, 0.5, 0.5, 0.5, -0.5, 0.5, 0.5, 0.5, -0.5, 0.5, 0.5, -0.5, -0.5, 0.5, 0.5, -0.5, 0.5, 0.5, 0.5, 0.5, -0.5, -0.5, -0.5, -0.5, -0.5, -0.5, 0.5, -0.5, 0.5, 0.5, -0.5, -0.5, -0.5, -0.5, -0.5, -0.5, 0.5, -0.5, 0.5, 0.5, -0.5, 0.5, -0.5, -0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, -0.5, -0.5, 0.5, -0.5, -0.5, -0.5, -0.5, 0.5, -0.5, -0.5, 0.5, -0.5, 0.5, -0.5, -0.5, 0.5]
+                  },
+                  "normals": {
+                    "n": [0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0]
+                  },
+                  "tangents": {
+                    "n": [1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0]
+                  },
+                  "bitangents": {
+                    "n": [0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1]
+                  },
+                  "texCoords": {
+                    "n": [0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1]
+                  },
+                  "indices": {
+                    "n": [0, 1, 2, 0, 2, 3, 4, 5, 6, 4, 6, 7, 8, 9, 10, 8, 10, 11, 12, 13, 14, 12, 14, 15, 16, 17, 18, 16, 18, 19, 20, 21, 22, 20, 22, 23],
+                    "bits": 16
+                  },
+                  "typed": true
+                }
+              },
+              "material": {
+                "type": "pbr",
+                "baseColor": [0.42, 0.55, 0.75],
+                "metallic": 0,
+                "roughness": 0.9,
+                "reflectance": 0.5,
+                "opacity": 1,
+                "alphaCutoff": 0,
+                "emissiveFactor": [0, 0, 0],
+                "emissiveIntensity": 1,
+                "displacementScale": 0.05,
+                "depthSpace": "uv",
+                "invertHeight": false,
+                "clipSilhouette": false,
+                "uvProjection": "box",
+                "uvSpace": "world",
+                "textures": {
+                  "baseColorTexture": "d4a96a210b1af85c70925ceced937cb7"
+                },
+                "config": {
+                  "side": "front",
+                  "wireframe": false,
+                  "transparent": false,
+                  "castShadow": true,
+                  "probeable": true
+                }
+              }
+            },
+            "animationMappings": null,
+            "stateMachine": null,
+            "ragdoll": null
+          },
+          {
+            "id": "279726634ee886535a2d3a3301356fbe",
+            "name": "Bump 18",
+            "type": "model",
+            "position": [5.199999809265137, 0, 11.5],
+            "rotation": [-9.18663501739502, 89.65846252441406, -6.093602657318115],
+            "scale": [0.8999999761581421, 0.22303573787212372, 0.8999999761581421],
+            "children": [],
+            "variables": {
+              "__materialId": {
+                "type": "string",
+                "value": "8aa2f149c706ee8d1dd0cc8a3d19251d",
+                "access": "public"
+              }
+            },
+            "spawnOnStart": true,
+            "model": {
+              "geometry": {
+                "$geo": {
+                  "positions": {
+                    "n": [-0.5, -0.5, 0.5, 0.5, -0.5, 0.5, 0.5, 0.5, 0.5, -0.5, 0.5, 0.5, 0.5, -0.5, 0.5, 0.5, -0.5, -0.5, 0.5, 0.5, -0.5, 0.5, 0.5, 0.5, 0.5, -0.5, -0.5, -0.5, -0.5, -0.5, -0.5, 0.5, -0.5, 0.5, 0.5, -0.5, -0.5, -0.5, -0.5, -0.5, -0.5, 0.5, -0.5, 0.5, 0.5, -0.5, 0.5, -0.5, -0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, -0.5, -0.5, 0.5, -0.5, -0.5, -0.5, -0.5, 0.5, -0.5, -0.5, 0.5, -0.5, 0.5, -0.5, -0.5, 0.5]
+                  },
+                  "normals": {
+                    "n": [0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0]
+                  },
+                  "tangents": {
+                    "n": [1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0]
+                  },
+                  "bitangents": {
+                    "n": [0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1]
+                  },
+                  "texCoords": {
+                    "n": [0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1]
+                  },
+                  "indices": {
+                    "n": [0, 1, 2, 0, 2, 3, 4, 5, 6, 4, 6, 7, 8, 9, 10, 8, 10, 11, 12, 13, 14, 12, 14, 15, 16, 17, 18, 16, 18, 19, 20, 21, 22, 20, 22, 23],
+                    "bits": 16
+                  },
+                  "typed": true
+                }
+              },
+              "material": {
+                "type": "pbr",
+                "baseColor": [0.42, 0.55, 0.75],
+                "metallic": 0,
+                "roughness": 0.9,
+                "reflectance": 0.5,
+                "opacity": 1,
+                "alphaCutoff": 0,
+                "emissiveFactor": [0, 0, 0],
+                "emissiveIntensity": 1,
+                "displacementScale": 0.05,
+                "depthSpace": "uv",
+                "invertHeight": false,
+                "clipSilhouette": false,
+                "uvProjection": "box",
+                "uvSpace": "world",
+                "textures": {
+                  "baseColorTexture": "d4a96a210b1af85c70925ceced937cb7"
+                },
+                "config": {
+                  "side": "front",
+                  "wireframe": false,
+                  "transparent": false,
+                  "castShadow": true,
+                  "probeable": true
+                }
+              }
+            },
+            "animationMappings": null,
+            "stateMachine": null,
+            "ragdoll": null
+          },
+          {
+            "id": "d9e50a886d548c277258587845e9221d",
+            "name": "Bump 19",
+            "type": "model",
+            "position": [3, 0, 12.600000381469727],
+            "rotation": [-1.1656990051269531, 53.362430572509766, -9.843548774719238],
+            "scale": [0.8999999761581421, 0.22163791954517365, 0.8999999761581421],
+            "children": [],
+            "variables": {
+              "__materialId": {
+                "type": "string",
+                "value": "8aa2f149c706ee8d1dd0cc8a3d19251d",
+                "access": "public"
+              }
+            },
+            "spawnOnStart": true,
+            "model": {
+              "geometry": {
+                "$geo": {
+                  "positions": {
+                    "n": [-0.5, -0.5, 0.5, 0.5, -0.5, 0.5, 0.5, 0.5, 0.5, -0.5, 0.5, 0.5, 0.5, -0.5, 0.5, 0.5, -0.5, -0.5, 0.5, 0.5, -0.5, 0.5, 0.5, 0.5, 0.5, -0.5, -0.5, -0.5, -0.5, -0.5, -0.5, 0.5, -0.5, 0.5, 0.5, -0.5, -0.5, -0.5, -0.5, -0.5, -0.5, 0.5, -0.5, 0.5, 0.5, -0.5, 0.5, -0.5, -0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, -0.5, -0.5, 0.5, -0.5, -0.5, -0.5, -0.5, 0.5, -0.5, -0.5, 0.5, -0.5, 0.5, -0.5, -0.5, 0.5]
+                  },
+                  "normals": {
+                    "n": [0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0]
+                  },
+                  "tangents": {
+                    "n": [1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0]
+                  },
+                  "bitangents": {
+                    "n": [0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1]
+                  },
+                  "texCoords": {
+                    "n": [0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1]
+                  },
+                  "indices": {
+                    "n": [0, 1, 2, 0, 2, 3, 4, 5, 6, 4, 6, 7, 8, 9, 10, 8, 10, 11, 12, 13, 14, 12, 14, 15, 16, 17, 18, 16, 18, 19, 20, 21, 22, 20, 22, 23],
+                    "bits": 16
+                  },
+                  "typed": true
+                }
+              },
+              "material": {
+                "type": "pbr",
+                "baseColor": [0.42, 0.55, 0.75],
+                "metallic": 0,
+                "roughness": 0.9,
+                "reflectance": 0.5,
+                "opacity": 1,
+                "alphaCutoff": 0,
+                "emissiveFactor": [0, 0, 0],
+                "emissiveIntensity": 1,
+                "displacementScale": 0.05,
+                "depthSpace": "uv",
+                "invertHeight": false,
+                "clipSilhouette": false,
+                "uvProjection": "box",
+                "uvSpace": "world",
+                "textures": {
+                  "baseColorTexture": "d4a96a210b1af85c70925ceced937cb7"
+                },
+                "config": {
+                  "side": "front",
+                  "wireframe": false,
+                  "transparent": false,
+                  "castShadow": true,
+                  "probeable": true
+                }
+              }
+            },
+            "animationMappings": null,
+            "stateMachine": null,
+            "ragdoll": null
+          },
+          {
+            "id": "1a9e3e192b2b606dd09af5ad05bc59af",
+            "name": "Bump 20",
+            "type": "model",
+            "position": [4.099999904632568, 0, 12.600000381469727],
+            "rotation": [13.328315734863281, 79.66988372802734, 13.914849281311035],
+            "scale": [0.8999999761581421, 0.33268481492996216, 0.8999999761581421],
+            "children": [],
+            "variables": {
+              "__materialId": {
+                "type": "string",
+                "value": "8aa2f149c706ee8d1dd0cc8a3d19251d",
+                "access": "public"
+              }
+            },
+            "spawnOnStart": true,
+            "model": {
+              "geometry": {
+                "$geo": {
+                  "positions": {
+                    "n": [-0.5, -0.5, 0.5, 0.5, -0.5, 0.5, 0.5, 0.5, 0.5, -0.5, 0.5, 0.5, 0.5, -0.5, 0.5, 0.5, -0.5, -0.5, 0.5, 0.5, -0.5, 0.5, 0.5, 0.5, 0.5, -0.5, -0.5, -0.5, -0.5, -0.5, -0.5, 0.5, -0.5, 0.5, 0.5, -0.5, -0.5, -0.5, -0.5, -0.5, -0.5, 0.5, -0.5, 0.5, 0.5, -0.5, 0.5, -0.5, -0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, -0.5, -0.5, 0.5, -0.5, -0.5, -0.5, -0.5, 0.5, -0.5, -0.5, 0.5, -0.5, 0.5, -0.5, -0.5, 0.5]
+                  },
+                  "normals": {
+                    "n": [0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0]
+                  },
+                  "tangents": {
+                    "n": [1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0]
+                  },
+                  "bitangents": {
+                    "n": [0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1]
+                  },
+                  "texCoords": {
+                    "n": [0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1]
+                  },
+                  "indices": {
+                    "n": [0, 1, 2, 0, 2, 3, 4, 5, 6, 4, 6, 7, 8, 9, 10, 8, 10, 11, 12, 13, 14, 12, 14, 15, 16, 17, 18, 16, 18, 19, 20, 21, 22, 20, 22, 23],
+                    "bits": 16
+                  },
+                  "typed": true
+                }
+              },
+              "material": {
+                "type": "pbr",
+                "baseColor": [0.42, 0.55, 0.75],
+                "metallic": 0,
+                "roughness": 0.9,
+                "reflectance": 0.5,
+                "opacity": 1,
+                "alphaCutoff": 0,
+                "emissiveFactor": [0, 0, 0],
+                "emissiveIntensity": 1,
+                "displacementScale": 0.05,
+                "depthSpace": "uv",
+                "invertHeight": false,
+                "clipSilhouette": false,
+                "uvProjection": "box",
+                "uvSpace": "world",
+                "textures": {
+                  "baseColorTexture": "d4a96a210b1af85c70925ceced937cb7"
+                },
+                "config": {
+                  "side": "front",
+                  "wireframe": false,
+                  "transparent": false,
+                  "castShadow": true,
+                  "probeable": true
+                }
+              }
+            },
+            "animationMappings": null,
+            "stateMachine": null,
+            "ragdoll": null
+          },
+          {
+            "id": "deac5521ebda18a08ed6175662ffd1fe",
+            "name": "Bump 21",
+            "type": "model",
+            "position": [5.199999809265137, 0, 12.600000381469727],
+            "rotation": [-14.81613540649414, 22.346452713012695, -12.83203125],
+            "scale": [0.8999999761581421, 0.24131323397159576, 0.8999999761581421],
+            "children": [],
+            "variables": {
+              "__materialId": {
+                "type": "string",
+                "value": "8aa2f149c706ee8d1dd0cc8a3d19251d",
+                "access": "public"
+              }
+            },
+            "spawnOnStart": true,
+            "model": {
+              "geometry": {
+                "$geo": {
+                  "positions": {
+                    "n": [-0.5, -0.5, 0.5, 0.5, -0.5, 0.5, 0.5, 0.5, 0.5, -0.5, 0.5, 0.5, 0.5, -0.5, 0.5, 0.5, -0.5, -0.5, 0.5, 0.5, -0.5, 0.5, 0.5, 0.5, 0.5, -0.5, -0.5, -0.5, -0.5, -0.5, -0.5, 0.5, -0.5, 0.5, 0.5, -0.5, -0.5, -0.5, -0.5, -0.5, -0.5, 0.5, -0.5, 0.5, 0.5, -0.5, 0.5, -0.5, -0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, -0.5, -0.5, 0.5, -0.5, -0.5, -0.5, -0.5, 0.5, -0.5, -0.5, 0.5, -0.5, 0.5, -0.5, -0.5, 0.5]
+                  },
+                  "normals": {
+                    "n": [0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0]
+                  },
+                  "tangents": {
+                    "n": [1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0]
+                  },
+                  "bitangents": {
+                    "n": [0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1]
+                  },
+                  "texCoords": {
+                    "n": [0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1]
+                  },
+                  "indices": {
+                    "n": [0, 1, 2, 0, 2, 3, 4, 5, 6, 4, 6, 7, 8, 9, 10, 8, 10, 11, 12, 13, 14, 12, 14, 15, 16, 17, 18, 16, 18, 19, 20, 21, 22, 20, 22, 23],
+                    "bits": 16
+                  },
+                  "typed": true
+                }
+              },
+              "material": {
+                "type": "pbr",
+                "baseColor": [0.42, 0.55, 0.75],
+                "metallic": 0,
+                "roughness": 0.9,
+                "reflectance": 0.5,
+                "opacity": 1,
+                "alphaCutoff": 0,
+                "emissiveFactor": [0, 0, 0],
+                "emissiveIntensity": 1,
+                "displacementScale": 0.05,
+                "depthSpace": "uv",
+                "invertHeight": false,
+                "clipSilhouette": false,
+                "uvProjection": "box",
+                "uvSpace": "world",
+                "textures": {
+                  "baseColorTexture": "d4a96a210b1af85c70925ceced937cb7"
+                },
+                "config": {
+                  "side": "front",
+                  "wireframe": false,
+                  "transparent": false,
+                  "castShadow": true,
+                  "probeable": true
+                }
+              }
+            },
+            "animationMappings": null,
+            "stateMachine": null,
+            "ragdoll": null
+          },
+          {
+            "id": "feec1823cc7d31e08d2f97b5522a8ba8",
+            "name": "Bump 22",
+            "type": "model",
+            "position": [3, 0, 13.699999809265137],
+            "rotation": [-3.233694553375244, 66.70339965820312, -0.12807437777519226],
+            "scale": [0.8999999761581421, 0.2925260066986084, 0.8999999761581421],
+            "children": [],
+            "variables": {
+              "__materialId": {
+                "type": "string",
+                "value": "8aa2f149c706ee8d1dd0cc8a3d19251d",
+                "access": "public"
+              }
+            },
+            "spawnOnStart": true,
+            "model": {
+              "geometry": {
+                "$geo": {
+                  "positions": {
+                    "n": [-0.5, -0.5, 0.5, 0.5, -0.5, 0.5, 0.5, 0.5, 0.5, -0.5, 0.5, 0.5, 0.5, -0.5, 0.5, 0.5, -0.5, -0.5, 0.5, 0.5, -0.5, 0.5, 0.5, 0.5, 0.5, -0.5, -0.5, -0.5, -0.5, -0.5, -0.5, 0.5, -0.5, 0.5, 0.5, -0.5, -0.5, -0.5, -0.5, -0.5, -0.5, 0.5, -0.5, 0.5, 0.5, -0.5, 0.5, -0.5, -0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, -0.5, -0.5, 0.5, -0.5, -0.5, -0.5, -0.5, 0.5, -0.5, -0.5, 0.5, -0.5, 0.5, -0.5, -0.5, 0.5]
+                  },
+                  "normals": {
+                    "n": [0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0]
+                  },
+                  "tangents": {
+                    "n": [1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0]
+                  },
+                  "bitangents": {
+                    "n": [0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1]
+                  },
+                  "texCoords": {
+                    "n": [0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1]
+                  },
+                  "indices": {
+                    "n": [0, 1, 2, 0, 2, 3, 4, 5, 6, 4, 6, 7, 8, 9, 10, 8, 10, 11, 12, 13, 14, 12, 14, 15, 16, 17, 18, 16, 18, 19, 20, 21, 22, 20, 22, 23],
+                    "bits": 16
+                  },
+                  "typed": true
+                }
+              },
+              "material": {
+                "type": "pbr",
+                "baseColor": [0.42, 0.55, 0.75],
+                "metallic": 0,
+                "roughness": 0.9,
+                "reflectance": 0.5,
+                "opacity": 1,
+                "alphaCutoff": 0,
+                "emissiveFactor": [0, 0, 0],
+                "emissiveIntensity": 1,
+                "displacementScale": 0.05,
+                "depthSpace": "uv",
+                "invertHeight": false,
+                "clipSilhouette": false,
+                "uvProjection": "box",
+                "uvSpace": "world",
+                "textures": {
+                  "baseColorTexture": "d4a96a210b1af85c70925ceced937cb7"
+                },
+                "config": {
+                  "side": "front",
+                  "wireframe": false,
+                  "transparent": false,
+                  "castShadow": true,
+                  "probeable": true
+                }
+              }
+            },
+            "animationMappings": null,
+            "stateMachine": null,
+            "ragdoll": null
+          },
+          {
+            "id": "06ffa8c8ee76e1ed5acd617abb5a74ae",
+            "name": "Bump 23",
+            "type": "model",
+            "position": [4.099999904632568, 0, 13.699999809265137],
+            "rotation": [10.88970947265625, 21.164613723754883, -3.5926430225372314],
+            "scale": [0.8999999761581421, 0.23570728302001953, 0.8999999761581421],
+            "children": [],
+            "variables": {
+              "__materialId": {
+                "type": "string",
+                "value": "8aa2f149c706ee8d1dd0cc8a3d19251d",
+                "access": "public"
+              }
+            },
+            "spawnOnStart": true,
+            "model": {
+              "geometry": {
+                "$geo": {
+                  "positions": {
+                    "n": [-0.5, -0.5, 0.5, 0.5, -0.5, 0.5, 0.5, 0.5, 0.5, -0.5, 0.5, 0.5, 0.5, -0.5, 0.5, 0.5, -0.5, -0.5, 0.5, 0.5, -0.5, 0.5, 0.5, 0.5, 0.5, -0.5, -0.5, -0.5, -0.5, -0.5, -0.5, 0.5, -0.5, 0.5, 0.5, -0.5, -0.5, -0.5, -0.5, -0.5, -0.5, 0.5, -0.5, 0.5, 0.5, -0.5, 0.5, -0.5, -0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, -0.5, -0.5, 0.5, -0.5, -0.5, -0.5, -0.5, 0.5, -0.5, -0.5, 0.5, -0.5, 0.5, -0.5, -0.5, 0.5]
+                  },
+                  "normals": {
+                    "n": [0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0]
+                  },
+                  "tangents": {
+                    "n": [1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0]
+                  },
+                  "bitangents": {
+                    "n": [0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1]
+                  },
+                  "texCoords": {
+                    "n": [0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1]
+                  },
+                  "indices": {
+                    "n": [0, 1, 2, 0, 2, 3, 4, 5, 6, 4, 6, 7, 8, 9, 10, 8, 10, 11, 12, 13, 14, 12, 14, 15, 16, 17, 18, 16, 18, 19, 20, 21, 22, 20, 22, 23],
+                    "bits": 16
+                  },
+                  "typed": true
+                }
+              },
+              "material": {
+                "type": "pbr",
+                "baseColor": [0.42, 0.55, 0.75],
+                "metallic": 0,
+                "roughness": 0.9,
+                "reflectance": 0.5,
+                "opacity": 1,
+                "alphaCutoff": 0,
+                "emissiveFactor": [0, 0, 0],
+                "emissiveIntensity": 1,
+                "displacementScale": 0.05,
+                "depthSpace": "uv",
+                "invertHeight": false,
+                "clipSilhouette": false,
+                "uvProjection": "box",
+                "uvSpace": "world",
+                "textures": {
+                  "baseColorTexture": "d4a96a210b1af85c70925ceced937cb7"
+                },
+                "config": {
+                  "side": "front",
+                  "wireframe": false,
+                  "transparent": false,
+                  "castShadow": true,
+                  "probeable": true
+                }
+              }
+            },
+            "animationMappings": null,
+            "stateMachine": null,
+            "ragdoll": null
+          },
+          {
+            "id": "5a414271a6998ed54186d11fdba711f0",
+            "name": "Bump 24",
+            "type": "model",
+            "position": [5.199999809265137, 0, 13.699999809265137],
+            "rotation": [-0.3593687117099762, 0.26727965474128723, 13.819769859313965],
+            "scale": [0.8999999761581421, 0.21775589883327484, 0.8999999761581421],
+            "children": [],
+            "variables": {
+              "__materialId": {
+                "type": "string",
+                "value": "8aa2f149c706ee8d1dd0cc8a3d19251d",
+                "access": "public"
+              }
+            },
+            "spawnOnStart": true,
+            "model": {
+              "geometry": {
+                "$geo": {
+                  "positions": {
+                    "n": [-0.5, -0.5, 0.5, 0.5, -0.5, 0.5, 0.5, 0.5, 0.5, -0.5, 0.5, 0.5, 0.5, -0.5, 0.5, 0.5, -0.5, -0.5, 0.5, 0.5, -0.5, 0.5, 0.5, 0.5, 0.5, -0.5, -0.5, -0.5, -0.5, -0.5, -0.5, 0.5, -0.5, 0.5, 0.5, -0.5, -0.5, -0.5, -0.5, -0.5, -0.5, 0.5, -0.5, 0.5, 0.5, -0.5, 0.5, -0.5, -0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, -0.5, -0.5, 0.5, -0.5, -0.5, -0.5, -0.5, 0.5, -0.5, -0.5, 0.5, -0.5, 0.5, -0.5, -0.5, 0.5]
+                  },
+                  "normals": {
+                    "n": [0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0]
+                  },
+                  "tangents": {
+                    "n": [1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0]
+                  },
+                  "bitangents": {
+                    "n": [0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1]
+                  },
+                  "texCoords": {
+                    "n": [0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1]
+                  },
+                  "indices": {
+                    "n": [0, 1, 2, 0, 2, 3, 4, 5, 6, 4, 6, 7, 8, 9, 10, 8, 10, 11, 12, 13, 14, 12, 14, 15, 16, 17, 18, 16, 18, 19, 20, 21, 22, 20, 22, 23],
+                    "bits": 16
+                  },
+                  "typed": true
+                }
+              },
+              "material": {
+                "type": "pbr",
+                "baseColor": [0.42, 0.55, 0.75],
+                "metallic": 0,
+                "roughness": 0.9,
+                "reflectance": 0.5,
+                "opacity": 1,
+                "alphaCutoff": 0,
+                "emissiveFactor": [0, 0, 0],
+                "emissiveIntensity": 1,
+                "displacementScale": 0.05,
+                "depthSpace": "uv",
+                "invertHeight": false,
+                "clipSilhouette": false,
+                "uvProjection": "box",
+                "uvSpace": "world",
+                "textures": {
+                  "baseColorTexture": "d4a96a210b1af85c70925ceced937cb7"
+                },
+                "config": {
+                  "side": "front",
+                  "wireframe": false,
+                  "transparent": false,
+                  "castShadow": true,
+                  "probeable": true
+                }
+              }
+            },
+            "animationMappings": null,
+            "stateMachine": null,
+            "ragdoll": null
+          }
+        ],
         "variables": {},
         "spawnOnStart": true,
         "collider": {
+          "mass": 0,
           "linearDamping": 0.25,
           "angularDamping": 0.25,
           "linearConstraints": [1, 1, 1],
           "angularConstraints": [1, 1, 1],
-          "friction": 0.3,
+          "friction": 0.7,
           "restitution": 0,
           "simulatePhysics": true,
           "groundProbeDistance": 0,
@@ -1998,7 +3905,6 @@
           "canSleep": false,
           "layer": 32,
           "mask": -1,
-          "mass": 0,
           "shapes": [
             {
               "type": "box",
@@ -2337,1689 +4243,25 @@
               "rotation": [-0.3593686874595832, 0.26727963785247133, 13.81976973266231]
             }
           ]
-        },
-        "children": [
-          {
-            "id": "850368fd552020507ab1e6cb4c4afbd6",
-            "name": "Stairs 15 cm",
-            "type": "model",
-            "position": [-5, 0.75, 7.5],
-            "rotation": [0, 0, 0],
-            "scale": [2.5, 1.5, 3],
-            "children": [],
-            "spawnOnStart": true,
-            "variables": {
-              "__materialId": {
-                "type": "string",
-                "value": "30bd88eb2dd6719a3fbfe29ebc48047a",
-                "access": "public"
-              }
-            },
-            "model": {
-              "geometry": {
-                "$geo": {
-                  "positions": {
-                    "n": [0.5, -0.5, -0.5, -0.5, -0.5, -0.5, -0.5, -0.4000000059604645, -0.5, 0.5, -0.4000000059604645, -0.5, -0.5, -0.4000000059604645, -0.5, -0.5, -0.4000000059604645, -0.4000000059604645, 0.5, -0.4000000059604645, -0.4000000059604645, 0.5, -0.4000000059604645, -0.5, -0.5, -0.5, -0.5, -0.5, -0.5, -0.4000000059604645, -0.5, -0.4000000059604645, -0.4000000059604645, -0.5, -0.4000000059604645, -0.5, 0.5, -0.5, -0.5, 0.5, -0.4000000059604645, -0.5, 0.5, -0.4000000059604645, -0.4000000059604645, 0.5, -0.5, -0.4000000059604645, 0.5, -0.4000000059604645, -0.4000000059604645, -0.5, -0.4000000059604645, -0.4000000059604645, -0.5, -0.30000001192092896, -0.4000000059604645, 0.5, -0.30000001192092896, -0.4000000059604645, -0.5, -0.30000001192092896, -0.4000000059604645, -0.5, -0.30000001192092896, -0.30000001192092896, 0.5, -0.30000001192092896, -0.30000001192092896, 0.5, -0.30000001192092896, -0.4000000059604645, -0.5, -0.5, -0.4000000059604645, -0.5, -0.5, -0.30000001192092896, -0.5, -0.30000001192092896, -0.30000001192092896, -0.5, -0.30000001192092896, -0.4000000059604645, 0.5, -0.5, -0.4000000059604645, 0.5, -0.30000001192092896, -0.4000000059604645, 0.5, -0.30000001192092896, -0.30000001192092896, 0.5, -0.5, -0.30000001192092896, 0.5, -0.30000001192092896, -0.30000001192092896, -0.5, -0.30000001192092896, -0.30000001192092896, -0.5, -0.20000000298023224, -0.30000001192092896, 0.5, -0.20000000298023224, -0.30000001192092896, -0.5, -0.20000000298023224, -0.30000001192092896, -0.5, -0.20000000298023224, -0.20000000298023224, 0.5, -0.20000000298023224, -0.20000000298023224, 0.5, -0.20000000298023224, -0.30000001192092896, -0.5, -0.5, -0.30000001192092896, -0.5, -0.5, -0.20000000298023224, -0.5, -0.20000000298023224, -0.20000000298023224, -0.5, -0.20000000298023224, -0.30000001192092896, 0.5, -0.5, -0.30000001192092896, 0.5, -0.20000000298023224, -0.30000001192092896, 0.5, -0.20000000298023224, -0.20000000298023224, 0.5, -0.5, -0.20000000298023224, 0.5, -0.20000000298023224, -0.20000000298023224, -0.5, -0.20000000298023224, -0.20000000298023224, -0.5, -0.10000000149011612, -0.20000000298023224, 0.5, -0.10000000149011612, -0.20000000298023224, -0.5, -0.10000000149011612, -0.20000000298023224, -0.5, -0.10000000149011612, -0.10000000149011612, 0.5, -0.10000000149011612, -0.10000000149011612, 0.5, -0.10000000149011612, -0.20000000298023224, -0.5, -0.5, -0.20000000298023224, -0.5, -0.5, -0.10000000149011612, -0.5, -0.10000000149011612, -0.10000000149011612, -0.5, -0.10000000149011612, -0.20000000298023224, 0.5, -0.5, -0.20000000298023224, 0.5, -0.10000000149011612, -0.20000000298023224, 0.5, -0.10000000149011612, -0.10000000149011612, 0.5, -0.5, -0.10000000149011612, 0.5, -0.10000000149011612, -0.10000000149011612, -0.5, -0.10000000149011612, -0.10000000149011612, -0.5, 0, -0.10000000149011612, 0.5, 0, -0.10000000149011612, -0.5, 0, -0.10000000149011612, -0.5, 0, 0, 0.5, 0, 0, 0.5, 0, -0.10000000149011612, -0.5, -0.5, -0.10000000149011612, -0.5, -0.5, 0, -0.5, 0, 0, -0.5, 0, -0.10000000149011612, 0.5, -0.5, -0.10000000149011612, 0.5, 0, -0.10000000149011612, 0.5, 0, 0, 0.5, -0.5, 0, 0.5, 0, 0, -0.5, 0, 0, -0.5, 0.10000000149011612, 0, 0.5, 0.10000000149011612, 0, -0.5, 0.10000000149011612, 0, -0.5, 0.10000000149011612, 0.10000000149011612, 0.5, 0.10000000149011612, 0.10000000149011612, 0.5, 0.10000000149011612, 0, -0.5, -0.5, 0, -0.5, -0.5, 0.10000000149011612, -0.5, 0.10000000149011612, 0.10000000149011612, -0.5, 0.10000000149011612, 0, 0.5, -0.5, 0, 0.5, 0.10000000149011612, 0, 0.5, 0.10000000149011612, 0.10000000149011612, 0.5, -0.5, 0.10000000149011612, 0.5, 0.10000000149011612, 0.10000000149011612, -0.5, 0.10000000149011612, 0.10000000149011612, -0.5, 0.20000000298023224, 0.10000000149011612, 0.5, 0.20000000298023224, 0.10000000149011612, -0.5, 0.20000000298023224, 0.10000000149011612, -0.5, 0.20000000298023224, 0.20000000298023224, 0.5, 0.20000000298023224, 0.20000000298023224, 0.5, 0.20000000298023224, 0.10000000149011612, -0.5, -0.5, 0.10000000149011612, -0.5, -0.5, 0.20000000298023224, -0.5, 0.20000000298023224, 0.20000000298023224, -0.5, 0.20000000298023224, 0.10000000149011612, 0.5, -0.5, 0.10000000149011612, 0.5, 0.20000000298023224, 0.10000000149011612, 0.5, 0.20000000298023224, 0.20000000298023224, 0.5, -0.5, 0.20000000298023224, 0.5, 0.20000000298023224, 0.20000000298023224, -0.5, 0.20000000298023224, 0.20000000298023224, -0.5, 0.30000001192092896, 0.20000000298023224, 0.5, 0.30000001192092896, 0.20000000298023224, -0.5, 0.30000001192092896, 0.20000000298023224, -0.5, 0.30000001192092896, 0.30000001192092896, 0.5, 0.30000001192092896, 0.30000001192092896, 0.5, 0.30000001192092896, 0.20000000298023224, -0.5, -0.5, 0.20000000298023224, -0.5, -0.5, 0.30000001192092896, -0.5, 0.30000001192092896, 0.30000001192092896, -0.5, 0.30000001192092896, 0.20000000298023224, 0.5, -0.5, 0.20000000298023224, 0.5, 0.30000001192092896, 0.20000000298023224, 0.5, 0.30000001192092896, 0.30000001192092896, 0.5, -0.5, 0.30000001192092896, 0.5, 0.30000001192092896, 0.30000001192092896, -0.5, 0.30000001192092896, 0.30000001192092896, -0.5, 0.4000000059604645, 0.30000001192092896, 0.5, 0.4000000059604645, 0.30000001192092896, -0.5, 0.4000000059604645, 0.30000001192092896, -0.5, 0.4000000059604645, 0.4000000059604645, 0.5, 0.4000000059604645, 0.4000000059604645, 0.5, 0.4000000059604645, 0.30000001192092896, -0.5, -0.5, 0.30000001192092896, -0.5, -0.5, 0.4000000059604645, -0.5, 0.4000000059604645, 0.4000000059604645, -0.5, 0.4000000059604645, 0.30000001192092896, 0.5, -0.5, 0.30000001192092896, 0.5, 0.4000000059604645, 0.30000001192092896, 0.5, 0.4000000059604645, 0.4000000059604645, 0.5, -0.5, 0.4000000059604645, 0.5, 0.4000000059604645, 0.4000000059604645, -0.5, 0.4000000059604645, 0.4000000059604645, -0.5, 0.5, 0.4000000059604645, 0.5, 0.5, 0.4000000059604645, -0.5, 0.5, 0.4000000059604645, -0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.4000000059604645, -0.5, -0.5, 0.4000000059604645, -0.5, -0.5, 0.5, -0.5, 0.5, 0.5, -0.5, 0.5, 0.4000000059604645, 0.5, -0.5, 0.4000000059604645, 0.5, 0.5, 0.4000000059604645, 0.5, 0.5, 0.5, 0.5, -0.5, 0.5, -0.5, -0.5, 0.5, 0.5, -0.5, 0.5, 0.5, 0.5, 0.5, -0.5, 0.5, 0.5, -0.5, -0.5, -0.5, 0.5, -0.5, -0.5, 0.5, -0.5, 0.5, -0.5, -0.5, 0.5]
-                  },
-                  "normals": {
-                    "n": [0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0]
-                  },
-                  "tangents": {
-                    "n": [-1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0]
-                  },
-                  "bitangents": {
-                    "n": [0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1]
-                  },
-                  "texCoords": {
-                    "n": [0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1]
-                  },
-                  "indices": {
-                    "n": [0, 1, 2, 0, 2, 3, 4, 5, 6, 4, 6, 7, 8, 9, 10, 8, 10, 11, 12, 13, 14, 12, 14, 15, 16, 17, 18, 16, 18, 19, 20, 21, 22, 20, 22, 23, 24, 25, 26, 24, 26, 27, 28, 29, 30, 28, 30, 31, 32, 33, 34, 32, 34, 35, 36, 37, 38, 36, 38, 39, 40, 41, 42, 40, 42, 43, 44, 45, 46, 44, 46, 47, 48, 49, 50, 48, 50, 51, 52, 53, 54, 52, 54, 55, 56, 57, 58, 56, 58, 59, 60, 61, 62, 60, 62, 63, 64, 65, 66, 64, 66, 67, 68, 69, 70, 68, 70, 71, 72, 73, 74, 72, 74, 75, 76, 77, 78, 76, 78, 79, 80, 81, 82, 80, 82, 83, 84, 85, 86, 84, 86, 87, 88, 89, 90, 88, 90, 91, 92, 93, 94, 92, 94, 95, 96, 97, 98, 96, 98, 99, 100, 101, 102, 100, 102, 103, 104, 105, 106, 104, 106, 107, 108, 109, 110, 108, 110, 111, 112, 113, 114, 112, 114, 115, 116, 117, 118, 116, 118, 119, 120, 121, 122, 120, 122, 123, 124, 125, 126, 124, 126, 127, 128, 129, 130, 128, 130, 131, 132, 133, 134, 132, 134, 135, 136, 137, 138, 136, 138, 139, 140, 141, 142, 140, 142, 143, 144, 145, 146, 144, 146, 147, 148, 149, 150, 148, 150, 151, 152, 153, 154, 152, 154, 155, 156, 157, 158, 156, 158, 159, 160, 161, 162, 160, 162, 163, 164, 165, 166, 164, 166, 167],
-                    "bits": 16
-                  },
-                  "typed": true
-                }
-              },
-              "material": {
-                "type": "pbr",
-                "baseColor": [0.85, 0.55, 0.32],
-                "metallic": 0,
-                "roughness": 0.9,
-                "opacity": 1,
-                "emissiveFactor": [0, 0, 0],
-                "textures": {
-                  "baseColorTexture": "d4a96a210b1af85c70925ceced937cb7"
-                },
-                "config": {
-                  "side": "front",
-                  "wireframe": false,
-                  "transparent": false,
-                  "castShadow": true,
-                  "probeable": true
-                },
-                "uvProjection": "box",
-                "uvSpace": "world",
-                "uvWorldSize": 1
-              }
-            }
-          },
-          {
-            "id": "35d00d69196fb54c5c6011c3db0b03c6",
-            "name": "Stairs 20 cm",
-            "type": "model",
-            "position": [-1, 0.800000011920929, 7.199999809265137],
-            "rotation": [0, 0, 0],
-            "scale": [2.5, 1.600000023841858, 2.4000000953674316],
-            "children": [],
-            "spawnOnStart": true,
-            "variables": {
-              "__materialId": {
-                "type": "string",
-                "value": "30bd88eb2dd6719a3fbfe29ebc48047a",
-                "access": "public"
-              }
-            },
-            "model": {
-              "geometry": {
-                "$geo": {
-                  "positions": {
-                    "n": [0.5, -0.5, -0.5, -0.5, -0.5, -0.5, -0.5, -0.375, -0.5, 0.5, -0.375, -0.5, -0.5, -0.375, -0.5, -0.5, -0.375, -0.375, 0.5, -0.375, -0.375, 0.5, -0.375, -0.5, -0.5, -0.5, -0.5, -0.5, -0.5, -0.375, -0.5, -0.375, -0.375, -0.5, -0.375, -0.5, 0.5, -0.5, -0.5, 0.5, -0.375, -0.5, 0.5, -0.375, -0.375, 0.5, -0.5, -0.375, 0.5, -0.375, -0.375, -0.5, -0.375, -0.375, -0.5, -0.25, -0.375, 0.5, -0.25, -0.375, -0.5, -0.25, -0.375, -0.5, -0.25, -0.25, 0.5, -0.25, -0.25, 0.5, -0.25, -0.375, -0.5, -0.5, -0.375, -0.5, -0.5, -0.25, -0.5, -0.25, -0.25, -0.5, -0.25, -0.375, 0.5, -0.5, -0.375, 0.5, -0.25, -0.375, 0.5, -0.25, -0.25, 0.5, -0.5, -0.25, 0.5, -0.25, -0.25, -0.5, -0.25, -0.25, -0.5, -0.125, -0.25, 0.5, -0.125, -0.25, -0.5, -0.125, -0.25, -0.5, -0.125, -0.125, 0.5, -0.125, -0.125, 0.5, -0.125, -0.25, -0.5, -0.5, -0.25, -0.5, -0.5, -0.125, -0.5, -0.125, -0.125, -0.5, -0.125, -0.25, 0.5, -0.5, -0.25, 0.5, -0.125, -0.25, 0.5, -0.125, -0.125, 0.5, -0.5, -0.125, 0.5, -0.125, -0.125, -0.5, -0.125, -0.125, -0.5, 0, -0.125, 0.5, 0, -0.125, -0.5, 0, -0.125, -0.5, 0, 0, 0.5, 0, 0, 0.5, 0, -0.125, -0.5, -0.5, -0.125, -0.5, -0.5, 0, -0.5, 0, 0, -0.5, 0, -0.125, 0.5, -0.5, -0.125, 0.5, 0, -0.125, 0.5, 0, 0, 0.5, -0.5, 0, 0.5, 0, 0, -0.5, 0, 0, -0.5, 0.125, 0, 0.5, 0.125, 0, -0.5, 0.125, 0, -0.5, 0.125, 0.125, 0.5, 0.125, 0.125, 0.5, 0.125, 0, -0.5, -0.5, 0, -0.5, -0.5, 0.125, -0.5, 0.125, 0.125, -0.5, 0.125, 0, 0.5, -0.5, 0, 0.5, 0.125, 0, 0.5, 0.125, 0.125, 0.5, -0.5, 0.125, 0.5, 0.125, 0.125, -0.5, 0.125, 0.125, -0.5, 0.25, 0.125, 0.5, 0.25, 0.125, -0.5, 0.25, 0.125, -0.5, 0.25, 0.25, 0.5, 0.25, 0.25, 0.5, 0.25, 0.125, -0.5, -0.5, 0.125, -0.5, -0.5, 0.25, -0.5, 0.25, 0.25, -0.5, 0.25, 0.125, 0.5, -0.5, 0.125, 0.5, 0.25, 0.125, 0.5, 0.25, 0.25, 0.5, -0.5, 0.25, 0.5, 0.25, 0.25, -0.5, 0.25, 0.25, -0.5, 0.375, 0.25, 0.5, 0.375, 0.25, -0.5, 0.375, 0.25, -0.5, 0.375, 0.375, 0.5, 0.375, 0.375, 0.5, 0.375, 0.25, -0.5, -0.5, 0.25, -0.5, -0.5, 0.375, -0.5, 0.375, 0.375, -0.5, 0.375, 0.25, 0.5, -0.5, 0.25, 0.5, 0.375, 0.25, 0.5, 0.375, 0.375, 0.5, -0.5, 0.375, 0.5, 0.375, 0.375, -0.5, 0.375, 0.375, -0.5, 0.5, 0.375, 0.5, 0.5, 0.375, -0.5, 0.5, 0.375, -0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.375, -0.5, -0.5, 0.375, -0.5, -0.5, 0.5, -0.5, 0.5, 0.5, -0.5, 0.5, 0.375, 0.5, -0.5, 0.375, 0.5, 0.5, 0.375, 0.5, 0.5, 0.5, 0.5, -0.5, 0.5, -0.5, -0.5, 0.5, 0.5, -0.5, 0.5, 0.5, 0.5, 0.5, -0.5, 0.5, 0.5, -0.5, -0.5, -0.5, 0.5, -0.5, -0.5, 0.5, -0.5, 0.5, -0.5, -0.5, 0.5]
-                  },
-                  "normals": {
-                    "n": [0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0]
-                  },
-                  "tangents": {
-                    "n": [-1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0]
-                  },
-                  "bitangents": {
-                    "n": [0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1]
-                  },
-                  "texCoords": {
-                    "n": [0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1]
-                  },
-                  "indices": {
-                    "n": [0, 1, 2, 0, 2, 3, 4, 5, 6, 4, 6, 7, 8, 9, 10, 8, 10, 11, 12, 13, 14, 12, 14, 15, 16, 17, 18, 16, 18, 19, 20, 21, 22, 20, 22, 23, 24, 25, 26, 24, 26, 27, 28, 29, 30, 28, 30, 31, 32, 33, 34, 32, 34, 35, 36, 37, 38, 36, 38, 39, 40, 41, 42, 40, 42, 43, 44, 45, 46, 44, 46, 47, 48, 49, 50, 48, 50, 51, 52, 53, 54, 52, 54, 55, 56, 57, 58, 56, 58, 59, 60, 61, 62, 60, 62, 63, 64, 65, 66, 64, 66, 67, 68, 69, 70, 68, 70, 71, 72, 73, 74, 72, 74, 75, 76, 77, 78, 76, 78, 79, 80, 81, 82, 80, 82, 83, 84, 85, 86, 84, 86, 87, 88, 89, 90, 88, 90, 91, 92, 93, 94, 92, 94, 95, 96, 97, 98, 96, 98, 99, 100, 101, 102, 100, 102, 103, 104, 105, 106, 104, 106, 107, 108, 109, 110, 108, 110, 111, 112, 113, 114, 112, 114, 115, 116, 117, 118, 116, 118, 119, 120, 121, 122, 120, 122, 123, 124, 125, 126, 124, 126, 127, 128, 129, 130, 128, 130, 131, 132, 133, 134, 132, 134, 135],
-                    "bits": 16
-                  },
-                  "typed": true
-                }
-              },
-              "material": {
-                "type": "pbr",
-                "baseColor": [0.85, 0.55, 0.32],
-                "metallic": 0,
-                "roughness": 0.9,
-                "opacity": 1,
-                "emissiveFactor": [0, 0, 0],
-                "textures": {
-                  "baseColorTexture": "d4a96a210b1af85c70925ceced937cb7"
-                },
-                "config": {
-                  "side": "front",
-                  "wireframe": false,
-                  "transparent": false,
-                  "castShadow": true,
-                  "probeable": true
-                },
-                "uvProjection": "box",
-                "uvSpace": "world",
-                "uvWorldSize": 1
-              }
-            }
-          },
-          {
-            "id": "b5514a0609be7ccf1b32fee06e2b03f1",
-            "name": "Bump 1",
-            "type": "model",
-            "position": [3, 0, 6],
-            "rotation": [-2.5294301509857178, 18.949583053588867, 2.752749443054199],
-            "scale": [0.8999999761581421, 0.3381146788597107, 0.8999999761581421],
-            "children": [],
-            "spawnOnStart": true,
-            "variables": {
-              "__materialId": {
-                "type": "string",
-                "value": "8aa2f149c706ee8d1dd0cc8a3d19251d",
-                "access": "public"
-              }
-            },
-            "model": {
-              "geometry": {
-                "$geo": {
-                  "positions": {
-                    "n": [-0.5, -0.5, 0.5, 0.5, -0.5, 0.5, 0.5, 0.5, 0.5, -0.5, 0.5, 0.5, 0.5, -0.5, 0.5, 0.5, -0.5, -0.5, 0.5, 0.5, -0.5, 0.5, 0.5, 0.5, 0.5, -0.5, -0.5, -0.5, -0.5, -0.5, -0.5, 0.5, -0.5, 0.5, 0.5, -0.5, -0.5, -0.5, -0.5, -0.5, -0.5, 0.5, -0.5, 0.5, 0.5, -0.5, 0.5, -0.5, -0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, -0.5, -0.5, 0.5, -0.5, -0.5, -0.5, -0.5, 0.5, -0.5, -0.5, 0.5, -0.5, 0.5, -0.5, -0.5, 0.5]
-                  },
-                  "normals": {
-                    "n": [0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0]
-                  },
-                  "tangents": {
-                    "n": [1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0]
-                  },
-                  "bitangents": {
-                    "n": [0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1]
-                  },
-                  "texCoords": {
-                    "n": [0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1]
-                  },
-                  "indices": {
-                    "n": [0, 1, 2, 0, 2, 3, 4, 5, 6, 4, 6, 7, 8, 9, 10, 8, 10, 11, 12, 13, 14, 12, 14, 15, 16, 17, 18, 16, 18, 19, 20, 21, 22, 20, 22, 23],
-                    "bits": 16
-                  },
-                  "typed": true
-                }
-              },
-              "material": {
-                "type": "pbr",
-                "baseColor": [0.42, 0.55, 0.75],
-                "metallic": 0,
-                "roughness": 0.9,
-                "opacity": 1,
-                "emissiveFactor": [0, 0, 0],
-                "textures": {
-                  "baseColorTexture": "d4a96a210b1af85c70925ceced937cb7"
-                },
-                "config": {
-                  "side": "front",
-                  "wireframe": false,
-                  "transparent": false,
-                  "castShadow": true,
-                  "probeable": true
-                },
-                "uvProjection": "box",
-                "uvSpace": "world",
-                "uvWorldSize": 1
-              }
-            }
-          },
-          {
-            "id": "b45148730abe7e621e3303996b2aff38",
-            "name": "Bump 2",
-            "type": "model",
-            "position": [4.099999904632568, 0, 6],
-            "rotation": [6.2471699714660645, 67.95673370361328, 1.0620501041412354],
-            "scale": [0.8999999761581421, 0.24939684569835663, 0.8999999761581421],
-            "children": [],
-            "spawnOnStart": true,
-            "variables": {
-              "__materialId": {
-                "type": "string",
-                "value": "8aa2f149c706ee8d1dd0cc8a3d19251d",
-                "access": "public"
-              }
-            },
-            "model": {
-              "geometry": {
-                "$geo": {
-                  "positions": {
-                    "n": [-0.5, -0.5, 0.5, 0.5, -0.5, 0.5, 0.5, 0.5, 0.5, -0.5, 0.5, 0.5, 0.5, -0.5, 0.5, 0.5, -0.5, -0.5, 0.5, 0.5, -0.5, 0.5, 0.5, 0.5, 0.5, -0.5, -0.5, -0.5, -0.5, -0.5, -0.5, 0.5, -0.5, 0.5, 0.5, -0.5, -0.5, -0.5, -0.5, -0.5, -0.5, 0.5, -0.5, 0.5, 0.5, -0.5, 0.5, -0.5, -0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, -0.5, -0.5, 0.5, -0.5, -0.5, -0.5, -0.5, 0.5, -0.5, -0.5, 0.5, -0.5, 0.5, -0.5, -0.5, 0.5]
-                  },
-                  "normals": {
-                    "n": [0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0]
-                  },
-                  "tangents": {
-                    "n": [1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0]
-                  },
-                  "bitangents": {
-                    "n": [0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1]
-                  },
-                  "texCoords": {
-                    "n": [0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1]
-                  },
-                  "indices": {
-                    "n": [0, 1, 2, 0, 2, 3, 4, 5, 6, 4, 6, 7, 8, 9, 10, 8, 10, 11, 12, 13, 14, 12, 14, 15, 16, 17, 18, 16, 18, 19, 20, 21, 22, 20, 22, 23],
-                    "bits": 16
-                  },
-                  "typed": true
-                }
-              },
-              "material": {
-                "type": "pbr",
-                "baseColor": [0.42, 0.55, 0.75],
-                "metallic": 0,
-                "roughness": 0.9,
-                "opacity": 1,
-                "emissiveFactor": [0, 0, 0],
-                "textures": {
-                  "baseColorTexture": "d4a96a210b1af85c70925ceced937cb7"
-                },
-                "config": {
-                  "side": "front",
-                  "wireframe": false,
-                  "transparent": false,
-                  "castShadow": true,
-                  "probeable": true
-                },
-                "uvProjection": "box",
-                "uvSpace": "world",
-                "uvWorldSize": 1
-              }
-            }
-          },
-          {
-            "id": "b35146e00bbe7ff51d3302066c2b00cb",
-            "name": "Bump 3",
-            "type": "model",
-            "position": [5.199999809265137, 0, 6],
-            "rotation": [9.004890441894531, 21.78042984008789, -3.575392484664917],
-            "scale": [0.8999999761581421, 0.2953871786594391, 0.8999999761581421],
-            "children": [],
-            "spawnOnStart": true,
-            "variables": {
-              "__materialId": {
-                "type": "string",
-                "value": "8aa2f149c706ee8d1dd0cc8a3d19251d",
-                "access": "public"
-              }
-            },
-            "model": {
-              "geometry": {
-                "$geo": {
-                  "positions": {
-                    "n": [-0.5, -0.5, 0.5, 0.5, -0.5, 0.5, 0.5, 0.5, 0.5, -0.5, 0.5, 0.5, 0.5, -0.5, 0.5, 0.5, -0.5, -0.5, 0.5, 0.5, -0.5, 0.5, 0.5, 0.5, 0.5, -0.5, -0.5, -0.5, -0.5, -0.5, -0.5, 0.5, -0.5, 0.5, 0.5, -0.5, -0.5, -0.5, -0.5, -0.5, -0.5, 0.5, -0.5, 0.5, 0.5, -0.5, 0.5, -0.5, -0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, -0.5, -0.5, 0.5, -0.5, -0.5, -0.5, -0.5, 0.5, -0.5, -0.5, 0.5, -0.5, 0.5, -0.5, -0.5, 0.5]
-                  },
-                  "normals": {
-                    "n": [0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0]
-                  },
-                  "tangents": {
-                    "n": [1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0]
-                  },
-                  "bitangents": {
-                    "n": [0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1]
-                  },
-                  "texCoords": {
-                    "n": [0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1]
-                  },
-                  "indices": {
-                    "n": [0, 1, 2, 0, 2, 3, 4, 5, 6, 4, 6, 7, 8, 9, 10, 8, 10, 11, 12, 13, 14, 12, 14, 15, 16, 17, 18, 16, 18, 19, 20, 21, 22, 20, 22, 23],
-                    "bits": 16
-                  },
-                  "typed": true
-                }
-              },
-              "material": {
-                "type": "pbr",
-                "baseColor": [0.42, 0.55, 0.75],
-                "metallic": 0,
-                "roughness": 0.9,
-                "opacity": 1,
-                "emissiveFactor": [0, 0, 0],
-                "textures": {
-                  "baseColorTexture": "d4a96a210b1af85c70925ceced937cb7"
-                },
-                "config": {
-                  "side": "front",
-                  "wireframe": false,
-                  "transparent": false,
-                  "castShadow": true,
-                  "probeable": true
-                },
-                "uvProjection": "box",
-                "uvSpace": "world",
-                "uvWorldSize": 1
-              }
-            }
-          },
-          {
-            "id": "ba5151e504be74f0203306bf712b08aa",
-            "name": "Bump 4",
-            "type": "model",
-            "position": [3, 0, 7.099999904632568],
-            "rotation": [-12.932642936706543, 61.55186080932617, -0.9306929707527161],
-            "scale": [0.8999999761581421, 0.3047068417072296, 0.8999999761581421],
-            "children": [],
-            "spawnOnStart": true,
-            "variables": {
-              "__materialId": {
-                "type": "string",
-                "value": "8aa2f149c706ee8d1dd0cc8a3d19251d",
-                "access": "public"
-              }
-            },
-            "model": {
-              "geometry": {
-                "$geo": {
-                  "positions": {
-                    "n": [-0.5, -0.5, 0.5, 0.5, -0.5, 0.5, 0.5, 0.5, 0.5, -0.5, 0.5, 0.5, 0.5, -0.5, 0.5, 0.5, -0.5, -0.5, 0.5, 0.5, -0.5, 0.5, 0.5, 0.5, 0.5, -0.5, -0.5, -0.5, -0.5, -0.5, -0.5, 0.5, -0.5, 0.5, 0.5, -0.5, -0.5, -0.5, -0.5, -0.5, -0.5, 0.5, -0.5, 0.5, 0.5, -0.5, 0.5, -0.5, -0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, -0.5, -0.5, 0.5, -0.5, -0.5, -0.5, -0.5, 0.5, -0.5, -0.5, 0.5, -0.5, 0.5, -0.5, -0.5, 0.5]
-                  },
-                  "normals": {
-                    "n": [0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0]
-                  },
-                  "tangents": {
-                    "n": [1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0]
-                  },
-                  "bitangents": {
-                    "n": [0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1]
-                  },
-                  "texCoords": {
-                    "n": [0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1]
-                  },
-                  "indices": {
-                    "n": [0, 1, 2, 0, 2, 3, 4, 5, 6, 4, 6, 7, 8, 9, 10, 8, 10, 11, 12, 13, 14, 12, 14, 15, 16, 17, 18, 16, 18, 19, 20, 21, 22, 20, 22, 23],
-                    "bits": 16
-                  },
-                  "typed": true
-                }
-              },
-              "material": {
-                "type": "pbr",
-                "baseColor": [0.42, 0.55, 0.75],
-                "metallic": 0,
-                "roughness": 0.9,
-                "opacity": 1,
-                "emissiveFactor": [0, 0, 0],
-                "textures": {
-                  "baseColorTexture": "d4a96a210b1af85c70925ceced937cb7"
-                },
-                "config": {
-                  "side": "front",
-                  "wireframe": false,
-                  "transparent": false,
-                  "castShadow": true,
-                  "probeable": true
-                },
-                "uvProjection": "box",
-                "uvSpace": "world",
-                "uvWorldSize": 1
-              }
-            }
-          },
-          {
-            "id": "b951505205be76831f33052c722b0a3d",
-            "name": "Bump 5",
-            "type": "model",
-            "position": [4.099999904632568, 0, 7.099999904632568],
-            "rotation": [-12.875473022460938, 46.174991607666016, 14.445966720581055],
-            "scale": [0.8999999761581421, 0.3211113512516022, 0.8999999761581421],
-            "children": [],
-            "spawnOnStart": true,
-            "variables": {
-              "__materialId": {
-                "type": "string",
-                "value": "8aa2f149c706ee8d1dd0cc8a3d19251d",
-                "access": "public"
-              }
-            },
-            "model": {
-              "geometry": {
-                "$geo": {
-                  "positions": {
-                    "n": [-0.5, -0.5, 0.5, 0.5, -0.5, 0.5, 0.5, 0.5, 0.5, -0.5, 0.5, 0.5, 0.5, -0.5, 0.5, 0.5, -0.5, -0.5, 0.5, 0.5, -0.5, 0.5, 0.5, 0.5, 0.5, -0.5, -0.5, -0.5, -0.5, -0.5, -0.5, 0.5, -0.5, 0.5, 0.5, -0.5, -0.5, -0.5, -0.5, -0.5, -0.5, 0.5, -0.5, 0.5, 0.5, -0.5, 0.5, -0.5, -0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, -0.5, -0.5, 0.5, -0.5, -0.5, -0.5, -0.5, 0.5, -0.5, -0.5, 0.5, -0.5, 0.5, -0.5, -0.5, 0.5]
-                  },
-                  "normals": {
-                    "n": [0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0]
-                  },
-                  "tangents": {
-                    "n": [1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0]
-                  },
-                  "bitangents": {
-                    "n": [0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1]
-                  },
-                  "texCoords": {
-                    "n": [0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1]
-                  },
-                  "indices": {
-                    "n": [0, 1, 2, 0, 2, 3, 4, 5, 6, 4, 6, 7, 8, 9, 10, 8, 10, 11, 12, 13, 14, 12, 14, 15, 16, 17, 18, 16, 18, 19, 20, 21, 22, 20, 22, 23],
-                    "bits": 16
-                  },
-                  "typed": true
-                }
-              },
-              "material": {
-                "type": "pbr",
-                "baseColor": [0.42, 0.55, 0.75],
-                "metallic": 0,
-                "roughness": 0.9,
-                "opacity": 1,
-                "emissiveFactor": [0, 0, 0],
-                "textures": {
-                  "baseColorTexture": "d4a96a210b1af85c70925ceced937cb7"
-                },
-                "config": {
-                  "side": "front",
-                  "wireframe": false,
-                  "transparent": false,
-                  "castShadow": true,
-                  "probeable": true
-                },
-                "uvProjection": "box",
-                "uvSpace": "world",
-                "uvWorldSize": 1
-              }
-            }
-          },
-          {
-            "id": "b8514ebf06be7816223309e56f2b0584",
-            "name": "Bump 6",
-            "type": "model",
-            "position": [5.199999809265137, 0, 7.099999904632568],
-            "rotation": [2.2086939811706543, 82.07959747314453, 11.647337913513184],
-            "scale": [0.8999999761581421, 0.29656314849853516, 0.8999999761581421],
-            "children": [],
-            "spawnOnStart": true,
-            "variables": {
-              "__materialId": {
-                "type": "string",
-                "value": "8aa2f149c706ee8d1dd0cc8a3d19251d",
-                "access": "public"
-              }
-            },
-            "model": {
-              "geometry": {
-                "$geo": {
-                  "positions": {
-                    "n": [-0.5, -0.5, 0.5, 0.5, -0.5, 0.5, 0.5, 0.5, 0.5, -0.5, 0.5, 0.5, 0.5, -0.5, 0.5, 0.5, -0.5, -0.5, 0.5, 0.5, -0.5, 0.5, 0.5, 0.5, 0.5, -0.5, -0.5, -0.5, -0.5, -0.5, -0.5, 0.5, -0.5, 0.5, 0.5, -0.5, -0.5, -0.5, -0.5, -0.5, -0.5, 0.5, -0.5, 0.5, 0.5, -0.5, 0.5, -0.5, -0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, -0.5, -0.5, 0.5, -0.5, -0.5, -0.5, -0.5, 0.5, -0.5, -0.5, 0.5, -0.5, 0.5, -0.5, -0.5, 0.5]
-                  },
-                  "normals": {
-                    "n": [0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0]
-                  },
-                  "tangents": {
-                    "n": [1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0]
-                  },
-                  "bitangents": {
-                    "n": [0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1]
-                  },
-                  "texCoords": {
-                    "n": [0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1]
-                  },
-                  "indices": {
-                    "n": [0, 1, 2, 0, 2, 3, 4, 5, 6, 4, 6, 7, 8, 9, 10, 8, 10, 11, 12, 13, 14, 12, 14, 15, 16, 17, 18, 16, 18, 19, 20, 21, 22, 20, 22, 23],
-                    "bits": 16
-                  },
-                  "typed": true
-                }
-              },
-              "material": {
-                "type": "pbr",
-                "baseColor": [0.42, 0.55, 0.75],
-                "metallic": 0,
-                "roughness": 0.9,
-                "opacity": 1,
-                "emissiveFactor": [0, 0, 0],
-                "textures": {
-                  "baseColorTexture": "d4a96a210b1af85c70925ceced937cb7"
-                },
-                "config": {
-                  "side": "front",
-                  "wireframe": false,
-                  "transparent": false,
-                  "castShadow": true,
-                  "probeable": true
-                },
-                "uvProjection": "box",
-                "uvSpace": "world",
-                "uvWorldSize": 1
-              }
-            }
-          },
-          {
-            "id": "b7514d2c07be79a921330852702b0717",
-            "name": "Bump 7",
-            "type": "model",
-            "position": [3, 0, 8.199999809265137],
-            "rotation": [7.058302879333496, 29.90264320373535, -7.272997856140137],
-            "scale": [0.8999999761581421, 0.25030794739723206, 0.8999999761581421],
-            "children": [],
-            "spawnOnStart": true,
-            "variables": {
-              "__materialId": {
-                "type": "string",
-                "value": "8aa2f149c706ee8d1dd0cc8a3d19251d",
-                "access": "public"
-              }
-            },
-            "model": {
-              "geometry": {
-                "$geo": {
-                  "positions": {
-                    "n": [-0.5, -0.5, 0.5, 0.5, -0.5, 0.5, 0.5, 0.5, 0.5, -0.5, 0.5, 0.5, 0.5, -0.5, 0.5, 0.5, -0.5, -0.5, 0.5, 0.5, -0.5, 0.5, 0.5, 0.5, 0.5, -0.5, -0.5, -0.5, -0.5, -0.5, -0.5, 0.5, -0.5, 0.5, 0.5, -0.5, -0.5, -0.5, -0.5, -0.5, -0.5, 0.5, -0.5, 0.5, 0.5, -0.5, 0.5, -0.5, -0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, -0.5, -0.5, 0.5, -0.5, -0.5, -0.5, -0.5, 0.5, -0.5, -0.5, 0.5, -0.5, 0.5, -0.5, -0.5, 0.5]
-                  },
-                  "normals": {
-                    "n": [0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0]
-                  },
-                  "tangents": {
-                    "n": [1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0]
-                  },
-                  "bitangents": {
-                    "n": [0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1]
-                  },
-                  "texCoords": {
-                    "n": [0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1]
-                  },
-                  "indices": {
-                    "n": [0, 1, 2, 0, 2, 3, 4, 5, 6, 4, 6, 7, 8, 9, 10, 8, 10, 11, 12, 13, 14, 12, 14, 15, 16, 17, 18, 16, 18, 19, 20, 21, 22, 20, 22, 23],
-                    "bits": 16
-                  },
-                  "typed": true
-                }
-              },
-              "material": {
-                "type": "pbr",
-                "baseColor": [0.42, 0.55, 0.75],
-                "metallic": 0,
-                "roughness": 0.9,
-                "opacity": 1,
-                "emissiveFactor": [0, 0, 0],
-                "textures": {
-                  "baseColorTexture": "d4a96a210b1af85c70925ceced937cb7"
-                },
-                "config": {
-                  "side": "front",
-                  "wireframe": false,
-                  "transparent": false,
-                  "castShadow": true,
-                  "probeable": true
-                },
-                "uvProjection": "box",
-                "uvSpace": "world",
-                "uvWorldSize": 1
-              }
-            }
-          },
-          {
-            "id": "be51583110be87d424330d0b652af5c6",
-            "name": "Bump 8",
-            "type": "model",
-            "position": [4.099999904632568, 0, 8.199999809265137],
-            "rotation": [-3.9268102645874023, 84.35355377197266, 1.0982673168182373],
-            "scale": [0.8999999761581421, 0.26427048444747925, 0.8999999761581421],
-            "children": [],
-            "spawnOnStart": true,
-            "variables": {
-              "__materialId": {
-                "type": "string",
-                "value": "8aa2f149c706ee8d1dd0cc8a3d19251d",
-                "access": "public"
-              }
-            },
-            "model": {
-              "geometry": {
-                "$geo": {
-                  "positions": {
-                    "n": [-0.5, -0.5, 0.5, 0.5, -0.5, 0.5, 0.5, 0.5, 0.5, -0.5, 0.5, 0.5, 0.5, -0.5, 0.5, 0.5, -0.5, -0.5, 0.5, 0.5, -0.5, 0.5, 0.5, 0.5, 0.5, -0.5, -0.5, -0.5, -0.5, -0.5, -0.5, 0.5, -0.5, 0.5, 0.5, -0.5, -0.5, -0.5, -0.5, -0.5, -0.5, 0.5, -0.5, 0.5, 0.5, -0.5, 0.5, -0.5, -0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, -0.5, -0.5, 0.5, -0.5, -0.5, -0.5, -0.5, 0.5, -0.5, -0.5, 0.5, -0.5, 0.5, -0.5, -0.5, 0.5]
-                  },
-                  "normals": {
-                    "n": [0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0]
-                  },
-                  "tangents": {
-                    "n": [1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0]
-                  },
-                  "bitangents": {
-                    "n": [0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1]
-                  },
-                  "texCoords": {
-                    "n": [0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1]
-                  },
-                  "indices": {
-                    "n": [0, 1, 2, 0, 2, 3, 4, 5, 6, 4, 6, 7, 8, 9, 10, 8, 10, 11, 12, 13, 14, 12, 14, 15, 16, 17, 18, 16, 18, 19, 20, 21, 22, 20, 22, 23],
-                    "bits": 16
-                  },
-                  "typed": true
-                }
-              },
-              "material": {
-                "type": "pbr",
-                "baseColor": [0.42, 0.55, 0.75],
-                "metallic": 0,
-                "roughness": 0.9,
-                "opacity": 1,
-                "emissiveFactor": [0, 0, 0],
-                "textures": {
-                  "baseColorTexture": "d4a96a210b1af85c70925ceced937cb7"
-                },
-                "config": {
-                  "side": "front",
-                  "wireframe": false,
-                  "transparent": false,
-                  "castShadow": true,
-                  "probeable": true
-                },
-                "uvProjection": "box",
-                "uvSpace": "world",
-                "uvWorldSize": 1
-              }
-            }
-          },
-          {
-            "id": "bd51569e11be896723330b78662af759",
-            "name": "Bump 9",
-            "type": "model",
-            "position": [5.199999809265137, 0, 8.199999809265137],
-            "rotation": [-13.021744728088379, 24.61417579650879, 1.7887392044067383],
-            "scale": [0.8999999761581421, 0.33167779445648193, 0.8999999761581421],
-            "children": [],
-            "spawnOnStart": true,
-            "variables": {
-              "__materialId": {
-                "type": "string",
-                "value": "8aa2f149c706ee8d1dd0cc8a3d19251d",
-                "access": "public"
-              }
-            },
-            "model": {
-              "geometry": {
-                "$geo": {
-                  "positions": {
-                    "n": [-0.5, -0.5, 0.5, 0.5, -0.5, 0.5, 0.5, 0.5, 0.5, -0.5, 0.5, 0.5, 0.5, -0.5, 0.5, 0.5, -0.5, -0.5, 0.5, 0.5, -0.5, 0.5, 0.5, 0.5, 0.5, -0.5, -0.5, -0.5, -0.5, -0.5, -0.5, 0.5, -0.5, 0.5, 0.5, -0.5, -0.5, -0.5, -0.5, -0.5, -0.5, 0.5, -0.5, 0.5, 0.5, -0.5, 0.5, -0.5, -0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, -0.5, -0.5, 0.5, -0.5, -0.5, -0.5, -0.5, 0.5, -0.5, -0.5, 0.5, -0.5, 0.5, -0.5, -0.5, 0.5]
-                  },
-                  "normals": {
-                    "n": [0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0]
-                  },
-                  "tangents": {
-                    "n": [1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0]
-                  },
-                  "bitangents": {
-                    "n": [0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1]
-                  },
-                  "texCoords": {
-                    "n": [0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1]
-                  },
-                  "indices": {
-                    "n": [0, 1, 2, 0, 2, 3, 4, 5, 6, 4, 6, 7, 8, 9, 10, 8, 10, 11, 12, 13, 14, 12, 14, 15, 16, 17, 18, 16, 18, 19, 20, 21, 22, 20, 22, 23],
-                    "bits": 16
-                  },
-                  "typed": true
-                }
-              },
-              "material": {
-                "type": "pbr",
-                "baseColor": [0.42, 0.55, 0.75],
-                "metallic": 0,
-                "roughness": 0.9,
-                "opacity": 1,
-                "emissiveFactor": [0, 0, 0],
-                "textures": {
-                  "baseColorTexture": "d4a96a210b1af85c70925ceced937cb7"
-                },
-                "config": {
-                  "side": "front",
-                  "wireframe": false,
-                  "transparent": false,
-                  "castShadow": true,
-                  "probeable": true
-                },
-                "uvProjection": "box",
-                "uvSpace": "world",
-                "uvWorldSize": 1
-              }
-            }
-          },
-          {
-            "id": "a4f7d30255dec56da14721702eb6e8d3",
-            "name": "Bump 10",
-            "type": "model",
-            "position": [3, 0, 9.300000190734863],
-            "rotation": [-7.434060096740723, 81.80728149414062, -10.77690601348877],
-            "scale": [0.8999999761581421, 0.26321646571159363, 0.8999999761581421],
-            "children": [],
-            "spawnOnStart": true,
-            "variables": {
-              "__materialId": {
-                "type": "string",
-                "value": "8aa2f149c706ee8d1dd0cc8a3d19251d",
-                "access": "public"
-              }
-            },
-            "model": {
-              "geometry": {
-                "$geo": {
-                  "positions": {
-                    "n": [-0.5, -0.5, 0.5, 0.5, -0.5, 0.5, 0.5, 0.5, 0.5, -0.5, 0.5, 0.5, 0.5, -0.5, 0.5, 0.5, -0.5, -0.5, 0.5, 0.5, -0.5, 0.5, 0.5, 0.5, 0.5, -0.5, -0.5, -0.5, -0.5, -0.5, -0.5, 0.5, -0.5, 0.5, 0.5, -0.5, -0.5, -0.5, -0.5, -0.5, -0.5, 0.5, -0.5, 0.5, 0.5, -0.5, 0.5, -0.5, -0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, -0.5, -0.5, 0.5, -0.5, -0.5, -0.5, -0.5, 0.5, -0.5, -0.5, 0.5, -0.5, 0.5, -0.5, -0.5, 0.5]
-                  },
-                  "normals": {
-                    "n": [0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0]
-                  },
-                  "tangents": {
-                    "n": [1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0]
-                  },
-                  "bitangents": {
-                    "n": [0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1]
-                  },
-                  "texCoords": {
-                    "n": [0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1]
-                  },
-                  "indices": {
-                    "n": [0, 1, 2, 0, 2, 3, 4, 5, 6, 4, 6, 7, 8, 9, 10, 8, 10, 11, 12, 13, 14, 12, 14, 15, 16, 17, 18, 16, 18, 19, 20, 21, 22, 20, 22, 23],
-                    "bits": 16
-                  },
-                  "typed": true
-                }
-              },
-              "material": {
-                "type": "pbr",
-                "baseColor": [0.42, 0.55, 0.75],
-                "metallic": 0,
-                "roughness": 0.9,
-                "opacity": 1,
-                "emissiveFactor": [0, 0, 0],
-                "textures": {
-                  "baseColorTexture": "d4a96a210b1af85c70925ceced937cb7"
-                },
-                "config": {
-                  "side": "front",
-                  "wireframe": false,
-                  "transparent": false,
-                  "castShadow": true,
-                  "probeable": true
-                },
-                "uvProjection": "box",
-                "uvSpace": "world",
-                "uvWorldSize": 1
-              }
-            }
-          },
-          {
-            "id": "a5f7d49554dec3daa24723032db6e740",
-            "name": "Bump 11",
-            "type": "model",
-            "position": [4.099999904632568, 0, 9.300000190734863],
-            "rotation": [3.4152095317840576, 83.1913070678711, 0.3085520267486572],
-            "scale": [0.8999999761581421, 0.251618355512619, 0.8999999761581421],
-            "children": [],
-            "spawnOnStart": true,
-            "variables": {
-              "__materialId": {
-                "type": "string",
-                "value": "8aa2f149c706ee8d1dd0cc8a3d19251d",
-                "access": "public"
-              }
-            },
-            "model": {
-              "geometry": {
-                "$geo": {
-                  "positions": {
-                    "n": [-0.5, -0.5, 0.5, 0.5, -0.5, 0.5, 0.5, 0.5, 0.5, -0.5, 0.5, 0.5, 0.5, -0.5, 0.5, 0.5, -0.5, -0.5, 0.5, 0.5, -0.5, 0.5, 0.5, 0.5, 0.5, -0.5, -0.5, -0.5, -0.5, -0.5, -0.5, 0.5, -0.5, 0.5, 0.5, -0.5, -0.5, -0.5, -0.5, -0.5, -0.5, 0.5, -0.5, 0.5, 0.5, -0.5, 0.5, -0.5, -0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, -0.5, -0.5, 0.5, -0.5, -0.5, -0.5, -0.5, 0.5, -0.5, -0.5, 0.5, -0.5, 0.5, -0.5, -0.5, 0.5]
-                  },
-                  "normals": {
-                    "n": [0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0]
-                  },
-                  "tangents": {
-                    "n": [1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0]
-                  },
-                  "bitangents": {
-                    "n": [0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1]
-                  },
-                  "texCoords": {
-                    "n": [0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1]
-                  },
-                  "indices": {
-                    "n": [0, 1, 2, 0, 2, 3, 4, 5, 6, 4, 6, 7, 8, 9, 10, 8, 10, 11, 12, 13, 14, 12, 14, 15, 16, 17, 18, 16, 18, 19, 20, 21, 22, 20, 22, 23],
-                    "bits": 16
-                  },
-                  "typed": true
-                }
-              },
-              "material": {
-                "type": "pbr",
-                "baseColor": [0.42, 0.55, 0.75],
-                "metallic": 0,
-                "roughness": 0.9,
-                "opacity": 1,
-                "emissiveFactor": [0, 0, 0],
-                "textures": {
-                  "baseColorTexture": "d4a96a210b1af85c70925ceced937cb7"
-                },
-                "config": {
-                  "side": "front",
-                  "wireframe": false,
-                  "transparent": false,
-                  "castShadow": true,
-                  "probeable": true
-                },
-                "uvProjection": "box",
-                "uvSpace": "world",
-                "uvWorldSize": 1
-              }
-            }
-          },
-          {
-            "id": "a2f7cfdc53dec247a347249630b6ebf9",
-            "name": "Bump 12",
-            "type": "model",
-            "position": [5.199999809265137, 0, 9.300000190734863],
-            "rotation": [-3.456698417663574, 32.80110549926758, -1.2147579193115234],
-            "scale": [0.8999999761581421, 0.2608432471752167, 0.8999999761581421],
-            "children": [],
-            "spawnOnStart": true,
-            "variables": {
-              "__materialId": {
-                "type": "string",
-                "value": "8aa2f149c706ee8d1dd0cc8a3d19251d",
-                "access": "public"
-              }
-            },
-            "model": {
-              "geometry": {
-                "$geo": {
-                  "positions": {
-                    "n": [-0.5, -0.5, 0.5, 0.5, -0.5, 0.5, 0.5, 0.5, 0.5, -0.5, 0.5, 0.5, 0.5, -0.5, 0.5, 0.5, -0.5, -0.5, 0.5, 0.5, -0.5, 0.5, 0.5, 0.5, 0.5, -0.5, -0.5, -0.5, -0.5, -0.5, -0.5, 0.5, -0.5, 0.5, 0.5, -0.5, -0.5, -0.5, -0.5, -0.5, -0.5, 0.5, -0.5, 0.5, 0.5, -0.5, 0.5, -0.5, -0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, -0.5, -0.5, 0.5, -0.5, -0.5, -0.5, -0.5, 0.5, -0.5, -0.5, 0.5, -0.5, 0.5, -0.5, -0.5, 0.5]
-                  },
-                  "normals": {
-                    "n": [0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0]
-                  },
-                  "tangents": {
-                    "n": [1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0]
-                  },
-                  "bitangents": {
-                    "n": [0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1]
-                  },
-                  "texCoords": {
-                    "n": [0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1]
-                  },
-                  "indices": {
-                    "n": [0, 1, 2, 0, 2, 3, 4, 5, 6, 4, 6, 7, 8, 9, 10, 8, 10, 11, 12, 13, 14, 12, 14, 15, 16, 17, 18, 16, 18, 19, 20, 21, 22, 20, 22, 23],
-                    "bits": 16
-                  },
-                  "typed": true
-                }
-              },
-              "material": {
-                "type": "pbr",
-                "baseColor": [0.42, 0.55, 0.75],
-                "metallic": 0,
-                "roughness": 0.9,
-                "opacity": 1,
-                "emissiveFactor": [0, 0, 0],
-                "textures": {
-                  "baseColorTexture": "d4a96a210b1af85c70925ceced937cb7"
-                },
-                "config": {
-                  "side": "front",
-                  "wireframe": false,
-                  "transparent": false,
-                  "castShadow": true,
-                  "probeable": true
-                },
-                "uvProjection": "box",
-                "uvSpace": "world",
-                "uvWorldSize": 1
-              }
-            }
-          },
-          {
-            "id": "a3f7d16f52dec0b4a44726292fb6ea66",
-            "name": "Bump 13",
-            "type": "model",
-            "position": [3, 0, 10.399999618530273],
-            "rotation": [2.278790235519409, 20.990753173828125, 8.122465133666992],
-            "scale": [0.8999999761581421, 0.2797490358352661, 0.8999999761581421],
-            "children": [],
-            "spawnOnStart": true,
-            "variables": {
-              "__materialId": {
-                "type": "string",
-                "value": "8aa2f149c706ee8d1dd0cc8a3d19251d",
-                "access": "public"
-              }
-            },
-            "model": {
-              "geometry": {
-                "$geo": {
-                  "positions": {
-                    "n": [-0.5, -0.5, 0.5, 0.5, -0.5, 0.5, 0.5, 0.5, 0.5, -0.5, 0.5, 0.5, 0.5, -0.5, 0.5, 0.5, -0.5, -0.5, 0.5, 0.5, -0.5, 0.5, 0.5, 0.5, 0.5, -0.5, -0.5, -0.5, -0.5, -0.5, -0.5, 0.5, -0.5, 0.5, 0.5, -0.5, -0.5, -0.5, -0.5, -0.5, -0.5, 0.5, -0.5, 0.5, 0.5, -0.5, 0.5, -0.5, -0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, -0.5, -0.5, 0.5, -0.5, -0.5, -0.5, -0.5, 0.5, -0.5, -0.5, 0.5, -0.5, 0.5, -0.5, -0.5, 0.5]
-                  },
-                  "normals": {
-                    "n": [0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0]
-                  },
-                  "tangents": {
-                    "n": [1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0]
-                  },
-                  "bitangents": {
-                    "n": [0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1]
-                  },
-                  "texCoords": {
-                    "n": [0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1]
-                  },
-                  "indices": {
-                    "n": [0, 1, 2, 0, 2, 3, 4, 5, 6, 4, 6, 7, 8, 9, 10, 8, 10, 11, 12, 13, 14, 12, 14, 15, 16, 17, 18, 16, 18, 19, 20, 21, 22, 20, 22, 23],
-                    "bits": 16
-                  },
-                  "typed": true
-                }
-              },
-              "material": {
-                "type": "pbr",
-                "baseColor": [0.42, 0.55, 0.75],
-                "metallic": 0,
-                "roughness": 0.9,
-                "opacity": 1,
-                "emissiveFactor": [0, 0, 0],
-                "textures": {
-                  "baseColorTexture": "d4a96a210b1af85c70925ceced937cb7"
-                },
-                "config": {
-                  "side": "front",
-                  "wireframe": false,
-                  "transparent": false,
-                  "castShadow": true,
-                  "probeable": true
-                },
-                "uvProjection": "box",
-                "uvSpace": "world",
-                "uvWorldSize": 1
-              }
-            }
-          },
-          {
-            "id": "a0f7ccb651debf21a54727bc32b6ef1f",
-            "name": "Bump 14",
-            "type": "model",
-            "position": [4.099999904632568, 0, 10.399999618530273],
-            "rotation": [3.1063857078552246, 57.09147644042969, 0.3734075427055359],
-            "scale": [0.8999999761581421, 0.3294517397880554, 0.8999999761581421],
-            "children": [],
-            "spawnOnStart": true,
-            "variables": {
-              "__materialId": {
-                "type": "string",
-                "value": "8aa2f149c706ee8d1dd0cc8a3d19251d",
-                "access": "public"
-              }
-            },
-            "model": {
-              "geometry": {
-                "$geo": {
-                  "positions": {
-                    "n": [-0.5, -0.5, 0.5, 0.5, -0.5, 0.5, 0.5, 0.5, 0.5, -0.5, 0.5, 0.5, 0.5, -0.5, 0.5, 0.5, -0.5, -0.5, 0.5, 0.5, -0.5, 0.5, 0.5, 0.5, 0.5, -0.5, -0.5, -0.5, -0.5, -0.5, -0.5, 0.5, -0.5, 0.5, 0.5, -0.5, -0.5, -0.5, -0.5, -0.5, -0.5, 0.5, -0.5, 0.5, 0.5, -0.5, 0.5, -0.5, -0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, -0.5, -0.5, 0.5, -0.5, -0.5, -0.5, -0.5, 0.5, -0.5, -0.5, 0.5, -0.5, 0.5, -0.5, -0.5, 0.5]
-                  },
-                  "normals": {
-                    "n": [0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0]
-                  },
-                  "tangents": {
-                    "n": [1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0]
-                  },
-                  "bitangents": {
-                    "n": [0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1]
-                  },
-                  "texCoords": {
-                    "n": [0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1]
-                  },
-                  "indices": {
-                    "n": [0, 1, 2, 0, 2, 3, 4, 5, 6, 4, 6, 7, 8, 9, 10, 8, 10, 11, 12, 13, 14, 12, 14, 15, 16, 17, 18, 16, 18, 19, 20, 21, 22, 20, 22, 23],
-                    "bits": 16
-                  },
-                  "typed": true
-                }
-              },
-              "material": {
-                "type": "pbr",
-                "baseColor": [0.42, 0.55, 0.75],
-                "metallic": 0,
-                "roughness": 0.9,
-                "opacity": 1,
-                "emissiveFactor": [0, 0, 0],
-                "textures": {
-                  "baseColorTexture": "d4a96a210b1af85c70925ceced937cb7"
-                },
-                "config": {
-                  "side": "front",
-                  "wireframe": false,
-                  "transparent": false,
-                  "castShadow": true,
-                  "probeable": true
-                },
-                "uvProjection": "box",
-                "uvSpace": "world",
-                "uvWorldSize": 1
-              }
-            }
-          },
-          {
-            "id": "a1f7ce4950debd8ea647294f31b6ed8c",
-            "name": "Bump 15",
-            "type": "model",
-            "position": [5.199999809265137, 0, 10.399999618530273],
-            "rotation": [10.601960182189941, 35.704986572265625, 5.022298336029053],
-            "scale": [0.8999999761581421, 0.30334925651550293, 0.8999999761581421],
-            "children": [],
-            "spawnOnStart": true,
-            "variables": {
-              "__materialId": {
-                "type": "string",
-                "value": "8aa2f149c706ee8d1dd0cc8a3d19251d",
-                "access": "public"
-              }
-            },
-            "model": {
-              "geometry": {
-                "$geo": {
-                  "positions": {
-                    "n": [-0.5, -0.5, 0.5, 0.5, -0.5, 0.5, 0.5, 0.5, 0.5, -0.5, 0.5, 0.5, 0.5, -0.5, 0.5, 0.5, -0.5, -0.5, 0.5, 0.5, -0.5, 0.5, 0.5, 0.5, 0.5, -0.5, -0.5, -0.5, -0.5, -0.5, -0.5, 0.5, -0.5, 0.5, 0.5, -0.5, -0.5, -0.5, -0.5, -0.5, -0.5, 0.5, -0.5, 0.5, 0.5, -0.5, 0.5, -0.5, -0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, -0.5, -0.5, 0.5, -0.5, -0.5, -0.5, -0.5, 0.5, -0.5, -0.5, 0.5, -0.5, 0.5, -0.5, -0.5, 0.5]
-                  },
-                  "normals": {
-                    "n": [0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0]
-                  },
-                  "tangents": {
-                    "n": [1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0]
-                  },
-                  "bitangents": {
-                    "n": [0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1]
-                  },
-                  "texCoords": {
-                    "n": [0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1]
-                  },
-                  "indices": {
-                    "n": [0, 1, 2, 0, 2, 3, 4, 5, 6, 4, 6, 7, 8, 9, 10, 8, 10, 11, 12, 13, 14, 12, 14, 15, 16, 17, 18, 16, 18, 19, 20, 21, 22, 20, 22, 23],
-                    "bits": 16
-                  },
-                  "typed": true
-                }
-              },
-              "material": {
-                "type": "pbr",
-                "baseColor": [0.42, 0.55, 0.75],
-                "metallic": 0,
-                "roughness": 0.9,
-                "opacity": 1,
-                "emissiveFactor": [0, 0, 0],
-                "textures": {
-                  "baseColorTexture": "d4a96a210b1af85c70925ceced937cb7"
-                },
-                "config": {
-                  "side": "front",
-                  "wireframe": false,
-                  "transparent": false,
-                  "castShadow": true,
-                  "probeable": true
-                },
-                "uvProjection": "box",
-                "uvSpace": "world",
-                "uvWorldSize": 1
-              }
-            }
-          },
-          {
-            "id": "9ef7c9904fdebbfba7472ae234b6f245",
-            "name": "Bump 16",
-            "type": "model",
-            "position": [3, 0, 11.5],
-            "rotation": [-2.693437099456787, 29.753984451293945, -1.957147479057312],
-            "scale": [0.8999999761581421, 0.2880289554595947, 0.8999999761581421],
-            "children": [],
-            "spawnOnStart": true,
-            "variables": {
-              "__materialId": {
-                "type": "string",
-                "value": "8aa2f149c706ee8d1dd0cc8a3d19251d",
-                "access": "public"
-              }
-            },
-            "model": {
-              "geometry": {
-                "$geo": {
-                  "positions": {
-                    "n": [-0.5, -0.5, 0.5, 0.5, -0.5, 0.5, 0.5, 0.5, 0.5, -0.5, 0.5, 0.5, 0.5, -0.5, 0.5, 0.5, -0.5, -0.5, 0.5, 0.5, -0.5, 0.5, 0.5, 0.5, 0.5, -0.5, -0.5, -0.5, -0.5, -0.5, -0.5, 0.5, -0.5, 0.5, 0.5, -0.5, -0.5, -0.5, -0.5, -0.5, -0.5, 0.5, -0.5, 0.5, 0.5, -0.5, 0.5, -0.5, -0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, -0.5, -0.5, 0.5, -0.5, -0.5, -0.5, -0.5, 0.5, -0.5, -0.5, 0.5, -0.5, 0.5, -0.5, -0.5, 0.5]
-                  },
-                  "normals": {
-                    "n": [0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0]
-                  },
-                  "tangents": {
-                    "n": [1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0]
-                  },
-                  "bitangents": {
-                    "n": [0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1]
-                  },
-                  "texCoords": {
-                    "n": [0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1]
-                  },
-                  "indices": {
-                    "n": [0, 1, 2, 0, 2, 3, 4, 5, 6, 4, 6, 7, 8, 9, 10, 8, 10, 11, 12, 13, 14, 12, 14, 15, 16, 17, 18, 16, 18, 19, 20, 21, 22, 20, 22, 23],
-                    "bits": 16
-                  },
-                  "typed": true
-                }
-              },
-              "material": {
-                "type": "pbr",
-                "baseColor": [0.42, 0.55, 0.75],
-                "metallic": 0,
-                "roughness": 0.9,
-                "opacity": 1,
-                "emissiveFactor": [0, 0, 0],
-                "textures": {
-                  "baseColorTexture": "d4a96a210b1af85c70925ceced937cb7"
-                },
-                "config": {
-                  "side": "front",
-                  "wireframe": false,
-                  "transparent": false,
-                  "castShadow": true,
-                  "probeable": true
-                },
-                "uvProjection": "box",
-                "uvSpace": "world",
-                "uvWorldSize": 1
-              }
-            }
-          },
-          {
-            "id": "9ff7cb234edeba68a8472c7533b6f0b2",
-            "name": "Bump 17",
-            "type": "model",
-            "position": [4.099999904632568, 0, 11.5],
-            "rotation": [-12.085219383239746, 73.72683715820312, -13.12132740020752],
-            "scale": [0.8999999761581421, 0.33163365721702576, 0.8999999761581421],
-            "children": [],
-            "spawnOnStart": true,
-            "variables": {
-              "__materialId": {
-                "type": "string",
-                "value": "8aa2f149c706ee8d1dd0cc8a3d19251d",
-                "access": "public"
-              }
-            },
-            "model": {
-              "geometry": {
-                "$geo": {
-                  "positions": {
-                    "n": [-0.5, -0.5, 0.5, 0.5, -0.5, 0.5, 0.5, 0.5, 0.5, -0.5, 0.5, 0.5, 0.5, -0.5, 0.5, 0.5, -0.5, -0.5, 0.5, 0.5, -0.5, 0.5, 0.5, 0.5, 0.5, -0.5, -0.5, -0.5, -0.5, -0.5, -0.5, 0.5, -0.5, 0.5, 0.5, -0.5, -0.5, -0.5, -0.5, -0.5, -0.5, 0.5, -0.5, 0.5, 0.5, -0.5, 0.5, -0.5, -0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, -0.5, -0.5, 0.5, -0.5, -0.5, -0.5, -0.5, 0.5, -0.5, -0.5, 0.5, -0.5, 0.5, -0.5, -0.5, 0.5]
-                  },
-                  "normals": {
-                    "n": [0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0]
-                  },
-                  "tangents": {
-                    "n": [1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0]
-                  },
-                  "bitangents": {
-                    "n": [0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1]
-                  },
-                  "texCoords": {
-                    "n": [0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1]
-                  },
-                  "indices": {
-                    "n": [0, 1, 2, 0, 2, 3, 4, 5, 6, 4, 6, 7, 8, 9, 10, 8, 10, 11, 12, 13, 14, 12, 14, 15, 16, 17, 18, 16, 18, 19, 20, 21, 22, 20, 22, 23],
-                    "bits": 16
-                  },
-                  "typed": true
-                }
-              },
-              "material": {
-                "type": "pbr",
-                "baseColor": [0.42, 0.55, 0.75],
-                "metallic": 0,
-                "roughness": 0.9,
-                "opacity": 1,
-                "emissiveFactor": [0, 0, 0],
-                "textures": {
-                  "baseColorTexture": "d4a96a210b1af85c70925ceced937cb7"
-                },
-                "config": {
-                  "side": "front",
-                  "wireframe": false,
-                  "transparent": false,
-                  "castShadow": true,
-                  "probeable": true
-                },
-                "uvProjection": "box",
-                "uvSpace": "world",
-                "uvWorldSize": 1
-              }
-            }
-          },
-          {
-            "id": "acf7df9a4ddeb8d5a9472e0836b6f56b",
-            "name": "Bump 18",
-            "type": "model",
-            "position": [5.199999809265137, 0, 11.5],
-            "rotation": [-9.18663501739502, 89.65846252441406, -6.093602657318115],
-            "scale": [0.8999999761581421, 0.22303573787212372, 0.8999999761581421],
-            "children": [],
-            "spawnOnStart": true,
-            "variables": {
-              "__materialId": {
-                "type": "string",
-                "value": "8aa2f149c706ee8d1dd0cc8a3d19251d",
-                "access": "public"
-              }
-            },
-            "model": {
-              "geometry": {
-                "$geo": {
-                  "positions": {
-                    "n": [-0.5, -0.5, 0.5, 0.5, -0.5, 0.5, 0.5, 0.5, 0.5, -0.5, 0.5, 0.5, 0.5, -0.5, 0.5, 0.5, -0.5, -0.5, 0.5, 0.5, -0.5, 0.5, 0.5, 0.5, 0.5, -0.5, -0.5, -0.5, -0.5, -0.5, -0.5, 0.5, -0.5, 0.5, 0.5, -0.5, -0.5, -0.5, -0.5, -0.5, -0.5, 0.5, -0.5, 0.5, 0.5, -0.5, 0.5, -0.5, -0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, -0.5, -0.5, 0.5, -0.5, -0.5, -0.5, -0.5, 0.5, -0.5, -0.5, 0.5, -0.5, 0.5, -0.5, -0.5, 0.5]
-                  },
-                  "normals": {
-                    "n": [0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0]
-                  },
-                  "tangents": {
-                    "n": [1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0]
-                  },
-                  "bitangents": {
-                    "n": [0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1]
-                  },
-                  "texCoords": {
-                    "n": [0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1]
-                  },
-                  "indices": {
-                    "n": [0, 1, 2, 0, 2, 3, 4, 5, 6, 4, 6, 7, 8, 9, 10, 8, 10, 11, 12, 13, 14, 12, 14, 15, 16, 17, 18, 16, 18, 19, 20, 21, 22, 20, 22, 23],
-                    "bits": 16
-                  },
-                  "typed": true
-                }
-              },
-              "material": {
-                "type": "pbr",
-                "baseColor": [0.42, 0.55, 0.75],
-                "metallic": 0,
-                "roughness": 0.9,
-                "opacity": 1,
-                "emissiveFactor": [0, 0, 0],
-                "textures": {
-                  "baseColorTexture": "d4a96a210b1af85c70925ceced937cb7"
-                },
-                "config": {
-                  "side": "front",
-                  "wireframe": false,
-                  "transparent": false,
-                  "castShadow": true,
-                  "probeable": true
-                },
-                "uvProjection": "box",
-                "uvSpace": "world",
-                "uvWorldSize": 1
-              }
-            }
-          },
-          {
-            "id": "adf7e12d4cdeb742aa472f9b35b6f3d8",
-            "name": "Bump 19",
-            "type": "model",
-            "position": [3, 0, 12.600000381469727],
-            "rotation": [-1.1656990051269531, 53.362430572509766, -9.843548774719238],
-            "scale": [0.8999999761581421, 0.22163791954517365, 0.8999999761581421],
-            "children": [],
-            "spawnOnStart": true,
-            "variables": {
-              "__materialId": {
-                "type": "string",
-                "value": "8aa2f149c706ee8d1dd0cc8a3d19251d",
-                "access": "public"
-              }
-            },
-            "model": {
-              "geometry": {
-                "$geo": {
-                  "positions": {
-                    "n": [-0.5, -0.5, 0.5, 0.5, -0.5, 0.5, 0.5, 0.5, 0.5, -0.5, 0.5, 0.5, 0.5, -0.5, 0.5, 0.5, -0.5, -0.5, 0.5, 0.5, -0.5, 0.5, 0.5, 0.5, 0.5, -0.5, -0.5, -0.5, -0.5, -0.5, -0.5, 0.5, -0.5, 0.5, 0.5, -0.5, -0.5, -0.5, -0.5, -0.5, -0.5, 0.5, -0.5, 0.5, 0.5, -0.5, 0.5, -0.5, -0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, -0.5, -0.5, 0.5, -0.5, -0.5, -0.5, -0.5, 0.5, -0.5, -0.5, 0.5, -0.5, 0.5, -0.5, -0.5, 0.5]
-                  },
-                  "normals": {
-                    "n": [0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0]
-                  },
-                  "tangents": {
-                    "n": [1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0]
-                  },
-                  "bitangents": {
-                    "n": [0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1]
-                  },
-                  "texCoords": {
-                    "n": [0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1]
-                  },
-                  "indices": {
-                    "n": [0, 1, 2, 0, 2, 3, 4, 5, 6, 4, 6, 7, 8, 9, 10, 8, 10, 11, 12, 13, 14, 12, 14, 15, 16, 17, 18, 16, 18, 19, 20, 21, 22, 20, 22, 23],
-                    "bits": 16
-                  },
-                  "typed": true
-                }
-              },
-              "material": {
-                "type": "pbr",
-                "baseColor": [0.42, 0.55, 0.75],
-                "metallic": 0,
-                "roughness": 0.9,
-                "opacity": 1,
-                "emissiveFactor": [0, 0, 0],
-                "textures": {
-                  "baseColorTexture": "d4a96a210b1af85c70925ceced937cb7"
-                },
-                "config": {
-                  "side": "front",
-                  "wireframe": false,
-                  "transparent": false,
-                  "castShadow": true,
-                  "probeable": true
-                },
-                "uvProjection": "box",
-                "uvSpace": "world",
-                "uvWorldSize": 1
-              }
-            }
-          },
-          {
-            "id": "1ef4c1793be0db16334ec30bbcaf7998",
-            "name": "Bump 20",
-            "type": "model",
-            "position": [4.099999904632568, 0, 12.600000381469727],
-            "rotation": [13.328315734863281, 79.66988372802734, 13.914849281311035],
-            "scale": [0.8999999761581421, 0.33268481492996216, 0.8999999761581421],
-            "children": [],
-            "spawnOnStart": true,
-            "variables": {
-              "__materialId": {
-                "type": "string",
-                "value": "8aa2f149c706ee8d1dd0cc8a3d19251d",
-                "access": "public"
-              }
-            },
-            "model": {
-              "geometry": {
-                "$geo": {
-                  "positions": {
-                    "n": [-0.5, -0.5, 0.5, 0.5, -0.5, 0.5, 0.5, 0.5, 0.5, -0.5, 0.5, 0.5, 0.5, -0.5, 0.5, 0.5, -0.5, -0.5, 0.5, 0.5, -0.5, 0.5, 0.5, 0.5, 0.5, -0.5, -0.5, -0.5, -0.5, -0.5, -0.5, 0.5, -0.5, 0.5, 0.5, -0.5, -0.5, -0.5, -0.5, -0.5, -0.5, 0.5, -0.5, 0.5, 0.5, -0.5, 0.5, -0.5, -0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, -0.5, -0.5, 0.5, -0.5, -0.5, -0.5, -0.5, 0.5, -0.5, -0.5, 0.5, -0.5, 0.5, -0.5, -0.5, 0.5]
-                  },
-                  "normals": {
-                    "n": [0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0]
-                  },
-                  "tangents": {
-                    "n": [1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0]
-                  },
-                  "bitangents": {
-                    "n": [0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1]
-                  },
-                  "texCoords": {
-                    "n": [0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1]
-                  },
-                  "indices": {
-                    "n": [0, 1, 2, 0, 2, 3, 4, 5, 6, 4, 6, 7, 8, 9, 10, 8, 10, 11, 12, 13, 14, 12, 14, 15, 16, 17, 18, 16, 18, 19, 20, 21, 22, 20, 22, 23],
-                    "bits": 16
-                  },
-                  "typed": true
-                }
-              },
-              "material": {
-                "type": "pbr",
-                "baseColor": [0.42, 0.55, 0.75],
-                "metallic": 0,
-                "roughness": 0.9,
-                "opacity": 1,
-                "emissiveFactor": [0, 0, 0],
-                "textures": {
-                  "baseColorTexture": "d4a96a210b1af85c70925ceced937cb7"
-                },
-                "config": {
-                  "side": "front",
-                  "wireframe": false,
-                  "transparent": false,
-                  "castShadow": true,
-                  "probeable": true
-                },
-                "uvProjection": "box",
-                "uvSpace": "world",
-                "uvWorldSize": 1
-              }
-            }
-          },
-          {
-            "id": "1df4bfe63ce0dca9324ec178bdaf7b2b",
-            "name": "Bump 21",
-            "type": "model",
-            "position": [5.199999809265137, 0, 12.600000381469727],
-            "rotation": [-14.81613540649414, 22.346452713012695, -12.83203125],
-            "scale": [0.8999999761581421, 0.24131323397159576, 0.8999999761581421],
-            "children": [],
-            "spawnOnStart": true,
-            "variables": {
-              "__materialId": {
-                "type": "string",
-                "value": "8aa2f149c706ee8d1dd0cc8a3d19251d",
-                "access": "public"
-              }
-            },
-            "model": {
-              "geometry": {
-                "$geo": {
-                  "positions": {
-                    "n": [-0.5, -0.5, 0.5, 0.5, -0.5, 0.5, 0.5, 0.5, 0.5, -0.5, 0.5, 0.5, 0.5, -0.5, 0.5, 0.5, -0.5, -0.5, 0.5, 0.5, -0.5, 0.5, 0.5, 0.5, 0.5, -0.5, -0.5, -0.5, -0.5, -0.5, -0.5, 0.5, -0.5, 0.5, 0.5, -0.5, -0.5, -0.5, -0.5, -0.5, -0.5, 0.5, -0.5, 0.5, 0.5, -0.5, 0.5, -0.5, -0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, -0.5, -0.5, 0.5, -0.5, -0.5, -0.5, -0.5, 0.5, -0.5, -0.5, 0.5, -0.5, 0.5, -0.5, -0.5, 0.5]
-                  },
-                  "normals": {
-                    "n": [0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0]
-                  },
-                  "tangents": {
-                    "n": [1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0]
-                  },
-                  "bitangents": {
-                    "n": [0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1]
-                  },
-                  "texCoords": {
-                    "n": [0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1]
-                  },
-                  "indices": {
-                    "n": [0, 1, 2, 0, 2, 3, 4, 5, 6, 4, 6, 7, 8, 9, 10, 8, 10, 11, 12, 13, 14, 12, 14, 15, 16, 17, 18, 16, 18, 19, 20, 21, 22, 20, 22, 23],
-                    "bits": 16
-                  },
-                  "typed": true
-                }
-              },
-              "material": {
-                "type": "pbr",
-                "baseColor": [0.42, 0.55, 0.75],
-                "metallic": 0,
-                "roughness": 0.9,
-                "opacity": 1,
-                "emissiveFactor": [0, 0, 0],
-                "textures": {
-                  "baseColorTexture": "d4a96a210b1af85c70925ceced937cb7"
-                },
-                "config": {
-                  "side": "front",
-                  "wireframe": false,
-                  "transparent": false,
-                  "castShadow": true,
-                  "probeable": true
-                },
-                "uvProjection": "box",
-                "uvSpace": "world",
-                "uvWorldSize": 1
-              }
-            }
-          },
-          {
-            "id": "1cf4be5339e0d7f0354ec631beaf7cbe",
-            "name": "Bump 22",
-            "type": "model",
-            "position": [3, 0, 13.699999809265137],
-            "rotation": [-3.233694553375244, 66.70339965820312, -0.12807437777519226],
-            "scale": [0.8999999761581421, 0.2925260066986084, 0.8999999761581421],
-            "children": [],
-            "spawnOnStart": true,
-            "variables": {
-              "__materialId": {
-                "type": "string",
-                "value": "8aa2f149c706ee8d1dd0cc8a3d19251d",
-                "access": "public"
-              }
-            },
-            "model": {
-              "geometry": {
-                "$geo": {
-                  "positions": {
-                    "n": [-0.5, -0.5, 0.5, 0.5, -0.5, 0.5, 0.5, 0.5, 0.5, -0.5, 0.5, 0.5, 0.5, -0.5, 0.5, 0.5, -0.5, -0.5, 0.5, 0.5, -0.5, 0.5, 0.5, 0.5, 0.5, -0.5, -0.5, -0.5, -0.5, -0.5, -0.5, 0.5, -0.5, 0.5, 0.5, -0.5, -0.5, -0.5, -0.5, -0.5, -0.5, 0.5, -0.5, 0.5, 0.5, -0.5, 0.5, -0.5, -0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, -0.5, -0.5, 0.5, -0.5, -0.5, -0.5, -0.5, 0.5, -0.5, -0.5, 0.5, -0.5, 0.5, -0.5, -0.5, 0.5]
-                  },
-                  "normals": {
-                    "n": [0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0]
-                  },
-                  "tangents": {
-                    "n": [1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0]
-                  },
-                  "bitangents": {
-                    "n": [0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1]
-                  },
-                  "texCoords": {
-                    "n": [0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1]
-                  },
-                  "indices": {
-                    "n": [0, 1, 2, 0, 2, 3, 4, 5, 6, 4, 6, 7, 8, 9, 10, 8, 10, 11, 12, 13, 14, 12, 14, 15, 16, 17, 18, 16, 18, 19, 20, 21, 22, 20, 22, 23],
-                    "bits": 16
-                  },
-                  "typed": true
-                }
-              },
-              "material": {
-                "type": "pbr",
-                "baseColor": [0.42, 0.55, 0.75],
-                "metallic": 0,
-                "roughness": 0.9,
-                "opacity": 1,
-                "emissiveFactor": [0, 0, 0],
-                "textures": {
-                  "baseColorTexture": "d4a96a210b1af85c70925ceced937cb7"
-                },
-                "config": {
-                  "side": "front",
-                  "wireframe": false,
-                  "transparent": false,
-                  "castShadow": true,
-                  "probeable": true
-                },
-                "uvProjection": "box",
-                "uvSpace": "world",
-                "uvWorldSize": 1
-              }
-            }
-          },
-          {
-            "id": "1bf4bcc03ae0d983344ec49ebfaf7e51",
-            "name": "Bump 23",
-            "type": "model",
-            "position": [4.099999904632568, 0, 13.699999809265137],
-            "rotation": [10.88970947265625, 21.164613723754883, -3.5926430225372314],
-            "scale": [0.8999999761581421, 0.23570728302001953, 0.8999999761581421],
-            "children": [],
-            "spawnOnStart": true,
-            "variables": {
-              "__materialId": {
-                "type": "string",
-                "value": "8aa2f149c706ee8d1dd0cc8a3d19251d",
-                "access": "public"
-              }
-            },
-            "model": {
-              "geometry": {
-                "$geo": {
-                  "positions": {
-                    "n": [-0.5, -0.5, 0.5, 0.5, -0.5, 0.5, 0.5, 0.5, 0.5, -0.5, 0.5, 0.5, 0.5, -0.5, 0.5, 0.5, -0.5, -0.5, 0.5, 0.5, -0.5, 0.5, 0.5, 0.5, 0.5, -0.5, -0.5, -0.5, -0.5, -0.5, -0.5, 0.5, -0.5, 0.5, 0.5, -0.5, -0.5, -0.5, -0.5, -0.5, -0.5, 0.5, -0.5, 0.5, 0.5, -0.5, 0.5, -0.5, -0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, -0.5, -0.5, 0.5, -0.5, -0.5, -0.5, -0.5, 0.5, -0.5, -0.5, 0.5, -0.5, 0.5, -0.5, -0.5, 0.5]
-                  },
-                  "normals": {
-                    "n": [0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0]
-                  },
-                  "tangents": {
-                    "n": [1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0]
-                  },
-                  "bitangents": {
-                    "n": [0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1]
-                  },
-                  "texCoords": {
-                    "n": [0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1]
-                  },
-                  "indices": {
-                    "n": [0, 1, 2, 0, 2, 3, 4, 5, 6, 4, 6, 7, 8, 9, 10, 8, 10, 11, 12, 13, 14, 12, 14, 15, 16, 17, 18, 16, 18, 19, 20, 21, 22, 20, 22, 23],
-                    "bits": 16
-                  },
-                  "typed": true
-                }
-              },
-              "material": {
-                "type": "pbr",
-                "baseColor": [0.42, 0.55, 0.75],
-                "metallic": 0,
-                "roughness": 0.9,
-                "opacity": 1,
-                "emissiveFactor": [0, 0, 0],
-                "textures": {
-                  "baseColorTexture": "d4a96a210b1af85c70925ceced937cb7"
-                },
-                "config": {
-                  "side": "front",
-                  "wireframe": false,
-                  "transparent": false,
-                  "castShadow": true,
-                  "probeable": true
-                },
-                "uvProjection": "box",
-                "uvSpace": "world",
-                "uvWorldSize": 1
-              }
-            }
-          },
-          {
-            "id": "22f4c7c53fe0e162374ec957c0af7fe4",
-            "name": "Bump 24",
-            "type": "model",
-            "position": [5.199999809265137, 0, 13.699999809265137],
-            "rotation": [-0.3593687117099762, 0.26727965474128723, 13.819769859313965],
-            "scale": [0.8999999761581421, 0.21775589883327484, 0.8999999761581421],
-            "children": [],
-            "spawnOnStart": true,
-            "variables": {
-              "__materialId": {
-                "type": "string",
-                "value": "8aa2f149c706ee8d1dd0cc8a3d19251d",
-                "access": "public"
-              }
-            },
-            "model": {
-              "geometry": {
-                "$geo": {
-                  "positions": {
-                    "n": [-0.5, -0.5, 0.5, 0.5, -0.5, 0.5, 0.5, 0.5, 0.5, -0.5, 0.5, 0.5, 0.5, -0.5, 0.5, 0.5, -0.5, -0.5, 0.5, 0.5, -0.5, 0.5, 0.5, 0.5, 0.5, -0.5, -0.5, -0.5, -0.5, -0.5, -0.5, 0.5, -0.5, 0.5, 0.5, -0.5, -0.5, -0.5, -0.5, -0.5, -0.5, 0.5, -0.5, 0.5, 0.5, -0.5, 0.5, -0.5, -0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, -0.5, -0.5, 0.5, -0.5, -0.5, -0.5, -0.5, 0.5, -0.5, -0.5, 0.5, -0.5, 0.5, -0.5, -0.5, 0.5]
-                  },
-                  "normals": {
-                    "n": [0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0]
-                  },
-                  "tangents": {
-                    "n": [1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0]
-                  },
-                  "bitangents": {
-                    "n": [0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1]
-                  },
-                  "texCoords": {
-                    "n": [0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1]
-                  },
-                  "indices": {
-                    "n": [0, 1, 2, 0, 2, 3, 4, 5, 6, 4, 6, 7, 8, 9, 10, 8, 10, 11, 12, 13, 14, 12, 14, 15, 16, 17, 18, 16, 18, 19, 20, 21, 22, 20, 22, 23],
-                    "bits": 16
-                  },
-                  "typed": true
-                }
-              },
-              "material": {
-                "type": "pbr",
-                "baseColor": [0.42, 0.55, 0.75],
-                "metallic": 0,
-                "roughness": 0.9,
-                "opacity": 1,
-                "emissiveFactor": [0, 0, 0],
-                "textures": {
-                  "baseColorTexture": "d4a96a210b1af85c70925ceced937cb7"
-                },
-                "config": {
-                  "side": "front",
-                  "wireframe": false,
-                  "transparent": false,
-                  "castShadow": true,
-                  "probeable": true
-                },
-                "uvProjection": "box",
-                "uvSpace": "world",
-                "uvWorldSize": 1
-              }
-            }
-          }
-        ]
+        }
       },
       {
-        "id": "b73a204e36a8879fa14a5fc842bd9299",
+        "id": "25d4c3550493dfb087b09751f810b0bb",
         "name": "Static Collision (Stair Ramp)",
         "type": "collider",
         "position": [0, 0, 0],
         "rotation": [0, 0, 0],
         "scale": [1, 1, 1],
+        "children": [],
         "variables": {},
         "spawnOnStart": true,
         "collider": {
+          "mass": 0,
           "linearDamping": 0.25,
           "angularDamping": 0.25,
           "linearConstraints": [1, 1, 1],
           "angularConstraints": [1, 1, 1],
-          "friction": 0.3,
+          "friction": 0.7,
           "restitution": 0,
           "simulatePhysics": true,
           "groundProbeDistance": 0,
@@ -4029,7 +4271,6 @@
           "canSleep": false,
           "layer": 64,
           "mask": 16,
-          "mass": 0,
           "shapes": [
             {
               "type": "box",
@@ -4048,24 +4289,245 @@
               "rotation": [-32.10625474391104, 0, 0]
             }
           ]
-        },
-        "children": []
+        }
       },
       {
-        "id": "000a8815eae95e0a7819af9fade0e14c",
+        "id": "73ee1e7de605666adb36f80cfbcb8303",
         "name": "Static Collision (See Through)",
         "type": "collider",
         "position": [0, 0, 0],
         "rotation": [0, 0, 0],
         "scale": [1, 1, 1],
+        "children": [
+          {
+            "id": "e9e3f80ad35c60d636b0d9c4887971f3",
+            "name": "Pillar 1",
+            "type": "model",
+            "position": [8, 2, -5],
+            "rotation": [0, 0, 0],
+            "scale": [0.800000011920929, 4, 0.800000011920929],
+            "children": [],
+            "variables": {
+              "__materialId": {
+                "type": "string",
+                "value": "8aa2f149c706ee8d1dd0cc8a3d19251d",
+                "access": "public"
+              }
+            },
+            "spawnOnStart": true,
+            "model": {
+              "geometry": {
+                "$geo": {
+                  "positions": {
+                    "n": [0.5, -0.5, 0, 0.5, 0.5, 0, 0.4829599857330322, -0.5, 0.1294099986553192, 0.4829599857330322, 0.5, 0.1294099986553192, 0.4330100119113922, -0.5, 0.25, 0.4330100119113922, 0.5, 0.25, 0.353549987077713, -0.5, 0.353549987077713, 0.353549987077713, 0.5, 0.353549987077713, 0.25, -0.5, 0.4330100119113922, 0.25, 0.5, 0.4330100119113922, 0.1294099986553192, -0.5, 0.4829599857330322, 0.1294099986553192, 0.5, 0.4829599857330322, 0, -0.5, 0.5, 0, 0.5, 0.5, -0.1294099986553192, -0.5, 0.4829599857330322, -0.1294099986553192, 0.5, 0.4829599857330322, -0.25, -0.5, 0.4330100119113922, -0.25, 0.5, 0.4330100119113922, -0.353549987077713, -0.5, 0.353549987077713, -0.353549987077713, 0.5, 0.353549987077713, -0.4330100119113922, -0.5, 0.25, -0.4330100119113922, 0.5, 0.25, -0.4829599857330322, -0.5, 0.1294099986553192, -0.4829599857330322, 0.5, 0.1294099986553192, -0.5, -0.5, 0, -0.5, 0.5, 0, -0.4829599857330322, -0.5, -0.1294099986553192, -0.4829599857330322, 0.5, -0.1294099986553192, -0.4330100119113922, -0.5, -0.25, -0.4330100119113922, 0.5, -0.25, -0.353549987077713, -0.5, -0.353549987077713, -0.353549987077713, 0.5, -0.353549987077713, -0.25, -0.5, -0.4330100119113922, -0.25, 0.5, -0.4330100119113922, -0.1294099986553192, -0.5, -0.4829599857330322, -0.1294099986553192, 0.5, -0.4829599857330322, 0, -0.5, -0.5, 0, 0.5, -0.5, 0.1294099986553192, -0.5, -0.4829599857330322, 0.1294099986553192, 0.5, -0.4829599857330322, 0.25, -0.5, -0.4330100119113922, 0.25, 0.5, -0.4330100119113922, 0.353549987077713, -0.5, -0.353549987077713, 0.353549987077713, 0.5, -0.353549987077713, 0.4330100119113922, -0.5, -0.25, 0.4330100119113922, 0.5, -0.25, 0.4829599857330322, -0.5, -0.1294099986553192, 0.4829599857330322, 0.5, -0.1294099986553192, 0.5, -0.5, 0, 0.5, 0.5, 0, 0, 0.5, 0, 0.5, 0.5, 0, 0.4829599857330322, 0.5, 0.1294099986553192, 0.4330100119113922, 0.5, 0.25, 0.353549987077713, 0.5, 0.353549987077713, 0.25, 0.5, 0.4330100119113922, 0.1294099986553192, 0.5, 0.4829599857330322, 0, 0.5, 0.5, -0.1294099986553192, 0.5, 0.4829599857330322, -0.25, 0.5, 0.4330100119113922, -0.353549987077713, 0.5, 0.353549987077713, -0.4330100119113922, 0.5, 0.25, -0.4829599857330322, 0.5, 0.1294099986553192, -0.5, 0.5, 0, -0.4829599857330322, 0.5, -0.1294099986553192, -0.4330100119113922, 0.5, -0.25, -0.353549987077713, 0.5, -0.353549987077713, -0.25, 0.5, -0.4330100119113922, -0.1294099986553192, 0.5, -0.4829599857330322, 0, 0.5, -0.5, 0.1294099986553192, 0.5, -0.4829599857330322, 0.25, 0.5, -0.4330100119113922, 0.353549987077713, 0.5, -0.353549987077713, 0.4330100119113922, 0.5, -0.25, 0.4829599857330322, 0.5, -0.1294099986553192, 0.5, 0.5, 0, 0, -0.5, 0, 0.5, -0.5, 0, 0.4829599857330322, -0.5, 0.1294099986553192, 0.4330100119113922, -0.5, 0.25, 0.353549987077713, -0.5, 0.353549987077713, 0.25, -0.5, 0.4330100119113922, 0.1294099986553192, -0.5, 0.4829599857330322, 0, -0.5, 0.5, -0.1294099986553192, -0.5, 0.4829599857330322, -0.25, -0.5, 0.4330100119113922, -0.353549987077713, -0.5, 0.353549987077713, -0.4330100119113922, -0.5, 0.25, -0.4829599857330322, -0.5, 0.1294099986553192, -0.5, -0.5, 0, -0.4829599857330322, -0.5, -0.1294099986553192, -0.4330100119113922, -0.5, -0.25, -0.353549987077713, -0.5, -0.353549987077713, -0.25, -0.5, -0.4330100119113922, -0.1294099986553192, -0.5, -0.4829599857330322, 0, -0.5, -0.5, 0.1294099986553192, -0.5, -0.4829599857330322, 0.25, -0.5, -0.4330100119113922, 0.353549987077713, -0.5, -0.353549987077713, 0.4330100119113922, -0.5, -0.25, 0.4829599857330322, -0.5, -0.1294099986553192, 0.5, -0.5, 0]
+                  },
+                  "normals": {
+                    "n": [1, 0, 0, 1, 0, 0, 0.9659299850463867, 0, 0.2588199973106384, 0.9659299850463867, 0, 0.2588199973106384, 0.8660299777984619, 0, 0.5, 0.8660299777984619, 0, 0.5, 0.7071099877357483, 0, 0.7071099877357483, 0.7071099877357483, 0, 0.7071099877357483, 0.5, 0, 0.8660299777984619, 0.5, 0, 0.8660299777984619, 0.2588199973106384, 0, 0.9659299850463867, 0.2588199973106384, 0, 0.9659299850463867, 0, 0, 1, 0, 0, 1, -0.2588199973106384, 0, 0.9659299850463867, -0.2588199973106384, 0, 0.9659299850463867, -0.5, 0, 0.8660299777984619, -0.5, 0, 0.8660299777984619, -0.7071099877357483, 0, 0.7071099877357483, -0.7071099877357483, 0, 0.7071099877357483, -0.8660299777984619, 0, 0.5, -0.8660299777984619, 0, 0.5, -0.9659299850463867, 0, 0.2588199973106384, -0.9659299850463867, 0, 0.2588199973106384, -1, 0, 0, -1, 0, 0, -0.9659299850463867, 0, -0.2588199973106384, -0.9659299850463867, 0, -0.2588199973106384, -0.8660299777984619, 0, -0.5, -0.8660299777984619, 0, -0.5, -0.7071099877357483, 0, -0.7071099877357483, -0.7071099877357483, 0, -0.7071099877357483, -0.5, 0, -0.8660299777984619, -0.5, 0, -0.8660299777984619, -0.2588199973106384, 0, -0.9659299850463867, -0.2588199973106384, 0, -0.9659299850463867, 0, 0, -1, 0, 0, -1, 0.2588199973106384, 0, -0.9659299850463867, 0.2588199973106384, 0, -0.9659299850463867, 0.5, 0, -0.8660299777984619, 0.5, 0, -0.8660299777984619, 0.7071099877357483, 0, -0.7071099877357483, 0.7071099877357483, 0, -0.7071099877357483, 0.8660299777984619, 0, -0.5, 0.8660299777984619, 0, -0.5, 0.9659299850463867, 0, -0.2588199973106384, 0.9659299850463867, 0, -0.2588199973106384, 1, 0, 0, 1, 0, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0]
+                  },
+                  "tangents": {
+                    "n": [0, 0, 1, 0, 0, 1, -0.258819043636322, 0, 0.9659258127212524, -0.258819043636322, 0, 0.9659258127212524, -0.5, 0, 0.8660253882408142, -0.5, 0, 0.8660253882408142, -0.7071067690849304, 0, 0.7071067690849304, -0.7071067690849304, 0, 0.7071067690849304, -0.8660253882408142, 0, 0.5, -0.8660253882408142, 0, 0.5, -0.9659258127212524, 0, 0.258819043636322, -0.9659258127212524, 0, 0.258819043636322, -1, 0, 5.95773924515562e-17, -1, 0, 5.95773858341113e-17, -0.9659258127212524, 0, -0.258819043636322, -0.9659258127212524, 0, -0.258819043636322, -0.8660253882408142, 0, -0.5, -0.8660253882408142, 0, -0.5, -0.7071067690849304, 0, -0.7071067690849304, -0.7071067690849304, 0, -0.7071067690849304, -0.5, 0, -0.8660253882408142, -0.5, 0, -0.8660253882408142, -0.258819043636322, 0, -0.9659258127212524, -0.258819043636322, 0, -0.9659258127212524, -1.2511252348652353e-16, 0, -1, -1.2511256319119293e-16, 0, -1, 0.258819043636322, 0, -0.9659258127212524, 0.258819043636322, 0, -0.9659258127212524, 0.5, 0, -0.8660253882408142, 0.5, 0, -0.8660253882408142, 0.7071067690849304, 0, -0.7071067690849304, 0.7071067690849304, 0, -0.7071067690849304, 0.8660253882408142, 0, -0.5, 0.8660253882408142, 0, -0.5, 0.9659258127212524, 0, -0.258819043636322, 0.9659258127212524, 0, -0.258819043636322, 1, 0, -1.8469001519975324e-16, 1, 0, -1.8469001519975324e-16, 0.9659258127212524, 0, 0.258819043636322, 0.9659258127212524, 0, 0.258819043636322, 0.8660253882408142, 0, 0.5, 0.8660253882408142, 0, 0.5, 0.7071067690849304, 0, 0.7071067690849304, 0.7071067690849304, 0, 0.7071067690849304, 0.5, 0, 0.8660253882408142, 0.5, 0, 0.8660253882408142, 0.258819043636322, 0, 0.9659258127212524, 0.258819043636322, 0, 0.9659258127212524, 2.5022517932194507e-16, 0, 1, 2.5022517932194507e-16, 0, 1, 1, 0, -2.284696674673104e-15, 1, 0, 0, 1, 0, -5.7573682710199137e-8, 1, 0, -2.775317004205871e-14, 1, 0, 3.9274606677963675e-8, 1, 0, -1.2952285999290325e-7, 1, 0, -1.1122381238237722e-7, 1, 0, 0, 1, 0, 1.1122378396066779e-7, 1, 0, 1.2952284578204853e-7, 1, 0, -3.927459957253632e-8, 1, 0, 2.248165541262389e-14, 1, 0, 5.757367560477178e-8, 1, 0, -1.2246468525851679e-16, 1, 0, -6.123234262925839e-17, 1, 0, 0, 1, 0, 2.035536539324312e-8, 1, 0, 1.7479548475307638e-8, 1, 0, -3.166265116760769e-8, 1, 0, -6.062024644602369e-15, 1, 0, 3.1662644062180334e-8, 1, 0, -1.747954314623712e-8, 1, 0, -2.035536184052944e-8, 1, 0, 0, 1, 0, -1.2246468525851679e-16, 1, 0, -2.4492937051703357e-16, 1, 0, 2.215858307049747e-15, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 2.035536184052944e-8, 1, 0, 1.747954314623712e-8, 1, 0, -3.1662644062180334e-8, 1, 0, 5.896500007148775e-15, 1, 0, 3.166264761489401e-8, 1, 0, -1.7479548475307638e-8, 1, 0, -2.035536539324312e-8, 1, 0, 0, 1, 0, -6.123234262925839e-17, 1, 0, -1.2246468525851679e-16, 1, 0, -5.757367560477178e-8, 1, 0, -2.024559854615568e-14, 1, 0, 3.927459957253632e-8, 1, 0, -1.2952284578204853e-7, 1, 0, -1.1122378396066779e-7, 1, 0, 0, 1, 0, 1.1122381238237722e-7, 1, 0, 1.2952285999290325e-7, 1, 0, -3.9274606677963675e-8, 1, 0, 2.6712762861078043e-14, 1, 0, 5.7573682710199137e-8, 1, 0, -2.4492937051703357e-16]
+                  },
+                  "bitangents": {
+                    "n": [0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 2.284696674673104e-15, 0, 1, 0, 0, 1, 5.7573682710199137e-8, 0, 1, 2.775317004205871e-14, 0, 1, -3.9274606677963675e-8, 0, 1, 1.2952285999290325e-7, 0, 1, 1.1122381238237722e-7, 0, 1, 0, 0, 1, -1.1122378396066779e-7, 0, 1, -1.2952284578204853e-7, 0, 1, 3.927459957253632e-8, 0, 1, -2.248165541262389e-14, 0, 1, -5.757367560477178e-8, 0, 1, 1.2246468525851679e-16, 0, 1, 6.123234262925839e-17, 0, 1, 0, 0, 1, -2.035536539324312e-8, 0, 1, -1.7479548475307638e-8, 0, 1, 3.166265116760769e-8, 0, 1, 6.062024644602369e-15, 0, 1, -3.1662644062180334e-8, 0, 1, 1.747954314623712e-8, 0, 1, 2.035536184052944e-8, 0, 1, 0, 0, 1, 1.2246468525851679e-16, 0, 1, 2.4492937051703357e-16, 0, 1, 2.215858307049747e-15, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 2.035536184052944e-8, 0, -1, 1.747954314623712e-8, 0, -1, -3.1662644062180334e-8, 0, -1, 5.896500007148775e-15, 0, -1, 3.166264761489401e-8, 0, -1, -1.7479548475307638e-8, 0, -1, -2.035536539324312e-8, 0, -1, 0, 0, -1, -6.123234262925839e-17, 0, -1, -1.2246468525851679e-16, 0, -1, -5.757367560477178e-8, 0, -1, -2.024559854615568e-14, 0, -1, 3.927459957253632e-8, 0, -1, -1.2952284578204853e-7, 0, -1, -1.1122378396066779e-7, 0, -1, 0, 0, -1, 1.1122381238237722e-7, 0, -1, 1.2952285999290325e-7, 0, -1, -3.9274606677963675e-8, 0, -1, 2.6712762861078043e-14, 0, -1, 5.7573682710199137e-8, 0, -1, -2.4492937051703357e-16, 0, -1]
+                  },
+                  "texCoords": {
+                    "n": [0, 0, 0, 1, 0.041669998317956924, 0, 0.041669998317956924, 1, 0.08332999795675278, 0, 0.08332999795675278, 1, 0.125, 0, 0.125, 1, 0.16666999459266663, 0, 0.16666999459266663, 1, 0.20833000540733337, 0, 0.20833000540733337, 1, 0.25, 0, 0.25, 1, 0.2916699945926666, 0, 0.2916699945926666, 1, 0.3333300054073334, 0, 0.3333300054073334, 1, 0.375, 0, 0.375, 1, 0.4166699945926666, 0, 0.4166699945926666, 1, 0.4583300054073334, 0, 0.4583300054073334, 1, 0.5, 0, 0.5, 1, 0.541670024394989, 0, 0.541670024394989, 1, 0.583329975605011, 0, 0.583329975605011, 1, 0.625, 0, 0.625, 1, 0.666670024394989, 0, 0.666670024394989, 1, 0.708329975605011, 0, 0.708329975605011, 1, 0.75, 0, 0.75, 1, 0.791670024394989, 0, 0.791670024394989, 1, 0.833329975605011, 0, 0.833329975605011, 1, 0.875, 0, 0.875, 1, 0.916670024394989, 0, 0.916670024394989, 1, 0.958329975605011, 0, 0.958329975605011, 1, 1, 0, 1, 1, 0.5, 0.5, 1, 0.5, 0.9829599857330322, 0.6294100284576416, 0.9330099821090698, 0.75, 0.8535500168800354, 0.8535500168800354, 0.75, 0.9330099821090698, 0.6294100284576416, 0.9829599857330322, 0.5, 1, 0.3705900013446808, 0.9829599857330322, 0.25, 0.9330099821090698, 0.1464499980211258, 0.8535500168800354, 0.06699000298976898, 0.75, 0.01703999936580658, 0.6294100284576416, 0, 0.5, 0.01703999936580658, 0.3705900013446808, 0.06699000298976898, 0.25, 0.1464499980211258, 0.1464499980211258, 0.25, 0.06699000298976898, 0.3705900013446808, 0.01703999936580658, 0.5, 0, 0.6294100284576416, 0.01703999936580658, 0.75, 0.06699000298976898, 0.8535500168800354, 0.1464499980211258, 0.9330099821090698, 0.25, 0.9829599857330322, 0.3705900013446808, 1, 0.5, 0.5, 0.5, 1, 0.5, 0.9829599857330322, 0.3705900013446808, 0.9330099821090698, 0.25, 0.8535500168800354, 0.1464499980211258, 0.75, 0.06699000298976898, 0.6294100284576416, 0.01703999936580658, 0.5, 0, 0.3705900013446808, 0.01703999936580658, 0.25, 0.06699000298976898, 0.1464499980211258, 0.1464499980211258, 0.06699000298976898, 0.25, 0.01703999936580658, 0.3705900013446808, 0, 0.5, 0.01703999936580658, 0.6294100284576416, 0.06699000298976898, 0.75, 0.1464499980211258, 0.8535500168800354, 0.25, 0.9330099821090698, 0.3705900013446808, 0.9829599857330322, 0.5, 1, 0.6294100284576416, 0.9829599857330322, 0.75, 0.9330099821090698, 0.8535500168800354, 0.8535500168800354, 0.9330099821090698, 0.75, 0.9829599857330322, 0.6294100284576416, 1, 0.5]
+                  },
+                  "indices": {
+                    "n": [0, 1, 2, 2, 1, 3, 2, 3, 4, 4, 3, 5, 4, 5, 6, 6, 5, 7, 6, 7, 8, 8, 7, 9, 8, 9, 10, 10, 9, 11, 10, 11, 12, 12, 11, 13, 12, 13, 14, 14, 13, 15, 14, 15, 16, 16, 15, 17, 16, 17, 18, 18, 17, 19, 18, 19, 20, 20, 19, 21, 20, 21, 22, 22, 21, 23, 22, 23, 24, 24, 23, 25, 24, 25, 26, 26, 25, 27, 26, 27, 28, 28, 27, 29, 28, 29, 30, 30, 29, 31, 30, 31, 32, 32, 31, 33, 32, 33, 34, 34, 33, 35, 34, 35, 36, 36, 35, 37, 36, 37, 38, 38, 37, 39, 38, 39, 40, 40, 39, 41, 40, 41, 42, 42, 41, 43, 42, 43, 44, 44, 43, 45, 44, 45, 46, 46, 45, 47, 46, 47, 48, 48, 47, 49, 50, 52, 51, 50, 53, 52, 50, 54, 53, 50, 55, 54, 50, 56, 55, 50, 57, 56, 50, 58, 57, 50, 59, 58, 50, 60, 59, 50, 61, 60, 50, 62, 61, 50, 63, 62, 50, 64, 63, 50, 65, 64, 50, 66, 65, 50, 67, 66, 50, 68, 67, 50, 69, 68, 50, 70, 69, 50, 71, 70, 50, 72, 71, 50, 73, 72, 50, 74, 73, 50, 75, 74, 76, 77, 78, 76, 78, 79, 76, 79, 80, 76, 80, 81, 76, 81, 82, 76, 82, 83, 76, 83, 84, 76, 84, 85, 76, 85, 86, 76, 86, 87, 76, 87, 88, 76, 88, 89, 76, 89, 90, 76, 90, 91, 76, 91, 92, 76, 92, 93, 76, 93, 94, 76, 94, 95, 76, 95, 96, 76, 96, 97, 76, 97, 98, 76, 98, 99, 76, 99, 100, 76, 100, 101],
+                    "bits": 16
+                  },
+                  "typed": true
+                }
+              },
+              "material": {
+                "type": "pbr",
+                "baseColor": [0.42, 0.55, 0.75],
+                "metallic": 0,
+                "roughness": 0.9,
+                "reflectance": 0.5,
+                "opacity": 1,
+                "alphaCutoff": 0,
+                "emissiveFactor": [0, 0, 0],
+                "emissiveIntensity": 1,
+                "displacementScale": 0.05,
+                "depthSpace": "uv",
+                "invertHeight": false,
+                "clipSilhouette": false,
+                "uvProjection": "box",
+                "uvSpace": "world",
+                "textures": {
+                  "baseColorTexture": "d4a96a210b1af85c70925ceced937cb7"
+                },
+                "config": {
+                  "side": "front",
+                  "wireframe": false,
+                  "transparent": false,
+                  "castShadow": true,
+                  "probeable": true
+                }
+              }
+            },
+            "animationMappings": null,
+            "stateMachine": null,
+            "ragdoll": null
+          },
+          {
+            "id": "8e98c981a11d12e8ad039da5779c3470",
+            "name": "Pillar 2",
+            "type": "model",
+            "position": [11, 2, -7],
+            "rotation": [0, 0, 0],
+            "scale": [0.800000011920929, 4, 0.800000011920929],
+            "children": [],
+            "variables": {
+              "__materialId": {
+                "type": "string",
+                "value": "8aa2f149c706ee8d1dd0cc8a3d19251d",
+                "access": "public"
+              }
+            },
+            "spawnOnStart": true,
+            "model": {
+              "geometry": {
+                "$geo": {
+                  "positions": {
+                    "n": [0.5, -0.5, 0, 0.5, 0.5, 0, 0.4829599857330322, -0.5, 0.1294099986553192, 0.4829599857330322, 0.5, 0.1294099986553192, 0.4330100119113922, -0.5, 0.25, 0.4330100119113922, 0.5, 0.25, 0.353549987077713, -0.5, 0.353549987077713, 0.353549987077713, 0.5, 0.353549987077713, 0.25, -0.5, 0.4330100119113922, 0.25, 0.5, 0.4330100119113922, 0.1294099986553192, -0.5, 0.4829599857330322, 0.1294099986553192, 0.5, 0.4829599857330322, 0, -0.5, 0.5, 0, 0.5, 0.5, -0.1294099986553192, -0.5, 0.4829599857330322, -0.1294099986553192, 0.5, 0.4829599857330322, -0.25, -0.5, 0.4330100119113922, -0.25, 0.5, 0.4330100119113922, -0.353549987077713, -0.5, 0.353549987077713, -0.353549987077713, 0.5, 0.353549987077713, -0.4330100119113922, -0.5, 0.25, -0.4330100119113922, 0.5, 0.25, -0.4829599857330322, -0.5, 0.1294099986553192, -0.4829599857330322, 0.5, 0.1294099986553192, -0.5, -0.5, 0, -0.5, 0.5, 0, -0.4829599857330322, -0.5, -0.1294099986553192, -0.4829599857330322, 0.5, -0.1294099986553192, -0.4330100119113922, -0.5, -0.25, -0.4330100119113922, 0.5, -0.25, -0.353549987077713, -0.5, -0.353549987077713, -0.353549987077713, 0.5, -0.353549987077713, -0.25, -0.5, -0.4330100119113922, -0.25, 0.5, -0.4330100119113922, -0.1294099986553192, -0.5, -0.4829599857330322, -0.1294099986553192, 0.5, -0.4829599857330322, 0, -0.5, -0.5, 0, 0.5, -0.5, 0.1294099986553192, -0.5, -0.4829599857330322, 0.1294099986553192, 0.5, -0.4829599857330322, 0.25, -0.5, -0.4330100119113922, 0.25, 0.5, -0.4330100119113922, 0.353549987077713, -0.5, -0.353549987077713, 0.353549987077713, 0.5, -0.353549987077713, 0.4330100119113922, -0.5, -0.25, 0.4330100119113922, 0.5, -0.25, 0.4829599857330322, -0.5, -0.1294099986553192, 0.4829599857330322, 0.5, -0.1294099986553192, 0.5, -0.5, 0, 0.5, 0.5, 0, 0, 0.5, 0, 0.5, 0.5, 0, 0.4829599857330322, 0.5, 0.1294099986553192, 0.4330100119113922, 0.5, 0.25, 0.353549987077713, 0.5, 0.353549987077713, 0.25, 0.5, 0.4330100119113922, 0.1294099986553192, 0.5, 0.4829599857330322, 0, 0.5, 0.5, -0.1294099986553192, 0.5, 0.4829599857330322, -0.25, 0.5, 0.4330100119113922, -0.353549987077713, 0.5, 0.353549987077713, -0.4330100119113922, 0.5, 0.25, -0.4829599857330322, 0.5, 0.1294099986553192, -0.5, 0.5, 0, -0.4829599857330322, 0.5, -0.1294099986553192, -0.4330100119113922, 0.5, -0.25, -0.353549987077713, 0.5, -0.353549987077713, -0.25, 0.5, -0.4330100119113922, -0.1294099986553192, 0.5, -0.4829599857330322, 0, 0.5, -0.5, 0.1294099986553192, 0.5, -0.4829599857330322, 0.25, 0.5, -0.4330100119113922, 0.353549987077713, 0.5, -0.353549987077713, 0.4330100119113922, 0.5, -0.25, 0.4829599857330322, 0.5, -0.1294099986553192, 0.5, 0.5, 0, 0, -0.5, 0, 0.5, -0.5, 0, 0.4829599857330322, -0.5, 0.1294099986553192, 0.4330100119113922, -0.5, 0.25, 0.353549987077713, -0.5, 0.353549987077713, 0.25, -0.5, 0.4330100119113922, 0.1294099986553192, -0.5, 0.4829599857330322, 0, -0.5, 0.5, -0.1294099986553192, -0.5, 0.4829599857330322, -0.25, -0.5, 0.4330100119113922, -0.353549987077713, -0.5, 0.353549987077713, -0.4330100119113922, -0.5, 0.25, -0.4829599857330322, -0.5, 0.1294099986553192, -0.5, -0.5, 0, -0.4829599857330322, -0.5, -0.1294099986553192, -0.4330100119113922, -0.5, -0.25, -0.353549987077713, -0.5, -0.353549987077713, -0.25, -0.5, -0.4330100119113922, -0.1294099986553192, -0.5, -0.4829599857330322, 0, -0.5, -0.5, 0.1294099986553192, -0.5, -0.4829599857330322, 0.25, -0.5, -0.4330100119113922, 0.353549987077713, -0.5, -0.353549987077713, 0.4330100119113922, -0.5, -0.25, 0.4829599857330322, -0.5, -0.1294099986553192, 0.5, -0.5, 0]
+                  },
+                  "normals": {
+                    "n": [1, 0, 0, 1, 0, 0, 0.9659299850463867, 0, 0.2588199973106384, 0.9659299850463867, 0, 0.2588199973106384, 0.8660299777984619, 0, 0.5, 0.8660299777984619, 0, 0.5, 0.7071099877357483, 0, 0.7071099877357483, 0.7071099877357483, 0, 0.7071099877357483, 0.5, 0, 0.8660299777984619, 0.5, 0, 0.8660299777984619, 0.2588199973106384, 0, 0.9659299850463867, 0.2588199973106384, 0, 0.9659299850463867, 0, 0, 1, 0, 0, 1, -0.2588199973106384, 0, 0.9659299850463867, -0.2588199973106384, 0, 0.9659299850463867, -0.5, 0, 0.8660299777984619, -0.5, 0, 0.8660299777984619, -0.7071099877357483, 0, 0.7071099877357483, -0.7071099877357483, 0, 0.7071099877357483, -0.8660299777984619, 0, 0.5, -0.8660299777984619, 0, 0.5, -0.9659299850463867, 0, 0.2588199973106384, -0.9659299850463867, 0, 0.2588199973106384, -1, 0, 0, -1, 0, 0, -0.9659299850463867, 0, -0.2588199973106384, -0.9659299850463867, 0, -0.2588199973106384, -0.8660299777984619, 0, -0.5, -0.8660299777984619, 0, -0.5, -0.7071099877357483, 0, -0.7071099877357483, -0.7071099877357483, 0, -0.7071099877357483, -0.5, 0, -0.8660299777984619, -0.5, 0, -0.8660299777984619, -0.2588199973106384, 0, -0.9659299850463867, -0.2588199973106384, 0, -0.9659299850463867, 0, 0, -1, 0, 0, -1, 0.2588199973106384, 0, -0.9659299850463867, 0.2588199973106384, 0, -0.9659299850463867, 0.5, 0, -0.8660299777984619, 0.5, 0, -0.8660299777984619, 0.7071099877357483, 0, -0.7071099877357483, 0.7071099877357483, 0, -0.7071099877357483, 0.8660299777984619, 0, -0.5, 0.8660299777984619, 0, -0.5, 0.9659299850463867, 0, -0.2588199973106384, 0.9659299850463867, 0, -0.2588199973106384, 1, 0, 0, 1, 0, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0]
+                  },
+                  "tangents": {
+                    "n": [0, 0, 1, 0, 0, 1, -0.258819043636322, 0, 0.9659258127212524, -0.258819043636322, 0, 0.9659258127212524, -0.5, 0, 0.8660253882408142, -0.5, 0, 0.8660253882408142, -0.7071067690849304, 0, 0.7071067690849304, -0.7071067690849304, 0, 0.7071067690849304, -0.8660253882408142, 0, 0.5, -0.8660253882408142, 0, 0.5, -0.9659258127212524, 0, 0.258819043636322, -0.9659258127212524, 0, 0.258819043636322, -1, 0, 5.95773924515562e-17, -1, 0, 5.95773858341113e-17, -0.9659258127212524, 0, -0.258819043636322, -0.9659258127212524, 0, -0.258819043636322, -0.8660253882408142, 0, -0.5, -0.8660253882408142, 0, -0.5, -0.7071067690849304, 0, -0.7071067690849304, -0.7071067690849304, 0, -0.7071067690849304, -0.5, 0, -0.8660253882408142, -0.5, 0, -0.8660253882408142, -0.258819043636322, 0, -0.9659258127212524, -0.258819043636322, 0, -0.9659258127212524, -1.2511252348652353e-16, 0, -1, -1.2511256319119293e-16, 0, -1, 0.258819043636322, 0, -0.9659258127212524, 0.258819043636322, 0, -0.9659258127212524, 0.5, 0, -0.8660253882408142, 0.5, 0, -0.8660253882408142, 0.7071067690849304, 0, -0.7071067690849304, 0.7071067690849304, 0, -0.7071067690849304, 0.8660253882408142, 0, -0.5, 0.8660253882408142, 0, -0.5, 0.9659258127212524, 0, -0.258819043636322, 0.9659258127212524, 0, -0.258819043636322, 1, 0, -1.8469001519975324e-16, 1, 0, -1.8469001519975324e-16, 0.9659258127212524, 0, 0.258819043636322, 0.9659258127212524, 0, 0.258819043636322, 0.8660253882408142, 0, 0.5, 0.8660253882408142, 0, 0.5, 0.7071067690849304, 0, 0.7071067690849304, 0.7071067690849304, 0, 0.7071067690849304, 0.5, 0, 0.8660253882408142, 0.5, 0, 0.8660253882408142, 0.258819043636322, 0, 0.9659258127212524, 0.258819043636322, 0, 0.9659258127212524, 2.5022517932194507e-16, 0, 1, 2.5022517932194507e-16, 0, 1, 1, 0, -2.284696674673104e-15, 1, 0, 0, 1, 0, -5.7573682710199137e-8, 1, 0, -2.775317004205871e-14, 1, 0, 3.9274606677963675e-8, 1, 0, -1.2952285999290325e-7, 1, 0, -1.1122381238237722e-7, 1, 0, 0, 1, 0, 1.1122378396066779e-7, 1, 0, 1.2952284578204853e-7, 1, 0, -3.927459957253632e-8, 1, 0, 2.248165541262389e-14, 1, 0, 5.757367560477178e-8, 1, 0, -1.2246468525851679e-16, 1, 0, -6.123234262925839e-17, 1, 0, 0, 1, 0, 2.035536539324312e-8, 1, 0, 1.7479548475307638e-8, 1, 0, -3.166265116760769e-8, 1, 0, -6.062024644602369e-15, 1, 0, 3.1662644062180334e-8, 1, 0, -1.747954314623712e-8, 1, 0, -2.035536184052944e-8, 1, 0, 0, 1, 0, -1.2246468525851679e-16, 1, 0, -2.4492937051703357e-16, 1, 0, 2.215858307049747e-15, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 2.035536184052944e-8, 1, 0, 1.747954314623712e-8, 1, 0, -3.1662644062180334e-8, 1, 0, 5.896500007148775e-15, 1, 0, 3.166264761489401e-8, 1, 0, -1.7479548475307638e-8, 1, 0, -2.035536539324312e-8, 1, 0, 0, 1, 0, -6.123234262925839e-17, 1, 0, -1.2246468525851679e-16, 1, 0, -5.757367560477178e-8, 1, 0, -2.024559854615568e-14, 1, 0, 3.927459957253632e-8, 1, 0, -1.2952284578204853e-7, 1, 0, -1.1122378396066779e-7, 1, 0, 0, 1, 0, 1.1122381238237722e-7, 1, 0, 1.2952285999290325e-7, 1, 0, -3.9274606677963675e-8, 1, 0, 2.6712762861078043e-14, 1, 0, 5.7573682710199137e-8, 1, 0, -2.4492937051703357e-16]
+                  },
+                  "bitangents": {
+                    "n": [0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 2.284696674673104e-15, 0, 1, 0, 0, 1, 5.7573682710199137e-8, 0, 1, 2.775317004205871e-14, 0, 1, -3.9274606677963675e-8, 0, 1, 1.2952285999290325e-7, 0, 1, 1.1122381238237722e-7, 0, 1, 0, 0, 1, -1.1122378396066779e-7, 0, 1, -1.2952284578204853e-7, 0, 1, 3.927459957253632e-8, 0, 1, -2.248165541262389e-14, 0, 1, -5.757367560477178e-8, 0, 1, 1.2246468525851679e-16, 0, 1, 6.123234262925839e-17, 0, 1, 0, 0, 1, -2.035536539324312e-8, 0, 1, -1.7479548475307638e-8, 0, 1, 3.166265116760769e-8, 0, 1, 6.062024644602369e-15, 0, 1, -3.1662644062180334e-8, 0, 1, 1.747954314623712e-8, 0, 1, 2.035536184052944e-8, 0, 1, 0, 0, 1, 1.2246468525851679e-16, 0, 1, 2.4492937051703357e-16, 0, 1, 2.215858307049747e-15, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 2.035536184052944e-8, 0, -1, 1.747954314623712e-8, 0, -1, -3.1662644062180334e-8, 0, -1, 5.896500007148775e-15, 0, -1, 3.166264761489401e-8, 0, -1, -1.7479548475307638e-8, 0, -1, -2.035536539324312e-8, 0, -1, 0, 0, -1, -6.123234262925839e-17, 0, -1, -1.2246468525851679e-16, 0, -1, -5.757367560477178e-8, 0, -1, -2.024559854615568e-14, 0, -1, 3.927459957253632e-8, 0, -1, -1.2952284578204853e-7, 0, -1, -1.1122378396066779e-7, 0, -1, 0, 0, -1, 1.1122381238237722e-7, 0, -1, 1.2952285999290325e-7, 0, -1, -3.9274606677963675e-8, 0, -1, 2.6712762861078043e-14, 0, -1, 5.7573682710199137e-8, 0, -1, -2.4492937051703357e-16, 0, -1]
+                  },
+                  "texCoords": {
+                    "n": [0, 0, 0, 1, 0.041669998317956924, 0, 0.041669998317956924, 1, 0.08332999795675278, 0, 0.08332999795675278, 1, 0.125, 0, 0.125, 1, 0.16666999459266663, 0, 0.16666999459266663, 1, 0.20833000540733337, 0, 0.20833000540733337, 1, 0.25, 0, 0.25, 1, 0.2916699945926666, 0, 0.2916699945926666, 1, 0.3333300054073334, 0, 0.3333300054073334, 1, 0.375, 0, 0.375, 1, 0.4166699945926666, 0, 0.4166699945926666, 1, 0.4583300054073334, 0, 0.4583300054073334, 1, 0.5, 0, 0.5, 1, 0.541670024394989, 0, 0.541670024394989, 1, 0.583329975605011, 0, 0.583329975605011, 1, 0.625, 0, 0.625, 1, 0.666670024394989, 0, 0.666670024394989, 1, 0.708329975605011, 0, 0.708329975605011, 1, 0.75, 0, 0.75, 1, 0.791670024394989, 0, 0.791670024394989, 1, 0.833329975605011, 0, 0.833329975605011, 1, 0.875, 0, 0.875, 1, 0.916670024394989, 0, 0.916670024394989, 1, 0.958329975605011, 0, 0.958329975605011, 1, 1, 0, 1, 1, 0.5, 0.5, 1, 0.5, 0.9829599857330322, 0.6294100284576416, 0.9330099821090698, 0.75, 0.8535500168800354, 0.8535500168800354, 0.75, 0.9330099821090698, 0.6294100284576416, 0.9829599857330322, 0.5, 1, 0.3705900013446808, 0.9829599857330322, 0.25, 0.9330099821090698, 0.1464499980211258, 0.8535500168800354, 0.06699000298976898, 0.75, 0.01703999936580658, 0.6294100284576416, 0, 0.5, 0.01703999936580658, 0.3705900013446808, 0.06699000298976898, 0.25, 0.1464499980211258, 0.1464499980211258, 0.25, 0.06699000298976898, 0.3705900013446808, 0.01703999936580658, 0.5, 0, 0.6294100284576416, 0.01703999936580658, 0.75, 0.06699000298976898, 0.8535500168800354, 0.1464499980211258, 0.9330099821090698, 0.25, 0.9829599857330322, 0.3705900013446808, 1, 0.5, 0.5, 0.5, 1, 0.5, 0.9829599857330322, 0.3705900013446808, 0.9330099821090698, 0.25, 0.8535500168800354, 0.1464499980211258, 0.75, 0.06699000298976898, 0.6294100284576416, 0.01703999936580658, 0.5, 0, 0.3705900013446808, 0.01703999936580658, 0.25, 0.06699000298976898, 0.1464499980211258, 0.1464499980211258, 0.06699000298976898, 0.25, 0.01703999936580658, 0.3705900013446808, 0, 0.5, 0.01703999936580658, 0.6294100284576416, 0.06699000298976898, 0.75, 0.1464499980211258, 0.8535500168800354, 0.25, 0.9330099821090698, 0.3705900013446808, 0.9829599857330322, 0.5, 1, 0.6294100284576416, 0.9829599857330322, 0.75, 0.9330099821090698, 0.8535500168800354, 0.8535500168800354, 0.9330099821090698, 0.75, 0.9829599857330322, 0.6294100284576416, 1, 0.5]
+                  },
+                  "indices": {
+                    "n": [0, 1, 2, 2, 1, 3, 2, 3, 4, 4, 3, 5, 4, 5, 6, 6, 5, 7, 6, 7, 8, 8, 7, 9, 8, 9, 10, 10, 9, 11, 10, 11, 12, 12, 11, 13, 12, 13, 14, 14, 13, 15, 14, 15, 16, 16, 15, 17, 16, 17, 18, 18, 17, 19, 18, 19, 20, 20, 19, 21, 20, 21, 22, 22, 21, 23, 22, 23, 24, 24, 23, 25, 24, 25, 26, 26, 25, 27, 26, 27, 28, 28, 27, 29, 28, 29, 30, 30, 29, 31, 30, 31, 32, 32, 31, 33, 32, 33, 34, 34, 33, 35, 34, 35, 36, 36, 35, 37, 36, 37, 38, 38, 37, 39, 38, 39, 40, 40, 39, 41, 40, 41, 42, 42, 41, 43, 42, 43, 44, 44, 43, 45, 44, 45, 46, 46, 45, 47, 46, 47, 48, 48, 47, 49, 50, 52, 51, 50, 53, 52, 50, 54, 53, 50, 55, 54, 50, 56, 55, 50, 57, 56, 50, 58, 57, 50, 59, 58, 50, 60, 59, 50, 61, 60, 50, 62, 61, 50, 63, 62, 50, 64, 63, 50, 65, 64, 50, 66, 65, 50, 67, 66, 50, 68, 67, 50, 69, 68, 50, 70, 69, 50, 71, 70, 50, 72, 71, 50, 73, 72, 50, 74, 73, 50, 75, 74, 76, 77, 78, 76, 78, 79, 76, 79, 80, 76, 80, 81, 76, 81, 82, 76, 82, 83, 76, 83, 84, 76, 84, 85, 76, 85, 86, 76, 86, 87, 76, 87, 88, 76, 88, 89, 76, 89, 90, 76, 90, 91, 76, 91, 92, 76, 92, 93, 76, 93, 94, 76, 94, 95, 76, 95, 96, 76, 96, 97, 76, 97, 98, 76, 98, 99, 76, 99, 100, 76, 100, 101],
+                    "bits": 16
+                  },
+                  "typed": true
+                }
+              },
+              "material": {
+                "type": "pbr",
+                "baseColor": [0.42, 0.55, 0.75],
+                "metallic": 0,
+                "roughness": 0.9,
+                "reflectance": 0.5,
+                "opacity": 1,
+                "alphaCutoff": 0,
+                "emissiveFactor": [0, 0, 0],
+                "emissiveIntensity": 1,
+                "displacementScale": 0.05,
+                "depthSpace": "uv",
+                "invertHeight": false,
+                "clipSilhouette": false,
+                "uvProjection": "box",
+                "uvSpace": "world",
+                "textures": {
+                  "baseColorTexture": "d4a96a210b1af85c70925ceced937cb7"
+                },
+                "config": {
+                  "side": "front",
+                  "wireframe": false,
+                  "transparent": false,
+                  "castShadow": true,
+                  "probeable": true
+                }
+              }
+            },
+            "animationMappings": null,
+            "stateMachine": null,
+            "ragdoll": null
+          },
+          {
+            "id": "847a90f25291d49882da28f0b3784195",
+            "name": "Pillar 3",
+            "type": "model",
+            "position": [14, 2, -5],
+            "rotation": [0, 0, 0],
+            "scale": [0.800000011920929, 4, 0.800000011920929],
+            "children": [],
+            "variables": {
+              "__materialId": {
+                "type": "string",
+                "value": "8aa2f149c706ee8d1dd0cc8a3d19251d",
+                "access": "public"
+              }
+            },
+            "spawnOnStart": true,
+            "model": {
+              "geometry": {
+                "$geo": {
+                  "positions": {
+                    "n": [0.5, -0.5, 0, 0.5, 0.5, 0, 0.4829599857330322, -0.5, 0.1294099986553192, 0.4829599857330322, 0.5, 0.1294099986553192, 0.4330100119113922, -0.5, 0.25, 0.4330100119113922, 0.5, 0.25, 0.353549987077713, -0.5, 0.353549987077713, 0.353549987077713, 0.5, 0.353549987077713, 0.25, -0.5, 0.4330100119113922, 0.25, 0.5, 0.4330100119113922, 0.1294099986553192, -0.5, 0.4829599857330322, 0.1294099986553192, 0.5, 0.4829599857330322, 0, -0.5, 0.5, 0, 0.5, 0.5, -0.1294099986553192, -0.5, 0.4829599857330322, -0.1294099986553192, 0.5, 0.4829599857330322, -0.25, -0.5, 0.4330100119113922, -0.25, 0.5, 0.4330100119113922, -0.353549987077713, -0.5, 0.353549987077713, -0.353549987077713, 0.5, 0.353549987077713, -0.4330100119113922, -0.5, 0.25, -0.4330100119113922, 0.5, 0.25, -0.4829599857330322, -0.5, 0.1294099986553192, -0.4829599857330322, 0.5, 0.1294099986553192, -0.5, -0.5, 0, -0.5, 0.5, 0, -0.4829599857330322, -0.5, -0.1294099986553192, -0.4829599857330322, 0.5, -0.1294099986553192, -0.4330100119113922, -0.5, -0.25, -0.4330100119113922, 0.5, -0.25, -0.353549987077713, -0.5, -0.353549987077713, -0.353549987077713, 0.5, -0.353549987077713, -0.25, -0.5, -0.4330100119113922, -0.25, 0.5, -0.4330100119113922, -0.1294099986553192, -0.5, -0.4829599857330322, -0.1294099986553192, 0.5, -0.4829599857330322, 0, -0.5, -0.5, 0, 0.5, -0.5, 0.1294099986553192, -0.5, -0.4829599857330322, 0.1294099986553192, 0.5, -0.4829599857330322, 0.25, -0.5, -0.4330100119113922, 0.25, 0.5, -0.4330100119113922, 0.353549987077713, -0.5, -0.353549987077713, 0.353549987077713, 0.5, -0.353549987077713, 0.4330100119113922, -0.5, -0.25, 0.4330100119113922, 0.5, -0.25, 0.4829599857330322, -0.5, -0.1294099986553192, 0.4829599857330322, 0.5, -0.1294099986553192, 0.5, -0.5, 0, 0.5, 0.5, 0, 0, 0.5, 0, 0.5, 0.5, 0, 0.4829599857330322, 0.5, 0.1294099986553192, 0.4330100119113922, 0.5, 0.25, 0.353549987077713, 0.5, 0.353549987077713, 0.25, 0.5, 0.4330100119113922, 0.1294099986553192, 0.5, 0.4829599857330322, 0, 0.5, 0.5, -0.1294099986553192, 0.5, 0.4829599857330322, -0.25, 0.5, 0.4330100119113922, -0.353549987077713, 0.5, 0.353549987077713, -0.4330100119113922, 0.5, 0.25, -0.4829599857330322, 0.5, 0.1294099986553192, -0.5, 0.5, 0, -0.4829599857330322, 0.5, -0.1294099986553192, -0.4330100119113922, 0.5, -0.25, -0.353549987077713, 0.5, -0.353549987077713, -0.25, 0.5, -0.4330100119113922, -0.1294099986553192, 0.5, -0.4829599857330322, 0, 0.5, -0.5, 0.1294099986553192, 0.5, -0.4829599857330322, 0.25, 0.5, -0.4330100119113922, 0.353549987077713, 0.5, -0.353549987077713, 0.4330100119113922, 0.5, -0.25, 0.4829599857330322, 0.5, -0.1294099986553192, 0.5, 0.5, 0, 0, -0.5, 0, 0.5, -0.5, 0, 0.4829599857330322, -0.5, 0.1294099986553192, 0.4330100119113922, -0.5, 0.25, 0.353549987077713, -0.5, 0.353549987077713, 0.25, -0.5, 0.4330100119113922, 0.1294099986553192, -0.5, 0.4829599857330322, 0, -0.5, 0.5, -0.1294099986553192, -0.5, 0.4829599857330322, -0.25, -0.5, 0.4330100119113922, -0.353549987077713, -0.5, 0.353549987077713, -0.4330100119113922, -0.5, 0.25, -0.4829599857330322, -0.5, 0.1294099986553192, -0.5, -0.5, 0, -0.4829599857330322, -0.5, -0.1294099986553192, -0.4330100119113922, -0.5, -0.25, -0.353549987077713, -0.5, -0.353549987077713, -0.25, -0.5, -0.4330100119113922, -0.1294099986553192, -0.5, -0.4829599857330322, 0, -0.5, -0.5, 0.1294099986553192, -0.5, -0.4829599857330322, 0.25, -0.5, -0.4330100119113922, 0.353549987077713, -0.5, -0.353549987077713, 0.4330100119113922, -0.5, -0.25, 0.4829599857330322, -0.5, -0.1294099986553192, 0.5, -0.5, 0]
+                  },
+                  "normals": {
+                    "n": [1, 0, 0, 1, 0, 0, 0.9659299850463867, 0, 0.2588199973106384, 0.9659299850463867, 0, 0.2588199973106384, 0.8660299777984619, 0, 0.5, 0.8660299777984619, 0, 0.5, 0.7071099877357483, 0, 0.7071099877357483, 0.7071099877357483, 0, 0.7071099877357483, 0.5, 0, 0.8660299777984619, 0.5, 0, 0.8660299777984619, 0.2588199973106384, 0, 0.9659299850463867, 0.2588199973106384, 0, 0.9659299850463867, 0, 0, 1, 0, 0, 1, -0.2588199973106384, 0, 0.9659299850463867, -0.2588199973106384, 0, 0.9659299850463867, -0.5, 0, 0.8660299777984619, -0.5, 0, 0.8660299777984619, -0.7071099877357483, 0, 0.7071099877357483, -0.7071099877357483, 0, 0.7071099877357483, -0.8660299777984619, 0, 0.5, -0.8660299777984619, 0, 0.5, -0.9659299850463867, 0, 0.2588199973106384, -0.9659299850463867, 0, 0.2588199973106384, -1, 0, 0, -1, 0, 0, -0.9659299850463867, 0, -0.2588199973106384, -0.9659299850463867, 0, -0.2588199973106384, -0.8660299777984619, 0, -0.5, -0.8660299777984619, 0, -0.5, -0.7071099877357483, 0, -0.7071099877357483, -0.7071099877357483, 0, -0.7071099877357483, -0.5, 0, -0.8660299777984619, -0.5, 0, -0.8660299777984619, -0.2588199973106384, 0, -0.9659299850463867, -0.2588199973106384, 0, -0.9659299850463867, 0, 0, -1, 0, 0, -1, 0.2588199973106384, 0, -0.9659299850463867, 0.2588199973106384, 0, -0.9659299850463867, 0.5, 0, -0.8660299777984619, 0.5, 0, -0.8660299777984619, 0.7071099877357483, 0, -0.7071099877357483, 0.7071099877357483, 0, -0.7071099877357483, 0.8660299777984619, 0, -0.5, 0.8660299777984619, 0, -0.5, 0.9659299850463867, 0, -0.2588199973106384, 0.9659299850463867, 0, -0.2588199973106384, 1, 0, 0, 1, 0, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0]
+                  },
+                  "tangents": {
+                    "n": [0, 0, 1, 0, 0, 1, -0.258819043636322, 0, 0.9659258127212524, -0.258819043636322, 0, 0.9659258127212524, -0.5, 0, 0.8660253882408142, -0.5, 0, 0.8660253882408142, -0.7071067690849304, 0, 0.7071067690849304, -0.7071067690849304, 0, 0.7071067690849304, -0.8660253882408142, 0, 0.5, -0.8660253882408142, 0, 0.5, -0.9659258127212524, 0, 0.258819043636322, -0.9659258127212524, 0, 0.258819043636322, -1, 0, 5.95773924515562e-17, -1, 0, 5.95773858341113e-17, -0.9659258127212524, 0, -0.258819043636322, -0.9659258127212524, 0, -0.258819043636322, -0.8660253882408142, 0, -0.5, -0.8660253882408142, 0, -0.5, -0.7071067690849304, 0, -0.7071067690849304, -0.7071067690849304, 0, -0.7071067690849304, -0.5, 0, -0.8660253882408142, -0.5, 0, -0.8660253882408142, -0.258819043636322, 0, -0.9659258127212524, -0.258819043636322, 0, -0.9659258127212524, -1.2511252348652353e-16, 0, -1, -1.2511256319119293e-16, 0, -1, 0.258819043636322, 0, -0.9659258127212524, 0.258819043636322, 0, -0.9659258127212524, 0.5, 0, -0.8660253882408142, 0.5, 0, -0.8660253882408142, 0.7071067690849304, 0, -0.7071067690849304, 0.7071067690849304, 0, -0.7071067690849304, 0.8660253882408142, 0, -0.5, 0.8660253882408142, 0, -0.5, 0.9659258127212524, 0, -0.258819043636322, 0.9659258127212524, 0, -0.258819043636322, 1, 0, -1.8469001519975324e-16, 1, 0, -1.8469001519975324e-16, 0.9659258127212524, 0, 0.258819043636322, 0.9659258127212524, 0, 0.258819043636322, 0.8660253882408142, 0, 0.5, 0.8660253882408142, 0, 0.5, 0.7071067690849304, 0, 0.7071067690849304, 0.7071067690849304, 0, 0.7071067690849304, 0.5, 0, 0.8660253882408142, 0.5, 0, 0.8660253882408142, 0.258819043636322, 0, 0.9659258127212524, 0.258819043636322, 0, 0.9659258127212524, 2.5022517932194507e-16, 0, 1, 2.5022517932194507e-16, 0, 1, 1, 0, -2.284696674673104e-15, 1, 0, 0, 1, 0, -5.7573682710199137e-8, 1, 0, -2.775317004205871e-14, 1, 0, 3.9274606677963675e-8, 1, 0, -1.2952285999290325e-7, 1, 0, -1.1122381238237722e-7, 1, 0, 0, 1, 0, 1.1122378396066779e-7, 1, 0, 1.2952284578204853e-7, 1, 0, -3.927459957253632e-8, 1, 0, 2.248165541262389e-14, 1, 0, 5.757367560477178e-8, 1, 0, -1.2246468525851679e-16, 1, 0, -6.123234262925839e-17, 1, 0, 0, 1, 0, 2.035536539324312e-8, 1, 0, 1.7479548475307638e-8, 1, 0, -3.166265116760769e-8, 1, 0, -6.062024644602369e-15, 1, 0, 3.1662644062180334e-8, 1, 0, -1.747954314623712e-8, 1, 0, -2.035536184052944e-8, 1, 0, 0, 1, 0, -1.2246468525851679e-16, 1, 0, -2.4492937051703357e-16, 1, 0, 2.215858307049747e-15, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 2.035536184052944e-8, 1, 0, 1.747954314623712e-8, 1, 0, -3.1662644062180334e-8, 1, 0, 5.896500007148775e-15, 1, 0, 3.166264761489401e-8, 1, 0, -1.7479548475307638e-8, 1, 0, -2.035536539324312e-8, 1, 0, 0, 1, 0, -6.123234262925839e-17, 1, 0, -1.2246468525851679e-16, 1, 0, -5.757367560477178e-8, 1, 0, -2.024559854615568e-14, 1, 0, 3.927459957253632e-8, 1, 0, -1.2952284578204853e-7, 1, 0, -1.1122378396066779e-7, 1, 0, 0, 1, 0, 1.1122381238237722e-7, 1, 0, 1.2952285999290325e-7, 1, 0, -3.9274606677963675e-8, 1, 0, 2.6712762861078043e-14, 1, 0, 5.7573682710199137e-8, 1, 0, -2.4492937051703357e-16]
+                  },
+                  "bitangents": {
+                    "n": [0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 2.284696674673104e-15, 0, 1, 0, 0, 1, 5.7573682710199137e-8, 0, 1, 2.775317004205871e-14, 0, 1, -3.9274606677963675e-8, 0, 1, 1.2952285999290325e-7, 0, 1, 1.1122381238237722e-7, 0, 1, 0, 0, 1, -1.1122378396066779e-7, 0, 1, -1.2952284578204853e-7, 0, 1, 3.927459957253632e-8, 0, 1, -2.248165541262389e-14, 0, 1, -5.757367560477178e-8, 0, 1, 1.2246468525851679e-16, 0, 1, 6.123234262925839e-17, 0, 1, 0, 0, 1, -2.035536539324312e-8, 0, 1, -1.7479548475307638e-8, 0, 1, 3.166265116760769e-8, 0, 1, 6.062024644602369e-15, 0, 1, -3.1662644062180334e-8, 0, 1, 1.747954314623712e-8, 0, 1, 2.035536184052944e-8, 0, 1, 0, 0, 1, 1.2246468525851679e-16, 0, 1, 2.4492937051703357e-16, 0, 1, 2.215858307049747e-15, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 2.035536184052944e-8, 0, -1, 1.747954314623712e-8, 0, -1, -3.1662644062180334e-8, 0, -1, 5.896500007148775e-15, 0, -1, 3.166264761489401e-8, 0, -1, -1.7479548475307638e-8, 0, -1, -2.035536539324312e-8, 0, -1, 0, 0, -1, -6.123234262925839e-17, 0, -1, -1.2246468525851679e-16, 0, -1, -5.757367560477178e-8, 0, -1, -2.024559854615568e-14, 0, -1, 3.927459957253632e-8, 0, -1, -1.2952284578204853e-7, 0, -1, -1.1122378396066779e-7, 0, -1, 0, 0, -1, 1.1122381238237722e-7, 0, -1, 1.2952285999290325e-7, 0, -1, -3.9274606677963675e-8, 0, -1, 2.6712762861078043e-14, 0, -1, 5.7573682710199137e-8, 0, -1, -2.4492937051703357e-16, 0, -1]
+                  },
+                  "texCoords": {
+                    "n": [0, 0, 0, 1, 0.041669998317956924, 0, 0.041669998317956924, 1, 0.08332999795675278, 0, 0.08332999795675278, 1, 0.125, 0, 0.125, 1, 0.16666999459266663, 0, 0.16666999459266663, 1, 0.20833000540733337, 0, 0.20833000540733337, 1, 0.25, 0, 0.25, 1, 0.2916699945926666, 0, 0.2916699945926666, 1, 0.3333300054073334, 0, 0.3333300054073334, 1, 0.375, 0, 0.375, 1, 0.4166699945926666, 0, 0.4166699945926666, 1, 0.4583300054073334, 0, 0.4583300054073334, 1, 0.5, 0, 0.5, 1, 0.541670024394989, 0, 0.541670024394989, 1, 0.583329975605011, 0, 0.583329975605011, 1, 0.625, 0, 0.625, 1, 0.666670024394989, 0, 0.666670024394989, 1, 0.708329975605011, 0, 0.708329975605011, 1, 0.75, 0, 0.75, 1, 0.791670024394989, 0, 0.791670024394989, 1, 0.833329975605011, 0, 0.833329975605011, 1, 0.875, 0, 0.875, 1, 0.916670024394989, 0, 0.916670024394989, 1, 0.958329975605011, 0, 0.958329975605011, 1, 1, 0, 1, 1, 0.5, 0.5, 1, 0.5, 0.9829599857330322, 0.6294100284576416, 0.9330099821090698, 0.75, 0.8535500168800354, 0.8535500168800354, 0.75, 0.9330099821090698, 0.6294100284576416, 0.9829599857330322, 0.5, 1, 0.3705900013446808, 0.9829599857330322, 0.25, 0.9330099821090698, 0.1464499980211258, 0.8535500168800354, 0.06699000298976898, 0.75, 0.01703999936580658, 0.6294100284576416, 0, 0.5, 0.01703999936580658, 0.3705900013446808, 0.06699000298976898, 0.25, 0.1464499980211258, 0.1464499980211258, 0.25, 0.06699000298976898, 0.3705900013446808, 0.01703999936580658, 0.5, 0, 0.6294100284576416, 0.01703999936580658, 0.75, 0.06699000298976898, 0.8535500168800354, 0.1464499980211258, 0.9330099821090698, 0.25, 0.9829599857330322, 0.3705900013446808, 1, 0.5, 0.5, 0.5, 1, 0.5, 0.9829599857330322, 0.3705900013446808, 0.9330099821090698, 0.25, 0.8535500168800354, 0.1464499980211258, 0.75, 0.06699000298976898, 0.6294100284576416, 0.01703999936580658, 0.5, 0, 0.3705900013446808, 0.01703999936580658, 0.25, 0.06699000298976898, 0.1464499980211258, 0.1464499980211258, 0.06699000298976898, 0.25, 0.01703999936580658, 0.3705900013446808, 0, 0.5, 0.01703999936580658, 0.6294100284576416, 0.06699000298976898, 0.75, 0.1464499980211258, 0.8535500168800354, 0.25, 0.9330099821090698, 0.3705900013446808, 0.9829599857330322, 0.5, 1, 0.6294100284576416, 0.9829599857330322, 0.75, 0.9330099821090698, 0.8535500168800354, 0.8535500168800354, 0.9330099821090698, 0.75, 0.9829599857330322, 0.6294100284576416, 1, 0.5]
+                  },
+                  "indices": {
+                    "n": [0, 1, 2, 2, 1, 3, 2, 3, 4, 4, 3, 5, 4, 5, 6, 6, 5, 7, 6, 7, 8, 8, 7, 9, 8, 9, 10, 10, 9, 11, 10, 11, 12, 12, 11, 13, 12, 13, 14, 14, 13, 15, 14, 15, 16, 16, 15, 17, 16, 17, 18, 18, 17, 19, 18, 19, 20, 20, 19, 21, 20, 21, 22, 22, 21, 23, 22, 23, 24, 24, 23, 25, 24, 25, 26, 26, 25, 27, 26, 27, 28, 28, 27, 29, 28, 29, 30, 30, 29, 31, 30, 31, 32, 32, 31, 33, 32, 33, 34, 34, 33, 35, 34, 35, 36, 36, 35, 37, 36, 37, 38, 38, 37, 39, 38, 39, 40, 40, 39, 41, 40, 41, 42, 42, 41, 43, 42, 43, 44, 44, 43, 45, 44, 45, 46, 46, 45, 47, 46, 47, 48, 48, 47, 49, 50, 52, 51, 50, 53, 52, 50, 54, 53, 50, 55, 54, 50, 56, 55, 50, 57, 56, 50, 58, 57, 50, 59, 58, 50, 60, 59, 50, 61, 60, 50, 62, 61, 50, 63, 62, 50, 64, 63, 50, 65, 64, 50, 66, 65, 50, 67, 66, 50, 68, 67, 50, 69, 68, 50, 70, 69, 50, 71, 70, 50, 72, 71, 50, 73, 72, 50, 74, 73, 50, 75, 74, 76, 77, 78, 76, 78, 79, 76, 79, 80, 76, 80, 81, 76, 81, 82, 76, 82, 83, 76, 83, 84, 76, 84, 85, 76, 85, 86, 76, 86, 87, 76, 87, 88, 76, 88, 89, 76, 89, 90, 76, 90, 91, 76, 91, 92, 76, 92, 93, 76, 93, 94, 76, 94, 95, 76, 95, 96, 76, 96, 97, 76, 97, 98, 76, 98, 99, 76, 99, 100, 76, 100, 101],
+                    "bits": 16
+                  },
+                  "typed": true
+                }
+              },
+              "material": {
+                "type": "pbr",
+                "baseColor": [0.42, 0.55, 0.75],
+                "metallic": 0,
+                "roughness": 0.9,
+                "reflectance": 0.5,
+                "opacity": 1,
+                "alphaCutoff": 0,
+                "emissiveFactor": [0, 0, 0],
+                "emissiveIntensity": 1,
+                "displacementScale": 0.05,
+                "depthSpace": "uv",
+                "invertHeight": false,
+                "clipSilhouette": false,
+                "uvProjection": "box",
+                "uvSpace": "world",
+                "textures": {
+                  "baseColorTexture": "d4a96a210b1af85c70925ceced937cb7"
+                },
+                "config": {
+                  "side": "front",
+                  "wireframe": false,
+                  "transparent": false,
+                  "castShadow": true,
+                  "probeable": true
+                }
+              }
+            },
+            "animationMappings": null,
+            "stateMachine": null,
+            "ragdoll": null
+          }
+        ],
         "variables": {},
         "spawnOnStart": true,
         "collider": {
+          "mass": 0,
           "linearDamping": 0.25,
           "angularDamping": 0.25,
           "linearConstraints": [1, 1, 1],
           "angularConstraints": [1, 1, 1],
-          "friction": 0.3,
+          "friction": 0.7,
           "restitution": 0,
           "simulatePhysics": true,
           "groundProbeDistance": 0,
@@ -4075,7 +4537,6 @@
           "canSleep": false,
           "layer": 4,
           "mask": -1,
-          "mass": 0,
           "shapes": [
             {
               "type": "cylinder",
@@ -4102,206 +4563,249 @@
               "rotation": [0, 0, 0]
             }
           ]
-        },
-        "children": [
-          {
-            "id": "5a2e24111c323b1c4b325d4799c2c76a",
-            "name": "Pillar 1",
-            "type": "model",
-            "position": [8, 2, -5],
-            "rotation": [0, 0, 0],
-            "scale": [0.800000011920929, 4, 0.800000011920929],
-            "children": [],
-            "spawnOnStart": true,
-            "variables": {
-              "__materialId": {
-                "type": "string",
-                "value": "8aa2f149c706ee8d1dd0cc8a3d19251d",
-                "access": "public"
-              }
-            },
-            "model": {
-              "geometry": {
-                "$geo": {
-                  "positions": {
-                    "n": [0.5, -0.5, 0, 0.5, 0.5, 0, 0.4829599857330322, -0.5, 0.1294099986553192, 0.4829599857330322, 0.5, 0.1294099986553192, 0.4330100119113922, -0.5, 0.25, 0.4330100119113922, 0.5, 0.25, 0.353549987077713, -0.5, 0.353549987077713, 0.353549987077713, 0.5, 0.353549987077713, 0.25, -0.5, 0.4330100119113922, 0.25, 0.5, 0.4330100119113922, 0.1294099986553192, -0.5, 0.4829599857330322, 0.1294099986553192, 0.5, 0.4829599857330322, 0, -0.5, 0.5, 0, 0.5, 0.5, -0.1294099986553192, -0.5, 0.4829599857330322, -0.1294099986553192, 0.5, 0.4829599857330322, -0.25, -0.5, 0.4330100119113922, -0.25, 0.5, 0.4330100119113922, -0.353549987077713, -0.5, 0.353549987077713, -0.353549987077713, 0.5, 0.353549987077713, -0.4330100119113922, -0.5, 0.25, -0.4330100119113922, 0.5, 0.25, -0.4829599857330322, -0.5, 0.1294099986553192, -0.4829599857330322, 0.5, 0.1294099986553192, -0.5, -0.5, 0, -0.5, 0.5, 0, -0.4829599857330322, -0.5, -0.1294099986553192, -0.4829599857330322, 0.5, -0.1294099986553192, -0.4330100119113922, -0.5, -0.25, -0.4330100119113922, 0.5, -0.25, -0.353549987077713, -0.5, -0.353549987077713, -0.353549987077713, 0.5, -0.353549987077713, -0.25, -0.5, -0.4330100119113922, -0.25, 0.5, -0.4330100119113922, -0.1294099986553192, -0.5, -0.4829599857330322, -0.1294099986553192, 0.5, -0.4829599857330322, 0, -0.5, -0.5, 0, 0.5, -0.5, 0.1294099986553192, -0.5, -0.4829599857330322, 0.1294099986553192, 0.5, -0.4829599857330322, 0.25, -0.5, -0.4330100119113922, 0.25, 0.5, -0.4330100119113922, 0.353549987077713, -0.5, -0.353549987077713, 0.353549987077713, 0.5, -0.353549987077713, 0.4330100119113922, -0.5, -0.25, 0.4330100119113922, 0.5, -0.25, 0.4829599857330322, -0.5, -0.1294099986553192, 0.4829599857330322, 0.5, -0.1294099986553192, 0.5, -0.5, 0, 0.5, 0.5, 0, 0, 0.5, 0, 0.5, 0.5, 0, 0.4829599857330322, 0.5, 0.1294099986553192, 0.4330100119113922, 0.5, 0.25, 0.353549987077713, 0.5, 0.353549987077713, 0.25, 0.5, 0.4330100119113922, 0.1294099986553192, 0.5, 0.4829599857330322, 0, 0.5, 0.5, -0.1294099986553192, 0.5, 0.4829599857330322, -0.25, 0.5, 0.4330100119113922, -0.353549987077713, 0.5, 0.353549987077713, -0.4330100119113922, 0.5, 0.25, -0.4829599857330322, 0.5, 0.1294099986553192, -0.5, 0.5, 0, -0.4829599857330322, 0.5, -0.1294099986553192, -0.4330100119113922, 0.5, -0.25, -0.353549987077713, 0.5, -0.353549987077713, -0.25, 0.5, -0.4330100119113922, -0.1294099986553192, 0.5, -0.4829599857330322, 0, 0.5, -0.5, 0.1294099986553192, 0.5, -0.4829599857330322, 0.25, 0.5, -0.4330100119113922, 0.353549987077713, 0.5, -0.353549987077713, 0.4330100119113922, 0.5, -0.25, 0.4829599857330322, 0.5, -0.1294099986553192, 0.5, 0.5, 0, 0, -0.5, 0, 0.5, -0.5, 0, 0.4829599857330322, -0.5, 0.1294099986553192, 0.4330100119113922, -0.5, 0.25, 0.353549987077713, -0.5, 0.353549987077713, 0.25, -0.5, 0.4330100119113922, 0.1294099986553192, -0.5, 0.4829599857330322, 0, -0.5, 0.5, -0.1294099986553192, -0.5, 0.4829599857330322, -0.25, -0.5, 0.4330100119113922, -0.353549987077713, -0.5, 0.353549987077713, -0.4330100119113922, -0.5, 0.25, -0.4829599857330322, -0.5, 0.1294099986553192, -0.5, -0.5, 0, -0.4829599857330322, -0.5, -0.1294099986553192, -0.4330100119113922, -0.5, -0.25, -0.353549987077713, -0.5, -0.353549987077713, -0.25, -0.5, -0.4330100119113922, -0.1294099986553192, -0.5, -0.4829599857330322, 0, -0.5, -0.5, 0.1294099986553192, -0.5, -0.4829599857330322, 0.25, -0.5, -0.4330100119113922, 0.353549987077713, -0.5, -0.353549987077713, 0.4330100119113922, -0.5, -0.25, 0.4829599857330322, -0.5, -0.1294099986553192, 0.5, -0.5, 0]
-                  },
-                  "normals": {
-                    "n": [1, 0, 0, 1, 0, 0, 0.9659299850463867, 0, 0.2588199973106384, 0.9659299850463867, 0, 0.2588199973106384, 0.8660299777984619, 0, 0.5, 0.8660299777984619, 0, 0.5, 0.7071099877357483, 0, 0.7071099877357483, 0.7071099877357483, 0, 0.7071099877357483, 0.5, 0, 0.8660299777984619, 0.5, 0, 0.8660299777984619, 0.2588199973106384, 0, 0.9659299850463867, 0.2588199973106384, 0, 0.9659299850463867, 0, 0, 1, 0, 0, 1, -0.2588199973106384, 0, 0.9659299850463867, -0.2588199973106384, 0, 0.9659299850463867, -0.5, 0, 0.8660299777984619, -0.5, 0, 0.8660299777984619, -0.7071099877357483, 0, 0.7071099877357483, -0.7071099877357483, 0, 0.7071099877357483, -0.8660299777984619, 0, 0.5, -0.8660299777984619, 0, 0.5, -0.9659299850463867, 0, 0.2588199973106384, -0.9659299850463867, 0, 0.2588199973106384, -1, 0, 0, -1, 0, 0, -0.9659299850463867, 0, -0.2588199973106384, -0.9659299850463867, 0, -0.2588199973106384, -0.8660299777984619, 0, -0.5, -0.8660299777984619, 0, -0.5, -0.7071099877357483, 0, -0.7071099877357483, -0.7071099877357483, 0, -0.7071099877357483, -0.5, 0, -0.8660299777984619, -0.5, 0, -0.8660299777984619, -0.2588199973106384, 0, -0.9659299850463867, -0.2588199973106384, 0, -0.9659299850463867, 0, 0, -1, 0, 0, -1, 0.2588199973106384, 0, -0.9659299850463867, 0.2588199973106384, 0, -0.9659299850463867, 0.5, 0, -0.8660299777984619, 0.5, 0, -0.8660299777984619, 0.7071099877357483, 0, -0.7071099877357483, 0.7071099877357483, 0, -0.7071099877357483, 0.8660299777984619, 0, -0.5, 0.8660299777984619, 0, -0.5, 0.9659299850463867, 0, -0.2588199973106384, 0.9659299850463867, 0, -0.2588199973106384, 1, 0, 0, 1, 0, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0]
-                  },
-                  "tangents": {
-                    "n": [0, 0, 1, 0, 0, 1, -0.258819043636322, 0, 0.9659258127212524, -0.258819043636322, 0, 0.9659258127212524, -0.5, 0, 0.8660253882408142, -0.5, 0, 0.8660253882408142, -0.7071067690849304, 0, 0.7071067690849304, -0.7071067690849304, 0, 0.7071067690849304, -0.8660253882408142, 0, 0.5, -0.8660253882408142, 0, 0.5, -0.9659258127212524, 0, 0.258819043636322, -0.9659258127212524, 0, 0.258819043636322, -1, 0, 5.95773924515562e-17, -1, 0, 5.95773858341113e-17, -0.9659258127212524, 0, -0.258819043636322, -0.9659258127212524, 0, -0.258819043636322, -0.8660253882408142, 0, -0.5, -0.8660253882408142, 0, -0.5, -0.7071067690849304, 0, -0.7071067690849304, -0.7071067690849304, 0, -0.7071067690849304, -0.5, 0, -0.8660253882408142, -0.5, 0, -0.8660253882408142, -0.258819043636322, 0, -0.9659258127212524, -0.258819043636322, 0, -0.9659258127212524, -1.2511252348652353e-16, 0, -1, -1.2511256319119293e-16, 0, -1, 0.258819043636322, 0, -0.9659258127212524, 0.258819043636322, 0, -0.9659258127212524, 0.5, 0, -0.8660253882408142, 0.5, 0, -0.8660253882408142, 0.7071067690849304, 0, -0.7071067690849304, 0.7071067690849304, 0, -0.7071067690849304, 0.8660253882408142, 0, -0.5, 0.8660253882408142, 0, -0.5, 0.9659258127212524, 0, -0.258819043636322, 0.9659258127212524, 0, -0.258819043636322, 1, 0, -1.8469001519975324e-16, 1, 0, -1.8469001519975324e-16, 0.9659258127212524, 0, 0.258819043636322, 0.9659258127212524, 0, 0.258819043636322, 0.8660253882408142, 0, 0.5, 0.8660253882408142, 0, 0.5, 0.7071067690849304, 0, 0.7071067690849304, 0.7071067690849304, 0, 0.7071067690849304, 0.5, 0, 0.8660253882408142, 0.5, 0, 0.8660253882408142, 0.258819043636322, 0, 0.9659258127212524, 0.258819043636322, 0, 0.9659258127212524, 2.5022517932194507e-16, 0, 1, 2.5022517932194507e-16, 0, 1, 1, 0, -2.284696674673104e-15, 1, 0, 0, 1, 0, -5.7573682710199137e-8, 1, 0, -2.775317004205871e-14, 1, 0, 3.9274606677963675e-8, 1, 0, -1.2952285999290325e-7, 1, 0, -1.1122381238237722e-7, 1, 0, 0, 1, 0, 1.1122378396066779e-7, 1, 0, 1.2952284578204853e-7, 1, 0, -3.927459957253632e-8, 1, 0, 2.248165541262389e-14, 1, 0, 5.757367560477178e-8, 1, 0, -1.2246468525851679e-16, 1, 0, -6.123234262925839e-17, 1, 0, 0, 1, 0, 2.035536539324312e-8, 1, 0, 1.7479548475307638e-8, 1, 0, -3.166265116760769e-8, 1, 0, -6.062024644602369e-15, 1, 0, 3.1662644062180334e-8, 1, 0, -1.747954314623712e-8, 1, 0, -2.035536184052944e-8, 1, 0, 0, 1, 0, -1.2246468525851679e-16, 1, 0, -2.4492937051703357e-16, 1, 0, 2.215858307049747e-15, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 2.035536184052944e-8, 1, 0, 1.747954314623712e-8, 1, 0, -3.1662644062180334e-8, 1, 0, 5.896500007148775e-15, 1, 0, 3.166264761489401e-8, 1, 0, -1.7479548475307638e-8, 1, 0, -2.035536539324312e-8, 1, 0, 0, 1, 0, -6.123234262925839e-17, 1, 0, -1.2246468525851679e-16, 1, 0, -5.757367560477178e-8, 1, 0, -2.024559854615568e-14, 1, 0, 3.927459957253632e-8, 1, 0, -1.2952284578204853e-7, 1, 0, -1.1122378396066779e-7, 1, 0, 0, 1, 0, 1.1122381238237722e-7, 1, 0, 1.2952285999290325e-7, 1, 0, -3.9274606677963675e-8, 1, 0, 2.6712762861078043e-14, 1, 0, 5.7573682710199137e-8, 1, 0, -2.4492937051703357e-16]
-                  },
-                  "bitangents": {
-                    "n": [0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 2.284696674673104e-15, 0, 1, 0, 0, 1, 5.7573682710199137e-8, 0, 1, 2.775317004205871e-14, 0, 1, -3.9274606677963675e-8, 0, 1, 1.2952285999290325e-7, 0, 1, 1.1122381238237722e-7, 0, 1, 0, 0, 1, -1.1122378396066779e-7, 0, 1, -1.2952284578204853e-7, 0, 1, 3.927459957253632e-8, 0, 1, -2.248165541262389e-14, 0, 1, -5.757367560477178e-8, 0, 1, 1.2246468525851679e-16, 0, 1, 6.123234262925839e-17, 0, 1, 0, 0, 1, -2.035536539324312e-8, 0, 1, -1.7479548475307638e-8, 0, 1, 3.166265116760769e-8, 0, 1, 6.062024644602369e-15, 0, 1, -3.1662644062180334e-8, 0, 1, 1.747954314623712e-8, 0, 1, 2.035536184052944e-8, 0, 1, 0, 0, 1, 1.2246468525851679e-16, 0, 1, 2.4492937051703357e-16, 0, 1, 2.215858307049747e-15, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 2.035536184052944e-8, 0, -1, 1.747954314623712e-8, 0, -1, -3.1662644062180334e-8, 0, -1, 5.896500007148775e-15, 0, -1, 3.166264761489401e-8, 0, -1, -1.7479548475307638e-8, 0, -1, -2.035536539324312e-8, 0, -1, 0, 0, -1, -6.123234262925839e-17, 0, -1, -1.2246468525851679e-16, 0, -1, -5.757367560477178e-8, 0, -1, -2.024559854615568e-14, 0, -1, 3.927459957253632e-8, 0, -1, -1.2952284578204853e-7, 0, -1, -1.1122378396066779e-7, 0, -1, 0, 0, -1, 1.1122381238237722e-7, 0, -1, 1.2952285999290325e-7, 0, -1, -3.9274606677963675e-8, 0, -1, 2.6712762861078043e-14, 0, -1, 5.7573682710199137e-8, 0, -1, -2.4492937051703357e-16, 0, -1]
-                  },
-                  "texCoords": {
-                    "n": [0, 0, 0, 1, 0.041669998317956924, 0, 0.041669998317956924, 1, 0.08332999795675278, 0, 0.08332999795675278, 1, 0.125, 0, 0.125, 1, 0.16666999459266663, 0, 0.16666999459266663, 1, 0.20833000540733337, 0, 0.20833000540733337, 1, 0.25, 0, 0.25, 1, 0.2916699945926666, 0, 0.2916699945926666, 1, 0.3333300054073334, 0, 0.3333300054073334, 1, 0.375, 0, 0.375, 1, 0.4166699945926666, 0, 0.4166699945926666, 1, 0.4583300054073334, 0, 0.4583300054073334, 1, 0.5, 0, 0.5, 1, 0.541670024394989, 0, 0.541670024394989, 1, 0.583329975605011, 0, 0.583329975605011, 1, 0.625, 0, 0.625, 1, 0.666670024394989, 0, 0.666670024394989, 1, 0.708329975605011, 0, 0.708329975605011, 1, 0.75, 0, 0.75, 1, 0.791670024394989, 0, 0.791670024394989, 1, 0.833329975605011, 0, 0.833329975605011, 1, 0.875, 0, 0.875, 1, 0.916670024394989, 0, 0.916670024394989, 1, 0.958329975605011, 0, 0.958329975605011, 1, 1, 0, 1, 1, 0.5, 0.5, 1, 0.5, 0.9829599857330322, 0.6294100284576416, 0.9330099821090698, 0.75, 0.8535500168800354, 0.8535500168800354, 0.75, 0.9330099821090698, 0.6294100284576416, 0.9829599857330322, 0.5, 1, 0.3705900013446808, 0.9829599857330322, 0.25, 0.9330099821090698, 0.1464499980211258, 0.8535500168800354, 0.06699000298976898, 0.75, 0.01703999936580658, 0.6294100284576416, 0, 0.5, 0.01703999936580658, 0.3705900013446808, 0.06699000298976898, 0.25, 0.1464499980211258, 0.1464499980211258, 0.25, 0.06699000298976898, 0.3705900013446808, 0.01703999936580658, 0.5, 0, 0.6294100284576416, 0.01703999936580658, 0.75, 0.06699000298976898, 0.8535500168800354, 0.1464499980211258, 0.9330099821090698, 0.25, 0.9829599857330322, 0.3705900013446808, 1, 0.5, 0.5, 0.5, 1, 0.5, 0.9829599857330322, 0.3705900013446808, 0.9330099821090698, 0.25, 0.8535500168800354, 0.1464499980211258, 0.75, 0.06699000298976898, 0.6294100284576416, 0.01703999936580658, 0.5, 0, 0.3705900013446808, 0.01703999936580658, 0.25, 0.06699000298976898, 0.1464499980211258, 0.1464499980211258, 0.06699000298976898, 0.25, 0.01703999936580658, 0.3705900013446808, 0, 0.5, 0.01703999936580658, 0.6294100284576416, 0.06699000298976898, 0.75, 0.1464499980211258, 0.8535500168800354, 0.25, 0.9330099821090698, 0.3705900013446808, 0.9829599857330322, 0.5, 1, 0.6294100284576416, 0.9829599857330322, 0.75, 0.9330099821090698, 0.8535500168800354, 0.8535500168800354, 0.9330099821090698, 0.75, 0.9829599857330322, 0.6294100284576416, 1, 0.5]
-                  },
-                  "indices": {
-                    "n": [0, 1, 2, 2, 1, 3, 2, 3, 4, 4, 3, 5, 4, 5, 6, 6, 5, 7, 6, 7, 8, 8, 7, 9, 8, 9, 10, 10, 9, 11, 10, 11, 12, 12, 11, 13, 12, 13, 14, 14, 13, 15, 14, 15, 16, 16, 15, 17, 16, 17, 18, 18, 17, 19, 18, 19, 20, 20, 19, 21, 20, 21, 22, 22, 21, 23, 22, 23, 24, 24, 23, 25, 24, 25, 26, 26, 25, 27, 26, 27, 28, 28, 27, 29, 28, 29, 30, 30, 29, 31, 30, 31, 32, 32, 31, 33, 32, 33, 34, 34, 33, 35, 34, 35, 36, 36, 35, 37, 36, 37, 38, 38, 37, 39, 38, 39, 40, 40, 39, 41, 40, 41, 42, 42, 41, 43, 42, 43, 44, 44, 43, 45, 44, 45, 46, 46, 45, 47, 46, 47, 48, 48, 47, 49, 50, 52, 51, 50, 53, 52, 50, 54, 53, 50, 55, 54, 50, 56, 55, 50, 57, 56, 50, 58, 57, 50, 59, 58, 50, 60, 59, 50, 61, 60, 50, 62, 61, 50, 63, 62, 50, 64, 63, 50, 65, 64, 50, 66, 65, 50, 67, 66, 50, 68, 67, 50, 69, 68, 50, 70, 69, 50, 71, 70, 50, 72, 71, 50, 73, 72, 50, 74, 73, 50, 75, 74, 76, 77, 78, 76, 78, 79, 76, 79, 80, 76, 80, 81, 76, 81, 82, 76, 82, 83, 76, 83, 84, 76, 84, 85, 76, 85, 86, 76, 86, 87, 76, 87, 88, 76, 88, 89, 76, 89, 90, 76, 90, 91, 76, 91, 92, 76, 92, 93, 76, 93, 94, 76, 94, 95, 76, 95, 96, 76, 96, 97, 76, 97, 98, 76, 98, 99, 76, 99, 100, 76, 100, 101],
-                    "bits": 16
-                  },
-                  "typed": true
-                }
-              },
-              "material": {
-                "type": "pbr",
-                "baseColor": [0.42, 0.55, 0.75],
-                "metallic": 0,
-                "roughness": 0.9,
-                "opacity": 1,
-                "emissiveFactor": [0, 0, 0],
-                "textures": {
-                  "baseColorTexture": "d4a96a210b1af85c70925ceced937cb7"
-                },
-                "config": {
-                  "side": "front",
-                  "wireframe": false,
-                  "transparent": false,
-                  "castShadow": true,
-                  "probeable": true
-                },
-                "uvProjection": "box",
-                "uvSpace": "world",
-                "uvWorldSize": 1
-              }
-            }
-          },
-          {
-            "id": "572e1f581f323fd54c325eda98c2c5d7",
-            "name": "Pillar 2",
-            "type": "model",
-            "position": [11, 2, -7],
-            "rotation": [0, 0, 0],
-            "scale": [0.800000011920929, 4, 0.800000011920929],
-            "children": [],
-            "spawnOnStart": true,
-            "variables": {
-              "__materialId": {
-                "type": "string",
-                "value": "8aa2f149c706ee8d1dd0cc8a3d19251d",
-                "access": "public"
-              }
-            },
-            "model": {
-              "geometry": {
-                "$geo": {
-                  "positions": {
-                    "n": [0.5, -0.5, 0, 0.5, 0.5, 0, 0.4829599857330322, -0.5, 0.1294099986553192, 0.4829599857330322, 0.5, 0.1294099986553192, 0.4330100119113922, -0.5, 0.25, 0.4330100119113922, 0.5, 0.25, 0.353549987077713, -0.5, 0.353549987077713, 0.353549987077713, 0.5, 0.353549987077713, 0.25, -0.5, 0.4330100119113922, 0.25, 0.5, 0.4330100119113922, 0.1294099986553192, -0.5, 0.4829599857330322, 0.1294099986553192, 0.5, 0.4829599857330322, 0, -0.5, 0.5, 0, 0.5, 0.5, -0.1294099986553192, -0.5, 0.4829599857330322, -0.1294099986553192, 0.5, 0.4829599857330322, -0.25, -0.5, 0.4330100119113922, -0.25, 0.5, 0.4330100119113922, -0.353549987077713, -0.5, 0.353549987077713, -0.353549987077713, 0.5, 0.353549987077713, -0.4330100119113922, -0.5, 0.25, -0.4330100119113922, 0.5, 0.25, -0.4829599857330322, -0.5, 0.1294099986553192, -0.4829599857330322, 0.5, 0.1294099986553192, -0.5, -0.5, 0, -0.5, 0.5, 0, -0.4829599857330322, -0.5, -0.1294099986553192, -0.4829599857330322, 0.5, -0.1294099986553192, -0.4330100119113922, -0.5, -0.25, -0.4330100119113922, 0.5, -0.25, -0.353549987077713, -0.5, -0.353549987077713, -0.353549987077713, 0.5, -0.353549987077713, -0.25, -0.5, -0.4330100119113922, -0.25, 0.5, -0.4330100119113922, -0.1294099986553192, -0.5, -0.4829599857330322, -0.1294099986553192, 0.5, -0.4829599857330322, 0, -0.5, -0.5, 0, 0.5, -0.5, 0.1294099986553192, -0.5, -0.4829599857330322, 0.1294099986553192, 0.5, -0.4829599857330322, 0.25, -0.5, -0.4330100119113922, 0.25, 0.5, -0.4330100119113922, 0.353549987077713, -0.5, -0.353549987077713, 0.353549987077713, 0.5, -0.353549987077713, 0.4330100119113922, -0.5, -0.25, 0.4330100119113922, 0.5, -0.25, 0.4829599857330322, -0.5, -0.1294099986553192, 0.4829599857330322, 0.5, -0.1294099986553192, 0.5, -0.5, 0, 0.5, 0.5, 0, 0, 0.5, 0, 0.5, 0.5, 0, 0.4829599857330322, 0.5, 0.1294099986553192, 0.4330100119113922, 0.5, 0.25, 0.353549987077713, 0.5, 0.353549987077713, 0.25, 0.5, 0.4330100119113922, 0.1294099986553192, 0.5, 0.4829599857330322, 0, 0.5, 0.5, -0.1294099986553192, 0.5, 0.4829599857330322, -0.25, 0.5, 0.4330100119113922, -0.353549987077713, 0.5, 0.353549987077713, -0.4330100119113922, 0.5, 0.25, -0.4829599857330322, 0.5, 0.1294099986553192, -0.5, 0.5, 0, -0.4829599857330322, 0.5, -0.1294099986553192, -0.4330100119113922, 0.5, -0.25, -0.353549987077713, 0.5, -0.353549987077713, -0.25, 0.5, -0.4330100119113922, -0.1294099986553192, 0.5, -0.4829599857330322, 0, 0.5, -0.5, 0.1294099986553192, 0.5, -0.4829599857330322, 0.25, 0.5, -0.4330100119113922, 0.353549987077713, 0.5, -0.353549987077713, 0.4330100119113922, 0.5, -0.25, 0.4829599857330322, 0.5, -0.1294099986553192, 0.5, 0.5, 0, 0, -0.5, 0, 0.5, -0.5, 0, 0.4829599857330322, -0.5, 0.1294099986553192, 0.4330100119113922, -0.5, 0.25, 0.353549987077713, -0.5, 0.353549987077713, 0.25, -0.5, 0.4330100119113922, 0.1294099986553192, -0.5, 0.4829599857330322, 0, -0.5, 0.5, -0.1294099986553192, -0.5, 0.4829599857330322, -0.25, -0.5, 0.4330100119113922, -0.353549987077713, -0.5, 0.353549987077713, -0.4330100119113922, -0.5, 0.25, -0.4829599857330322, -0.5, 0.1294099986553192, -0.5, -0.5, 0, -0.4829599857330322, -0.5, -0.1294099986553192, -0.4330100119113922, -0.5, -0.25, -0.353549987077713, -0.5, -0.353549987077713, -0.25, -0.5, -0.4330100119113922, -0.1294099986553192, -0.5, -0.4829599857330322, 0, -0.5, -0.5, 0.1294099986553192, -0.5, -0.4829599857330322, 0.25, -0.5, -0.4330100119113922, 0.353549987077713, -0.5, -0.353549987077713, 0.4330100119113922, -0.5, -0.25, 0.4829599857330322, -0.5, -0.1294099986553192, 0.5, -0.5, 0]
-                  },
-                  "normals": {
-                    "n": [1, 0, 0, 1, 0, 0, 0.9659299850463867, 0, 0.2588199973106384, 0.9659299850463867, 0, 0.2588199973106384, 0.8660299777984619, 0, 0.5, 0.8660299777984619, 0, 0.5, 0.7071099877357483, 0, 0.7071099877357483, 0.7071099877357483, 0, 0.7071099877357483, 0.5, 0, 0.8660299777984619, 0.5, 0, 0.8660299777984619, 0.2588199973106384, 0, 0.9659299850463867, 0.2588199973106384, 0, 0.9659299850463867, 0, 0, 1, 0, 0, 1, -0.2588199973106384, 0, 0.9659299850463867, -0.2588199973106384, 0, 0.9659299850463867, -0.5, 0, 0.8660299777984619, -0.5, 0, 0.8660299777984619, -0.7071099877357483, 0, 0.7071099877357483, -0.7071099877357483, 0, 0.7071099877357483, -0.8660299777984619, 0, 0.5, -0.8660299777984619, 0, 0.5, -0.9659299850463867, 0, 0.2588199973106384, -0.9659299850463867, 0, 0.2588199973106384, -1, 0, 0, -1, 0, 0, -0.9659299850463867, 0, -0.2588199973106384, -0.9659299850463867, 0, -0.2588199973106384, -0.8660299777984619, 0, -0.5, -0.8660299777984619, 0, -0.5, -0.7071099877357483, 0, -0.7071099877357483, -0.7071099877357483, 0, -0.7071099877357483, -0.5, 0, -0.8660299777984619, -0.5, 0, -0.8660299777984619, -0.2588199973106384, 0, -0.9659299850463867, -0.2588199973106384, 0, -0.9659299850463867, 0, 0, -1, 0, 0, -1, 0.2588199973106384, 0, -0.9659299850463867, 0.2588199973106384, 0, -0.9659299850463867, 0.5, 0, -0.8660299777984619, 0.5, 0, -0.8660299777984619, 0.7071099877357483, 0, -0.7071099877357483, 0.7071099877357483, 0, -0.7071099877357483, 0.8660299777984619, 0, -0.5, 0.8660299777984619, 0, -0.5, 0.9659299850463867, 0, -0.2588199973106384, 0.9659299850463867, 0, -0.2588199973106384, 1, 0, 0, 1, 0, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0]
-                  },
-                  "tangents": {
-                    "n": [0, 0, 1, 0, 0, 1, -0.258819043636322, 0, 0.9659258127212524, -0.258819043636322, 0, 0.9659258127212524, -0.5, 0, 0.8660253882408142, -0.5, 0, 0.8660253882408142, -0.7071067690849304, 0, 0.7071067690849304, -0.7071067690849304, 0, 0.7071067690849304, -0.8660253882408142, 0, 0.5, -0.8660253882408142, 0, 0.5, -0.9659258127212524, 0, 0.258819043636322, -0.9659258127212524, 0, 0.258819043636322, -1, 0, 5.95773924515562e-17, -1, 0, 5.95773858341113e-17, -0.9659258127212524, 0, -0.258819043636322, -0.9659258127212524, 0, -0.258819043636322, -0.8660253882408142, 0, -0.5, -0.8660253882408142, 0, -0.5, -0.7071067690849304, 0, -0.7071067690849304, -0.7071067690849304, 0, -0.7071067690849304, -0.5, 0, -0.8660253882408142, -0.5, 0, -0.8660253882408142, -0.258819043636322, 0, -0.9659258127212524, -0.258819043636322, 0, -0.9659258127212524, -1.2511252348652353e-16, 0, -1, -1.2511256319119293e-16, 0, -1, 0.258819043636322, 0, -0.9659258127212524, 0.258819043636322, 0, -0.9659258127212524, 0.5, 0, -0.8660253882408142, 0.5, 0, -0.8660253882408142, 0.7071067690849304, 0, -0.7071067690849304, 0.7071067690849304, 0, -0.7071067690849304, 0.8660253882408142, 0, -0.5, 0.8660253882408142, 0, -0.5, 0.9659258127212524, 0, -0.258819043636322, 0.9659258127212524, 0, -0.258819043636322, 1, 0, -1.8469001519975324e-16, 1, 0, -1.8469001519975324e-16, 0.9659258127212524, 0, 0.258819043636322, 0.9659258127212524, 0, 0.258819043636322, 0.8660253882408142, 0, 0.5, 0.8660253882408142, 0, 0.5, 0.7071067690849304, 0, 0.7071067690849304, 0.7071067690849304, 0, 0.7071067690849304, 0.5, 0, 0.8660253882408142, 0.5, 0, 0.8660253882408142, 0.258819043636322, 0, 0.9659258127212524, 0.258819043636322, 0, 0.9659258127212524, 2.5022517932194507e-16, 0, 1, 2.5022517932194507e-16, 0, 1, 1, 0, -2.284696674673104e-15, 1, 0, 0, 1, 0, -5.7573682710199137e-8, 1, 0, -2.775317004205871e-14, 1, 0, 3.9274606677963675e-8, 1, 0, -1.2952285999290325e-7, 1, 0, -1.1122381238237722e-7, 1, 0, 0, 1, 0, 1.1122378396066779e-7, 1, 0, 1.2952284578204853e-7, 1, 0, -3.927459957253632e-8, 1, 0, 2.248165541262389e-14, 1, 0, 5.757367560477178e-8, 1, 0, -1.2246468525851679e-16, 1, 0, -6.123234262925839e-17, 1, 0, 0, 1, 0, 2.035536539324312e-8, 1, 0, 1.7479548475307638e-8, 1, 0, -3.166265116760769e-8, 1, 0, -6.062024644602369e-15, 1, 0, 3.1662644062180334e-8, 1, 0, -1.747954314623712e-8, 1, 0, -2.035536184052944e-8, 1, 0, 0, 1, 0, -1.2246468525851679e-16, 1, 0, -2.4492937051703357e-16, 1, 0, 2.215858307049747e-15, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 2.035536184052944e-8, 1, 0, 1.747954314623712e-8, 1, 0, -3.1662644062180334e-8, 1, 0, 5.896500007148775e-15, 1, 0, 3.166264761489401e-8, 1, 0, -1.7479548475307638e-8, 1, 0, -2.035536539324312e-8, 1, 0, 0, 1, 0, -6.123234262925839e-17, 1, 0, -1.2246468525851679e-16, 1, 0, -5.757367560477178e-8, 1, 0, -2.024559854615568e-14, 1, 0, 3.927459957253632e-8, 1, 0, -1.2952284578204853e-7, 1, 0, -1.1122378396066779e-7, 1, 0, 0, 1, 0, 1.1122381238237722e-7, 1, 0, 1.2952285999290325e-7, 1, 0, -3.9274606677963675e-8, 1, 0, 2.6712762861078043e-14, 1, 0, 5.7573682710199137e-8, 1, 0, -2.4492937051703357e-16]
-                  },
-                  "bitangents": {
-                    "n": [0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 2.284696674673104e-15, 0, 1, 0, 0, 1, 5.7573682710199137e-8, 0, 1, 2.775317004205871e-14, 0, 1, -3.9274606677963675e-8, 0, 1, 1.2952285999290325e-7, 0, 1, 1.1122381238237722e-7, 0, 1, 0, 0, 1, -1.1122378396066779e-7, 0, 1, -1.2952284578204853e-7, 0, 1, 3.927459957253632e-8, 0, 1, -2.248165541262389e-14, 0, 1, -5.757367560477178e-8, 0, 1, 1.2246468525851679e-16, 0, 1, 6.123234262925839e-17, 0, 1, 0, 0, 1, -2.035536539324312e-8, 0, 1, -1.7479548475307638e-8, 0, 1, 3.166265116760769e-8, 0, 1, 6.062024644602369e-15, 0, 1, -3.1662644062180334e-8, 0, 1, 1.747954314623712e-8, 0, 1, 2.035536184052944e-8, 0, 1, 0, 0, 1, 1.2246468525851679e-16, 0, 1, 2.4492937051703357e-16, 0, 1, 2.215858307049747e-15, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 2.035536184052944e-8, 0, -1, 1.747954314623712e-8, 0, -1, -3.1662644062180334e-8, 0, -1, 5.896500007148775e-15, 0, -1, 3.166264761489401e-8, 0, -1, -1.7479548475307638e-8, 0, -1, -2.035536539324312e-8, 0, -1, 0, 0, -1, -6.123234262925839e-17, 0, -1, -1.2246468525851679e-16, 0, -1, -5.757367560477178e-8, 0, -1, -2.024559854615568e-14, 0, -1, 3.927459957253632e-8, 0, -1, -1.2952284578204853e-7, 0, -1, -1.1122378396066779e-7, 0, -1, 0, 0, -1, 1.1122381238237722e-7, 0, -1, 1.2952285999290325e-7, 0, -1, -3.9274606677963675e-8, 0, -1, 2.6712762861078043e-14, 0, -1, 5.7573682710199137e-8, 0, -1, -2.4492937051703357e-16, 0, -1]
-                  },
-                  "texCoords": {
-                    "n": [0, 0, 0, 1, 0.041669998317956924, 0, 0.041669998317956924, 1, 0.08332999795675278, 0, 0.08332999795675278, 1, 0.125, 0, 0.125, 1, 0.16666999459266663, 0, 0.16666999459266663, 1, 0.20833000540733337, 0, 0.20833000540733337, 1, 0.25, 0, 0.25, 1, 0.2916699945926666, 0, 0.2916699945926666, 1, 0.3333300054073334, 0, 0.3333300054073334, 1, 0.375, 0, 0.375, 1, 0.4166699945926666, 0, 0.4166699945926666, 1, 0.4583300054073334, 0, 0.4583300054073334, 1, 0.5, 0, 0.5, 1, 0.541670024394989, 0, 0.541670024394989, 1, 0.583329975605011, 0, 0.583329975605011, 1, 0.625, 0, 0.625, 1, 0.666670024394989, 0, 0.666670024394989, 1, 0.708329975605011, 0, 0.708329975605011, 1, 0.75, 0, 0.75, 1, 0.791670024394989, 0, 0.791670024394989, 1, 0.833329975605011, 0, 0.833329975605011, 1, 0.875, 0, 0.875, 1, 0.916670024394989, 0, 0.916670024394989, 1, 0.958329975605011, 0, 0.958329975605011, 1, 1, 0, 1, 1, 0.5, 0.5, 1, 0.5, 0.9829599857330322, 0.6294100284576416, 0.9330099821090698, 0.75, 0.8535500168800354, 0.8535500168800354, 0.75, 0.9330099821090698, 0.6294100284576416, 0.9829599857330322, 0.5, 1, 0.3705900013446808, 0.9829599857330322, 0.25, 0.9330099821090698, 0.1464499980211258, 0.8535500168800354, 0.06699000298976898, 0.75, 0.01703999936580658, 0.6294100284576416, 0, 0.5, 0.01703999936580658, 0.3705900013446808, 0.06699000298976898, 0.25, 0.1464499980211258, 0.1464499980211258, 0.25, 0.06699000298976898, 0.3705900013446808, 0.01703999936580658, 0.5, 0, 0.6294100284576416, 0.01703999936580658, 0.75, 0.06699000298976898, 0.8535500168800354, 0.1464499980211258, 0.9330099821090698, 0.25, 0.9829599857330322, 0.3705900013446808, 1, 0.5, 0.5, 0.5, 1, 0.5, 0.9829599857330322, 0.3705900013446808, 0.9330099821090698, 0.25, 0.8535500168800354, 0.1464499980211258, 0.75, 0.06699000298976898, 0.6294100284576416, 0.01703999936580658, 0.5, 0, 0.3705900013446808, 0.01703999936580658, 0.25, 0.06699000298976898, 0.1464499980211258, 0.1464499980211258, 0.06699000298976898, 0.25, 0.01703999936580658, 0.3705900013446808, 0, 0.5, 0.01703999936580658, 0.6294100284576416, 0.06699000298976898, 0.75, 0.1464499980211258, 0.8535500168800354, 0.25, 0.9330099821090698, 0.3705900013446808, 0.9829599857330322, 0.5, 1, 0.6294100284576416, 0.9829599857330322, 0.75, 0.9330099821090698, 0.8535500168800354, 0.8535500168800354, 0.9330099821090698, 0.75, 0.9829599857330322, 0.6294100284576416, 1, 0.5]
-                  },
-                  "indices": {
-                    "n": [0, 1, 2, 2, 1, 3, 2, 3, 4, 4, 3, 5, 4, 5, 6, 6, 5, 7, 6, 7, 8, 8, 7, 9, 8, 9, 10, 10, 9, 11, 10, 11, 12, 12, 11, 13, 12, 13, 14, 14, 13, 15, 14, 15, 16, 16, 15, 17, 16, 17, 18, 18, 17, 19, 18, 19, 20, 20, 19, 21, 20, 21, 22, 22, 21, 23, 22, 23, 24, 24, 23, 25, 24, 25, 26, 26, 25, 27, 26, 27, 28, 28, 27, 29, 28, 29, 30, 30, 29, 31, 30, 31, 32, 32, 31, 33, 32, 33, 34, 34, 33, 35, 34, 35, 36, 36, 35, 37, 36, 37, 38, 38, 37, 39, 38, 39, 40, 40, 39, 41, 40, 41, 42, 42, 41, 43, 42, 43, 44, 44, 43, 45, 44, 45, 46, 46, 45, 47, 46, 47, 48, 48, 47, 49, 50, 52, 51, 50, 53, 52, 50, 54, 53, 50, 55, 54, 50, 56, 55, 50, 57, 56, 50, 58, 57, 50, 59, 58, 50, 60, 59, 50, 61, 60, 50, 62, 61, 50, 63, 62, 50, 64, 63, 50, 65, 64, 50, 66, 65, 50, 67, 66, 50, 68, 67, 50, 69, 68, 50, 70, 69, 50, 71, 70, 50, 72, 71, 50, 73, 72, 50, 74, 73, 50, 75, 74, 76, 77, 78, 76, 78, 79, 76, 79, 80, 76, 80, 81, 76, 81, 82, 76, 82, 83, 76, 83, 84, 76, 84, 85, 76, 85, 86, 76, 86, 87, 76, 87, 88, 76, 88, 89, 76, 89, 90, 76, 90, 91, 76, 91, 92, 76, 92, 93, 76, 93, 94, 76, 94, 95, 76, 95, 96, 76, 96, 97, 76, 97, 98, 76, 98, 99, 76, 99, 100, 76, 100, 101],
-                    "bits": 16
-                  },
-                  "typed": true
-                }
-              },
-              "material": {
-                "type": "pbr",
-                "baseColor": [0.42, 0.55, 0.75],
-                "metallic": 0,
-                "roughness": 0.9,
-                "opacity": 1,
-                "emissiveFactor": [0, 0, 0],
-                "textures": {
-                  "baseColorTexture": "d4a96a210b1af85c70925ceced937cb7"
-                },
-                "config": {
-                  "side": "front",
-                  "wireframe": false,
-                  "transparent": false,
-                  "castShadow": true,
-                  "probeable": true
-                },
-                "uvProjection": "box",
-                "uvSpace": "world",
-                "uvWorldSize": 1
-              }
-            }
-          },
-          {
-            "id": "582e20eb1e323e424d32606d97c2c444",
-            "name": "Pillar 3",
-            "type": "model",
-            "position": [14, 2, -5],
-            "rotation": [0, 0, 0],
-            "scale": [0.800000011920929, 4, 0.800000011920929],
-            "children": [],
-            "spawnOnStart": true,
-            "variables": {
-              "__materialId": {
-                "type": "string",
-                "value": "8aa2f149c706ee8d1dd0cc8a3d19251d",
-                "access": "public"
-              }
-            },
-            "model": {
-              "geometry": {
-                "$geo": {
-                  "positions": {
-                    "n": [0.5, -0.5, 0, 0.5, 0.5, 0, 0.4829599857330322, -0.5, 0.1294099986553192, 0.4829599857330322, 0.5, 0.1294099986553192, 0.4330100119113922, -0.5, 0.25, 0.4330100119113922, 0.5, 0.25, 0.353549987077713, -0.5, 0.353549987077713, 0.353549987077713, 0.5, 0.353549987077713, 0.25, -0.5, 0.4330100119113922, 0.25, 0.5, 0.4330100119113922, 0.1294099986553192, -0.5, 0.4829599857330322, 0.1294099986553192, 0.5, 0.4829599857330322, 0, -0.5, 0.5, 0, 0.5, 0.5, -0.1294099986553192, -0.5, 0.4829599857330322, -0.1294099986553192, 0.5, 0.4829599857330322, -0.25, -0.5, 0.4330100119113922, -0.25, 0.5, 0.4330100119113922, -0.353549987077713, -0.5, 0.353549987077713, -0.353549987077713, 0.5, 0.353549987077713, -0.4330100119113922, -0.5, 0.25, -0.4330100119113922, 0.5, 0.25, -0.4829599857330322, -0.5, 0.1294099986553192, -0.4829599857330322, 0.5, 0.1294099986553192, -0.5, -0.5, 0, -0.5, 0.5, 0, -0.4829599857330322, -0.5, -0.1294099986553192, -0.4829599857330322, 0.5, -0.1294099986553192, -0.4330100119113922, -0.5, -0.25, -0.4330100119113922, 0.5, -0.25, -0.353549987077713, -0.5, -0.353549987077713, -0.353549987077713, 0.5, -0.353549987077713, -0.25, -0.5, -0.4330100119113922, -0.25, 0.5, -0.4330100119113922, -0.1294099986553192, -0.5, -0.4829599857330322, -0.1294099986553192, 0.5, -0.4829599857330322, 0, -0.5, -0.5, 0, 0.5, -0.5, 0.1294099986553192, -0.5, -0.4829599857330322, 0.1294099986553192, 0.5, -0.4829599857330322, 0.25, -0.5, -0.4330100119113922, 0.25, 0.5, -0.4330100119113922, 0.353549987077713, -0.5, -0.353549987077713, 0.353549987077713, 0.5, -0.353549987077713, 0.4330100119113922, -0.5, -0.25, 0.4330100119113922, 0.5, -0.25, 0.4829599857330322, -0.5, -0.1294099986553192, 0.4829599857330322, 0.5, -0.1294099986553192, 0.5, -0.5, 0, 0.5, 0.5, 0, 0, 0.5, 0, 0.5, 0.5, 0, 0.4829599857330322, 0.5, 0.1294099986553192, 0.4330100119113922, 0.5, 0.25, 0.353549987077713, 0.5, 0.353549987077713, 0.25, 0.5, 0.4330100119113922, 0.1294099986553192, 0.5, 0.4829599857330322, 0, 0.5, 0.5, -0.1294099986553192, 0.5, 0.4829599857330322, -0.25, 0.5, 0.4330100119113922, -0.353549987077713, 0.5, 0.353549987077713, -0.4330100119113922, 0.5, 0.25, -0.4829599857330322, 0.5, 0.1294099986553192, -0.5, 0.5, 0, -0.4829599857330322, 0.5, -0.1294099986553192, -0.4330100119113922, 0.5, -0.25, -0.353549987077713, 0.5, -0.353549987077713, -0.25, 0.5, -0.4330100119113922, -0.1294099986553192, 0.5, -0.4829599857330322, 0, 0.5, -0.5, 0.1294099986553192, 0.5, -0.4829599857330322, 0.25, 0.5, -0.4330100119113922, 0.353549987077713, 0.5, -0.353549987077713, 0.4330100119113922, 0.5, -0.25, 0.4829599857330322, 0.5, -0.1294099986553192, 0.5, 0.5, 0, 0, -0.5, 0, 0.5, -0.5, 0, 0.4829599857330322, -0.5, 0.1294099986553192, 0.4330100119113922, -0.5, 0.25, 0.353549987077713, -0.5, 0.353549987077713, 0.25, -0.5, 0.4330100119113922, 0.1294099986553192, -0.5, 0.4829599857330322, 0, -0.5, 0.5, -0.1294099986553192, -0.5, 0.4829599857330322, -0.25, -0.5, 0.4330100119113922, -0.353549987077713, -0.5, 0.353549987077713, -0.4330100119113922, -0.5, 0.25, -0.4829599857330322, -0.5, 0.1294099986553192, -0.5, -0.5, 0, -0.4829599857330322, -0.5, -0.1294099986553192, -0.4330100119113922, -0.5, -0.25, -0.353549987077713, -0.5, -0.353549987077713, -0.25, -0.5, -0.4330100119113922, -0.1294099986553192, -0.5, -0.4829599857330322, 0, -0.5, -0.5, 0.1294099986553192, -0.5, -0.4829599857330322, 0.25, -0.5, -0.4330100119113922, 0.353549987077713, -0.5, -0.353549987077713, 0.4330100119113922, -0.5, -0.25, 0.4829599857330322, -0.5, -0.1294099986553192, 0.5, -0.5, 0]
-                  },
-                  "normals": {
-                    "n": [1, 0, 0, 1, 0, 0, 0.9659299850463867, 0, 0.2588199973106384, 0.9659299850463867, 0, 0.2588199973106384, 0.8660299777984619, 0, 0.5, 0.8660299777984619, 0, 0.5, 0.7071099877357483, 0, 0.7071099877357483, 0.7071099877357483, 0, 0.7071099877357483, 0.5, 0, 0.8660299777984619, 0.5, 0, 0.8660299777984619, 0.2588199973106384, 0, 0.9659299850463867, 0.2588199973106384, 0, 0.9659299850463867, 0, 0, 1, 0, 0, 1, -0.2588199973106384, 0, 0.9659299850463867, -0.2588199973106384, 0, 0.9659299850463867, -0.5, 0, 0.8660299777984619, -0.5, 0, 0.8660299777984619, -0.7071099877357483, 0, 0.7071099877357483, -0.7071099877357483, 0, 0.7071099877357483, -0.8660299777984619, 0, 0.5, -0.8660299777984619, 0, 0.5, -0.9659299850463867, 0, 0.2588199973106384, -0.9659299850463867, 0, 0.2588199973106384, -1, 0, 0, -1, 0, 0, -0.9659299850463867, 0, -0.2588199973106384, -0.9659299850463867, 0, -0.2588199973106384, -0.8660299777984619, 0, -0.5, -0.8660299777984619, 0, -0.5, -0.7071099877357483, 0, -0.7071099877357483, -0.7071099877357483, 0, -0.7071099877357483, -0.5, 0, -0.8660299777984619, -0.5, 0, -0.8660299777984619, -0.2588199973106384, 0, -0.9659299850463867, -0.2588199973106384, 0, -0.9659299850463867, 0, 0, -1, 0, 0, -1, 0.2588199973106384, 0, -0.9659299850463867, 0.2588199973106384, 0, -0.9659299850463867, 0.5, 0, -0.8660299777984619, 0.5, 0, -0.8660299777984619, 0.7071099877357483, 0, -0.7071099877357483, 0.7071099877357483, 0, -0.7071099877357483, 0.8660299777984619, 0, -0.5, 0.8660299777984619, 0, -0.5, 0.9659299850463867, 0, -0.2588199973106384, 0.9659299850463867, 0, -0.2588199973106384, 1, 0, 0, 1, 0, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0]
-                  },
-                  "tangents": {
-                    "n": [0, 0, 1, 0, 0, 1, -0.258819043636322, 0, 0.9659258127212524, -0.258819043636322, 0, 0.9659258127212524, -0.5, 0, 0.8660253882408142, -0.5, 0, 0.8660253882408142, -0.7071067690849304, 0, 0.7071067690849304, -0.7071067690849304, 0, 0.7071067690849304, -0.8660253882408142, 0, 0.5, -0.8660253882408142, 0, 0.5, -0.9659258127212524, 0, 0.258819043636322, -0.9659258127212524, 0, 0.258819043636322, -1, 0, 5.95773924515562e-17, -1, 0, 5.95773858341113e-17, -0.9659258127212524, 0, -0.258819043636322, -0.9659258127212524, 0, -0.258819043636322, -0.8660253882408142, 0, -0.5, -0.8660253882408142, 0, -0.5, -0.7071067690849304, 0, -0.7071067690849304, -0.7071067690849304, 0, -0.7071067690849304, -0.5, 0, -0.8660253882408142, -0.5, 0, -0.8660253882408142, -0.258819043636322, 0, -0.9659258127212524, -0.258819043636322, 0, -0.9659258127212524, -1.2511252348652353e-16, 0, -1, -1.2511256319119293e-16, 0, -1, 0.258819043636322, 0, -0.9659258127212524, 0.258819043636322, 0, -0.9659258127212524, 0.5, 0, -0.8660253882408142, 0.5, 0, -0.8660253882408142, 0.7071067690849304, 0, -0.7071067690849304, 0.7071067690849304, 0, -0.7071067690849304, 0.8660253882408142, 0, -0.5, 0.8660253882408142, 0, -0.5, 0.9659258127212524, 0, -0.258819043636322, 0.9659258127212524, 0, -0.258819043636322, 1, 0, -1.8469001519975324e-16, 1, 0, -1.8469001519975324e-16, 0.9659258127212524, 0, 0.258819043636322, 0.9659258127212524, 0, 0.258819043636322, 0.8660253882408142, 0, 0.5, 0.8660253882408142, 0, 0.5, 0.7071067690849304, 0, 0.7071067690849304, 0.7071067690849304, 0, 0.7071067690849304, 0.5, 0, 0.8660253882408142, 0.5, 0, 0.8660253882408142, 0.258819043636322, 0, 0.9659258127212524, 0.258819043636322, 0, 0.9659258127212524, 2.5022517932194507e-16, 0, 1, 2.5022517932194507e-16, 0, 1, 1, 0, -2.284696674673104e-15, 1, 0, 0, 1, 0, -5.7573682710199137e-8, 1, 0, -2.775317004205871e-14, 1, 0, 3.9274606677963675e-8, 1, 0, -1.2952285999290325e-7, 1, 0, -1.1122381238237722e-7, 1, 0, 0, 1, 0, 1.1122378396066779e-7, 1, 0, 1.2952284578204853e-7, 1, 0, -3.927459957253632e-8, 1, 0, 2.248165541262389e-14, 1, 0, 5.757367560477178e-8, 1, 0, -1.2246468525851679e-16, 1, 0, -6.123234262925839e-17, 1, 0, 0, 1, 0, 2.035536539324312e-8, 1, 0, 1.7479548475307638e-8, 1, 0, -3.166265116760769e-8, 1, 0, -6.062024644602369e-15, 1, 0, 3.1662644062180334e-8, 1, 0, -1.747954314623712e-8, 1, 0, -2.035536184052944e-8, 1, 0, 0, 1, 0, -1.2246468525851679e-16, 1, 0, -2.4492937051703357e-16, 1, 0, 2.215858307049747e-15, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 2.035536184052944e-8, 1, 0, 1.747954314623712e-8, 1, 0, -3.1662644062180334e-8, 1, 0, 5.896500007148775e-15, 1, 0, 3.166264761489401e-8, 1, 0, -1.7479548475307638e-8, 1, 0, -2.035536539324312e-8, 1, 0, 0, 1, 0, -6.123234262925839e-17, 1, 0, -1.2246468525851679e-16, 1, 0, -5.757367560477178e-8, 1, 0, -2.024559854615568e-14, 1, 0, 3.927459957253632e-8, 1, 0, -1.2952284578204853e-7, 1, 0, -1.1122378396066779e-7, 1, 0, 0, 1, 0, 1.1122381238237722e-7, 1, 0, 1.2952285999290325e-7, 1, 0, -3.9274606677963675e-8, 1, 0, 2.6712762861078043e-14, 1, 0, 5.7573682710199137e-8, 1, 0, -2.4492937051703357e-16]
-                  },
-                  "bitangents": {
-                    "n": [0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 2.284696674673104e-15, 0, 1, 0, 0, 1, 5.7573682710199137e-8, 0, 1, 2.775317004205871e-14, 0, 1, -3.9274606677963675e-8, 0, 1, 1.2952285999290325e-7, 0, 1, 1.1122381238237722e-7, 0, 1, 0, 0, 1, -1.1122378396066779e-7, 0, 1, -1.2952284578204853e-7, 0, 1, 3.927459957253632e-8, 0, 1, -2.248165541262389e-14, 0, 1, -5.757367560477178e-8, 0, 1, 1.2246468525851679e-16, 0, 1, 6.123234262925839e-17, 0, 1, 0, 0, 1, -2.035536539324312e-8, 0, 1, -1.7479548475307638e-8, 0, 1, 3.166265116760769e-8, 0, 1, 6.062024644602369e-15, 0, 1, -3.1662644062180334e-8, 0, 1, 1.747954314623712e-8, 0, 1, 2.035536184052944e-8, 0, 1, 0, 0, 1, 1.2246468525851679e-16, 0, 1, 2.4492937051703357e-16, 0, 1, 2.215858307049747e-15, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 2.035536184052944e-8, 0, -1, 1.747954314623712e-8, 0, -1, -3.1662644062180334e-8, 0, -1, 5.896500007148775e-15, 0, -1, 3.166264761489401e-8, 0, -1, -1.7479548475307638e-8, 0, -1, -2.035536539324312e-8, 0, -1, 0, 0, -1, -6.123234262925839e-17, 0, -1, -1.2246468525851679e-16, 0, -1, -5.757367560477178e-8, 0, -1, -2.024559854615568e-14, 0, -1, 3.927459957253632e-8, 0, -1, -1.2952284578204853e-7, 0, -1, -1.1122378396066779e-7, 0, -1, 0, 0, -1, 1.1122381238237722e-7, 0, -1, 1.2952285999290325e-7, 0, -1, -3.9274606677963675e-8, 0, -1, 2.6712762861078043e-14, 0, -1, 5.7573682710199137e-8, 0, -1, -2.4492937051703357e-16, 0, -1]
-                  },
-                  "texCoords": {
-                    "n": [0, 0, 0, 1, 0.041669998317956924, 0, 0.041669998317956924, 1, 0.08332999795675278, 0, 0.08332999795675278, 1, 0.125, 0, 0.125, 1, 0.16666999459266663, 0, 0.16666999459266663, 1, 0.20833000540733337, 0, 0.20833000540733337, 1, 0.25, 0, 0.25, 1, 0.2916699945926666, 0, 0.2916699945926666, 1, 0.3333300054073334, 0, 0.3333300054073334, 1, 0.375, 0, 0.375, 1, 0.4166699945926666, 0, 0.4166699945926666, 1, 0.4583300054073334, 0, 0.4583300054073334, 1, 0.5, 0, 0.5, 1, 0.541670024394989, 0, 0.541670024394989, 1, 0.583329975605011, 0, 0.583329975605011, 1, 0.625, 0, 0.625, 1, 0.666670024394989, 0, 0.666670024394989, 1, 0.708329975605011, 0, 0.708329975605011, 1, 0.75, 0, 0.75, 1, 0.791670024394989, 0, 0.791670024394989, 1, 0.833329975605011, 0, 0.833329975605011, 1, 0.875, 0, 0.875, 1, 0.916670024394989, 0, 0.916670024394989, 1, 0.958329975605011, 0, 0.958329975605011, 1, 1, 0, 1, 1, 0.5, 0.5, 1, 0.5, 0.9829599857330322, 0.6294100284576416, 0.9330099821090698, 0.75, 0.8535500168800354, 0.8535500168800354, 0.75, 0.9330099821090698, 0.6294100284576416, 0.9829599857330322, 0.5, 1, 0.3705900013446808, 0.9829599857330322, 0.25, 0.9330099821090698, 0.1464499980211258, 0.8535500168800354, 0.06699000298976898, 0.75, 0.01703999936580658, 0.6294100284576416, 0, 0.5, 0.01703999936580658, 0.3705900013446808, 0.06699000298976898, 0.25, 0.1464499980211258, 0.1464499980211258, 0.25, 0.06699000298976898, 0.3705900013446808, 0.01703999936580658, 0.5, 0, 0.6294100284576416, 0.01703999936580658, 0.75, 0.06699000298976898, 0.8535500168800354, 0.1464499980211258, 0.9330099821090698, 0.25, 0.9829599857330322, 0.3705900013446808, 1, 0.5, 0.5, 0.5, 1, 0.5, 0.9829599857330322, 0.3705900013446808, 0.9330099821090698, 0.25, 0.8535500168800354, 0.1464499980211258, 0.75, 0.06699000298976898, 0.6294100284576416, 0.01703999936580658, 0.5, 0, 0.3705900013446808, 0.01703999936580658, 0.25, 0.06699000298976898, 0.1464499980211258, 0.1464499980211258, 0.06699000298976898, 0.25, 0.01703999936580658, 0.3705900013446808, 0, 0.5, 0.01703999936580658, 0.6294100284576416, 0.06699000298976898, 0.75, 0.1464499980211258, 0.8535500168800354, 0.25, 0.9330099821090698, 0.3705900013446808, 0.9829599857330322, 0.5, 1, 0.6294100284576416, 0.9829599857330322, 0.75, 0.9330099821090698, 0.8535500168800354, 0.8535500168800354, 0.9330099821090698, 0.75, 0.9829599857330322, 0.6294100284576416, 1, 0.5]
-                  },
-                  "indices": {
-                    "n": [0, 1, 2, 2, 1, 3, 2, 3, 4, 4, 3, 5, 4, 5, 6, 6, 5, 7, 6, 7, 8, 8, 7, 9, 8, 9, 10, 10, 9, 11, 10, 11, 12, 12, 11, 13, 12, 13, 14, 14, 13, 15, 14, 15, 16, 16, 15, 17, 16, 17, 18, 18, 17, 19, 18, 19, 20, 20, 19, 21, 20, 21, 22, 22, 21, 23, 22, 23, 24, 24, 23, 25, 24, 25, 26, 26, 25, 27, 26, 27, 28, 28, 27, 29, 28, 29, 30, 30, 29, 31, 30, 31, 32, 32, 31, 33, 32, 33, 34, 34, 33, 35, 34, 35, 36, 36, 35, 37, 36, 37, 38, 38, 37, 39, 38, 39, 40, 40, 39, 41, 40, 41, 42, 42, 41, 43, 42, 43, 44, 44, 43, 45, 44, 45, 46, 46, 45, 47, 46, 47, 48, 48, 47, 49, 50, 52, 51, 50, 53, 52, 50, 54, 53, 50, 55, 54, 50, 56, 55, 50, 57, 56, 50, 58, 57, 50, 59, 58, 50, 60, 59, 50, 61, 60, 50, 62, 61, 50, 63, 62, 50, 64, 63, 50, 65, 64, 50, 66, 65, 50, 67, 66, 50, 68, 67, 50, 69, 68, 50, 70, 69, 50, 71, 70, 50, 72, 71, 50, 73, 72, 50, 74, 73, 50, 75, 74, 76, 77, 78, 76, 78, 79, 76, 79, 80, 76, 80, 81, 76, 81, 82, 76, 82, 83, 76, 83, 84, 76, 84, 85, 76, 85, 86, 76, 86, 87, 76, 87, 88, 76, 88, 89, 76, 89, 90, 76, 90, 91, 76, 91, 92, 76, 92, 93, 76, 93, 94, 76, 94, 95, 76, 95, 96, 76, 96, 97, 76, 97, 98, 76, 98, 99, 76, 99, 100, 76, 100, 101],
-                    "bits": 16
-                  },
-                  "typed": true
-                }
-              },
-              "material": {
-                "type": "pbr",
-                "baseColor": [0.42, 0.55, 0.75],
-                "metallic": 0,
-                "roughness": 0.9,
-                "opacity": 1,
-                "emissiveFactor": [0, 0, 0],
-                "textures": {
-                  "baseColorTexture": "d4a96a210b1af85c70925ceced937cb7"
-                },
-                "config": {
-                  "side": "front",
-                  "wireframe": false,
-                  "transparent": false,
-                  "castShadow": true,
-                  "probeable": true
-                },
-                "uvProjection": "box",
-                "uvSpace": "world",
-                "uvWorldSize": 1
-              }
-            }
-          }
-        ]
+        }
       }
-    ]
+    ],
+    "variables": {},
+    "spawnOnStart": true,
+    "collider": {
+      "mass": 0,
+      "linearDamping": 0.25,
+      "angularDamping": 0.25,
+      "linearConstraints": [1, 1, 1],
+      "angularConstraints": [1, 1, 1],
+      "friction": 0.7,
+      "restitution": 0,
+      "simulatePhysics": true,
+      "groundProbeDistance": 0,
+      "motionSmoothing": 0,
+      "simulationMode": "project",
+      "simulationRange": 0,
+      "canSleep": false,
+      "layer": 1,
+      "mask": -1,
+      "shapes": [
+        {
+          "type": "box",
+          "width": 120,
+          "height": 1,
+          "depth": 120,
+          "offset": [0, -0.5, 0],
+          "rotation": [0, 0, 0]
+        },
+        {
+          "type": "box",
+          "width": 120,
+          "height": 1,
+          "depth": 0.5,
+          "offset": [0, 0.5, 59.75],
+          "rotation": [0, 0, 0]
+        },
+        {
+          "type": "box",
+          "width": 120,
+          "height": 1,
+          "depth": 0.5,
+          "offset": [0, 0.5, -59.75],
+          "rotation": [0, 0, 0]
+        },
+        {
+          "type": "box",
+          "width": 0.5,
+          "height": 1,
+          "depth": 119,
+          "offset": [-59.75, 0.5, 0],
+          "rotation": [0, 0, 0]
+        },
+        {
+          "type": "box",
+          "width": 0.5,
+          "height": 1,
+          "depth": 119,
+          "offset": [59.75, 0.5, 0],
+          "rotation": [0, 0, 0]
+        },
+        {
+          "type": "box",
+          "width": 3,
+          "height": 0.4,
+          "depth": 8.63815572471545,
+          "offset": [-12, 0.553038477897644, 10.288191795349121],
+          "rotation": [-10.000000413479448, 0, 0]
+        },
+        {
+          "type": "box",
+          "width": 3,
+          "height": 1.5,
+          "depth": 4,
+          "offset": [-12, 0.75, 16.50692367553711],
+          "rotation": [0, 0, 0]
+        },
+        {
+          "type": "box",
+          "width": 3,
+          "height": 0.4,
+          "depth": 4.385706600244631,
+          "offset": [-16, 0.5620614886283875, 8.129012107849121],
+          "rotation": [-19.999999673434996, 0, 0]
+        },
+        {
+          "type": "box",
+          "width": 3,
+          "height": 1.5,
+          "depth": 4,
+          "offset": [-16, 0.75, 12.1212158203125],
+          "rotation": [0, 0, 0]
+        },
+        {
+          "type": "box",
+          "width": 3,
+          "height": 0.4,
+          "depth": 3,
+          "offset": [-20, 0.5767949223518372, 7.399037837982178],
+          "rotation": [-29.999999467479046, 0, 0]
+        },
+        {
+          "type": "box",
+          "width": 3,
+          "height": 1.5,
+          "depth": 4,
+          "offset": [-20, 0.75, 10.598075866699219],
+          "rotation": [0, 0, 0]
+        },
+        {
+          "type": "box",
+          "width": 3,
+          "height": 0.4,
+          "depth": 2.333585740290619,
+          "offset": [-24, 0.59679114818573, 7.022372722625732],
+          "rotation": [-40.000001288448495, 0, 0]
+        },
+        {
+          "type": "box",
+          "width": 3,
+          "height": 1.5,
+          "depth": 4,
+          "offset": [-24, 0.75, 9.787630081176758],
+          "rotation": [0, 0, 0]
+        },
+        {
+          "type": "box",
+          "width": 2.5,
+          "height": 1.5,
+          "depth": 3,
+          "offset": [-5, 0.75, 10.5],
+          "rotation": [0, 0, 0]
+        },
+        {
+          "type": "box",
+          "width": 2.5,
+          "height": 1.600000023841858,
+          "depth": 3,
+          "offset": [-1, 0.800000011920929, 9.899999618530273],
+          "rotation": [0, 0, 0]
+        },
+        {
+          "type": "box",
+          "width": 3,
+          "height": 0.30000001192092896,
+          "depth": 3,
+          "offset": [10, 0.15000000596046448, 9.5],
+          "rotation": [0, 0, 0]
+        },
+        {
+          "type": "box",
+          "width": 3,
+          "height": 0.6000000238418579,
+          "depth": 3,
+          "offset": [14.5, 0.30000001192092896, 9.5],
+          "rotation": [0, 0, 0]
+        },
+        {
+          "type": "box",
+          "width": 3,
+          "height": 1,
+          "depth": 3,
+          "offset": [19, 0.5, 9.5],
+          "rotation": [0, 0, 0]
+        },
+        {
+          "type": "box",
+          "width": 3,
+          "height": 0.4,
+          "depth": 2.3662015831524985,
+          "offset": [19, 0.3187384605407715, 11.987730026245117],
+          "rotation": [-25.00000054320276, 180, 0]
+        },
+        {
+          "type": "box",
+          "width": 3,
+          "height": 2,
+          "depth": 3,
+          "offset": [23.5, 1, 9.5],
+          "rotation": [0, 0, 0]
+        },
+        {
+          "type": "box",
+          "width": 3,
+          "height": 0.4,
+          "depth": 4.732403166304997,
+          "offset": [23.5, 0.8187384605407715, 13.059983253479004],
+          "rotation": [-25.00000054320276, 180, 0]
+        },
+        {
+          "type": "box",
+          "width": 3,
+          "height": 3.5,
+          "depth": 3,
+          "offset": [28, 1.75, 9.5],
+          "rotation": [0, 0, 0]
+        },
+        {
+          "type": "box",
+          "width": 3,
+          "height": 0.4,
+          "depth": 8.281705541033745,
+          "offset": [28, 1.5687384605407715, 14.668363571166992],
+          "rotation": [-25.00000054320276, 180, 0]
+        },
+        {
+          "type": "box",
+          "width": 3,
+          "height": 0.4,
+          "depth": 2.923804400163087,
+          "offset": [8.377077266186838e-18, 0.31206148862838745, -4.442142963409424],
+          "rotation": [-20.0000014589873, 180, 0]
+        },
+        {
+          "type": "box",
+          "width": 3,
+          "height": 1,
+          "depth": 6,
+          "offset": [0, 0.5, -8.747477531433105],
+          "rotation": [0, 0, 0]
+        },
+        {
+          "type": "box",
+          "width": 3,
+          "height": 1,
+          "depth": 6,
+          "offset": [0, 0.5, -16.74747657775879],
+          "rotation": [0, 0, 0]
+        },
+        {
+          "type": "box",
+          "width": 8,
+          "height": 3,
+          "depth": 0.4000000059604645,
+          "offset": [-10, 1.5, -6],
+          "rotation": [0, 0, 0]
+        }
+      ]
+    }
   },
-  "scripts": {},
   "textureIds": [
     "d4a96a210b1af85c70925ceced937cb7"
-  ]
+  ],
+  "scripts": {}
 }

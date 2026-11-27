@@ -36,7 +36,7 @@ describe.skipIf(!present)('the Sandbox mannequin reacts', { timeout: 300_000 }, 
         physics.addBody(makeBody(box(50, 0.5, 50), { position: [0, -0.5, 0] }));
         extra?.(physics);
         made.push(physics);
-        const skin = loadSkin(library('rigs')[0].skin, (a: number[]) => mat4.clone(a as any));
+        const skin = loadSkin(library('rigs').find(r => r.name === 'Mannequin')!.skin, (a: number[]) => mat4.clone(a as any));
         const idle = library('animations').find(a => a.name === 'Idle')!.clips[0];
         // A skinned model with no GPU buffers: the skeleton and the clip are all a reaction reads.
         const model = Object.create(AnimatedModel.prototype) as AnimatedModel;
@@ -152,9 +152,12 @@ describe('the Sandbox scripts use the reactions', () => {
         expect(gun).toContain('physics?.reactionsFor?.(hit.body) && physics.applyHit(hit, way, impulse)')
     });
 
-    it('the player sits out its reactions: no input while it is down, and trips and is shoved on its keys', () => {
+    it('every Sandbox character sits out its reactions, and the player trips and is shoved on its keys', () => {
+        // The body (SandboxCharacter, the player's and every NPC's): no input while a reaction has it.
+        const body = source('Characters', 'Mannequin', 'Scripts', 'SandboxCharacter.ts');
+        expect(body).toMatch(/onUpdate\(delta: number\) \{\n\s+if \(this\._carPhase !== 'none'\) \{ this\._ride\(delta\); return \}\n\s+if \(this\._reacting\(delta\)\) return/);
         const player = source('Characters', 'Mannequin', 'Scripts', 'SandboxPlayer.ts');
-        expect(player).toMatch(/onUpdate\(delta: number\) \{\n\s+if \(this\._carPhase !== 'none'\) \{ this\._ride\(delta\); return \}\n\s+if \(this\._reacting\(delta\)\) return/);
+        expect(player).toMatch(/export default class SandboxPlayerNode extends SandboxCharacterNode/);
         expect(player).toContain("Input.started('Trip')");
         expect(player).toContain("Input.started('Shove')");
         const input = JSON.parse(readFileSync(join(EXAMPLE, 'ProjectSettings', 'input.json'), 'utf-8'));
@@ -165,7 +168,27 @@ describe('the Sandbox scripts use the reactions', () => {
     it('the car throws its driver out when asked to stop at speed', () => {
         const car = source('Vehicles', 'Car', 'Scripts', 'SandboxCar.ts');
         expect(car).toContain('Math.abs(vehicle.speed) > this.bailSpeed && this._driver?.bailOut?.(');
-        const player = source('Characters', 'Mannequin', 'Scripts', 'SandboxPlayer.ts');
-        expect(player).toContain('reactions.bail({ velocity, exitDirection, vehicle })');
+        const body = source('Characters', 'Mannequin', 'Scripts', 'SandboxCharacter.ts');
+        expect(body).toContain('reactions.bail({ velocity, exitDirection, vehicle })');
+    });
+
+    it('the car knocks down whoever it hits fast enough, warns whoever is ahead of it, and lets only the player drive', () => {
+        const car = source('Vehicles', 'Car', 'Scripts', 'SandboxCar.ts');
+        expect(car).toContain('character.struckByVehicle(this, [v[0], v[1], v[2]], closing)');
+        expect(car).toContain('character.dodgeVehicle(this, [v[0], v[1], v[2]])');
+        expect(car).toContain('character.canDrive === true');
+        const body = source('Characters', 'Mannequin', 'Scripts', 'SandboxCharacter.ts');
+        expect(body).toMatch(/public struckByVehicle\(vehicle: Node, velocity: ArrayLike<number>, speed: number\): boolean/);
+        expect(body).toMatch(/public get canDrive\(\): boolean \{ return false \}/);
+        expect(source('Characters', 'Mannequin', 'Scripts', 'SandboxPlayer.ts')).toMatch(/public get canDrive\(\): boolean \{ return true \}/);
+    });
+
+    it('an NPC never dies: its health kept full, a body down too long got up, its hits adding up to a fall', () => {
+        const npc = source('Characters', 'NPCs', 'Scripts', 'SandboxNpc.ts');
+        expect(npc).toContain('reactions.health = 1');
+        expect(npc).toContain('if (!reactions.alive) { reactions.reset(); return }');
+        expect(npc).toContain('if (this._downFor > this.downSeconds) { this._downFor = 0; reactions.getUp() }');
+        expect(npc).toMatch(/@eventListener\('reaction:Hit'\)/);
+        expect(npc).toMatch(/if \(this\._shock >= this\.knockdownShock \|\| legs\)/);
     });
 });

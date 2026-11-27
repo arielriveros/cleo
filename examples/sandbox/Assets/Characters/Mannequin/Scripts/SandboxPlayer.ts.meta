@@ -33,7 +33,7 @@
         "type": {
           "kind": "number"
         },
-        "access": "private",
+        "access": "protected",
         "default": 0.6,
         "hidden": false,
         "attribute": {
@@ -96,7 +96,7 @@
         "type": {
           "kind": "number"
         },
-        "access": "private",
+        "access": "protected",
         "default": 0.15,
         "hidden": false,
         "attribute": {
@@ -144,7 +144,7 @@
         "type": {
           "kind": "number"
         },
-        "access": "private",
+        "access": "protected",
         "default": 135,
         "hidden": false,
         "attribute": {
@@ -159,7 +159,7 @@
         "type": {
           "kind": "number"
         },
-        "access": "private",
+        "access": "protected",
         "default": 30,
         "hidden": false,
         "attribute": {
@@ -175,7 +175,7 @@
         "type": {
           "kind": "number"
         },
-        "access": "private",
+        "access": "protected",
         "default": 1.2,
         "hidden": false,
         "attribute": {
@@ -190,7 +190,7 @@
         "type": {
           "kind": "number"
         },
-        "access": "private",
+        "access": "protected",
         "default": 1,
         "hidden": false,
         "attribute": {
@@ -206,7 +206,7 @@
         "type": {
           "kind": "number"
         },
-        "access": "private",
+        "access": "protected",
         "default": 4,
         "hidden": false,
         "attribute": {
@@ -222,7 +222,7 @@
         "type": {
           "kind": "number"
         },
-        "access": "private",
+        "access": "protected",
         "default": 4,
         "hidden": false,
         "attribute": {
@@ -238,7 +238,7 @@
         "type": {
           "kind": "number"
         },
-        "access": "private",
+        "access": "protected",
         "default": 8,
         "hidden": false,
         "attribute": {
@@ -254,7 +254,7 @@
         "type": {
           "kind": "number"
         },
-        "access": "private",
+        "access": "protected",
         "default": 8,
         "hidden": false,
         "attribute": {
@@ -270,7 +270,7 @@
         "type": {
           "kind": "number"
         },
-        "access": "private",
+        "access": "protected",
         "default": 20,
         "hidden": false,
         "attribute": {
@@ -302,7 +302,7 @@
         "type": {
           "kind": "number"
         },
-        "access": "private",
+        "access": "protected",
         "default": 0.35,
         "hidden": false,
         "attribute": {
@@ -318,7 +318,7 @@
         "type": {
           "kind": "number"
         },
-        "access": "private",
+        "access": "protected",
         "default": 5,
         "hidden": false,
         "attribute": {
@@ -334,7 +334,7 @@
         "type": {
           "kind": "number"
         },
-        "access": "private",
+        "access": "protected",
         "default": 12,
         "hidden": false,
         "attribute": {
@@ -472,7 +472,7 @@
         "type": {
           "kind": "number"
         },
-        "access": "private",
+        "access": "protected",
         "default": 0.25,
         "hidden": false,
         "attribute": {
@@ -488,7 +488,7 @@
         "type": {
           "kind": "number"
         },
-        "access": "private",
+        "access": "protected",
         "default": 0.15,
         "hidden": false,
         "attribute": {
@@ -504,7 +504,7 @@
         "type": {
           "kind": "number"
         },
-        "access": "private",
+        "access": "protected",
         "default": 1.5,
         "hidden": false,
         "attribute": {
@@ -547,7 +547,7 @@
         "type": {
           "kind": "number"
         },
-        "access": "private",
+        "access": "protected",
         "default": 0.3,
         "hidden": false,
         "attribute": {
@@ -563,7 +563,7 @@
         "type": {
           "kind": "number"
         },
-        "access": "private",
+        "access": "protected",
         "default": 0.15,
         "hidden": false,
         "attribute": {
@@ -579,7 +579,7 @@
         "type": {
           "kind": "number"
         },
-        "access": "private",
+        "access": "protected",
         "default": 45,
         "hidden": false,
         "attribute": {
@@ -595,7 +595,7 @@
         "type": {
           "kind": "number"
         },
-        "access": "private",
+        "access": "protected",
         "default": 0.6,
         "hidden": false,
         "attribute": {
@@ -611,7 +611,7 @@
         "type": {
           "kind": "number"
         },
-        "access": "private",
+        "access": "protected",
         "default": 0.7,
         "hidden": false,
         "attribute": {
@@ -621,6 +621,669 @@
           "step": 0.05,
           "tooltip": "How far up the weapon must be (its aim's weight) before a shot goes."
         }
+      },
+      {
+        "name": "alignSeconds",
+        "type": {
+          "kind": "number"
+        },
+        "access": "protected",
+        "default": 0.35,
+        "hidden": false,
+        "attribute": {
+          "group": "Car",
+          "min": 0,
+          "max": 2,
+          "step": 0.05
+        }
+      },
+      {
+        "name": "alignMaxSeconds",
+        "type": {
+          "kind": "number"
+        },
+        "access": "protected",
+        "default": 0.6,
+        "hidden": false,
+        "attribute": {
+          "group": "Car",
+          "min": 0,
+          "max": 2,
+          "step": 0.05
+        }
+      },
+      {
+        "name": "settleSeconds",
+        "type": {
+          "kind": "number"
+        },
+        "access": "protected",
+        "default": 0.3,
+        "hidden": false,
+        "attribute": {
+          "group": "Car",
+          "min": 0,
+          "max": 2,
+          "step": 0.05,
+          "tooltip": "Seconds what is left of getting in (a few millimetres) eases out over once seated."
+        }
+      },
+      {
+        "name": "inVehicle",
+        "type": {
+          "kind": "boolean"
+        },
+        "access": "public",
+        "default": false,
+        "hidden": true
+      },
+      {
+        "name": "seated",
+        "type": {
+          "kind": "boolean"
+        },
+        "access": "public",
+        "default": false,
+        "hidden": true
+      },
+      {
+        "name": "hasMoveInput",
+        "type": {
+          "kind": "boolean"
+        },
+        "access": "public",
+        "default": false,
+        "hidden": true
+      },
+      {
+        "name": "groundSpeed",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 0,
+        "hidden": true
+      },
+      {
+        "name": "running",
+        "type": {
+          "kind": "boolean"
+        },
+        "access": "public",
+        "default": false,
+        "hidden": true
+      },
+      {
+        "name": "sprinting",
+        "type": {
+          "kind": "boolean"
+        },
+        "access": "public",
+        "default": false,
+        "hidden": true
+      },
+      {
+        "name": "moveAngle",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 0,
+        "hidden": true
+      },
+      {
+        "name": "runTurn",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 0,
+        "hidden": true
+      },
+      {
+        "name": "leanLeft",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 0,
+        "hidden": true
+      },
+      {
+        "name": "leanRight",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 0,
+        "hidden": true
+      },
+      {
+        "name": "leanForward",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 0,
+        "hidden": true
+      },
+      {
+        "name": "footPlacement",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 1,
+        "hidden": true
+      },
+      {
+        "name": "lookYaw",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 0,
+        "hidden": true
+      },
+      {
+        "name": "lookPitch",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 0,
+        "hidden": true
+      },
+      {
+        "name": "lookWeight",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 0,
+        "hidden": true
+      },
+      {
+        "name": "lookHeadWeight",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 0,
+        "hidden": true
+      },
+      {
+        "name": "onStairs",
+        "type": {
+          "kind": "boolean"
+        },
+        "access": "public",
+        "default": false,
+        "hidden": true
+      },
+      {
+        "name": "stairs",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 0,
+        "hidden": true
+      },
+      {
+        "name": "stairRate",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 1,
+        "hidden": true
+      },
+      {
+        "name": "weapon",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 0,
+        "hidden": true
+      },
+      {
+        "name": "pistolWeight",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 0,
+        "hidden": true
+      },
+      {
+        "name": "rifleWeight",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 0,
+        "hidden": true
+      },
+      {
+        "name": "shotgunWeight",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 0,
+        "hidden": true
+      },
+      {
+        "name": "stance",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 0,
+        "hidden": true
+      },
+      {
+        "name": "aiming",
+        "type": {
+          "kind": "boolean"
+        },
+        "access": "public",
+        "default": false,
+        "hidden": true
+      },
+      {
+        "name": "pistolAimWeight",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 0,
+        "hidden": true
+      },
+      {
+        "name": "rifleAimWeight",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 0,
+        "hidden": true
+      },
+      {
+        "name": "shotgunAimWeight",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 0,
+        "hidden": true
+      },
+      {
+        "name": "loweredWeight",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 0,
+        "hidden": true
+      },
+      {
+        "name": "supportHand",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 1,
+        "hidden": true
+      },
+      {
+        "name": "reloading",
+        "type": {
+          "kind": "boolean"
+        },
+        "access": "public",
+        "default": false,
+        "hidden": true
+      },
+      {
+        "name": "spreadNow",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 0,
+        "hidden": true
+      },
+      {
+        "name": "aimYaw",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 0,
+        "hidden": true
+      },
+      {
+        "name": "aimPitch",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 0,
+        "hidden": true
+      },
+      {
+        "name": "_directionScale",
+        "type": {
+          "kind": "number"
+        },
+        "access": "protected",
+        "default": 1,
+        "hidden": true
+      },
+      {
+        "name": "_lean",
+        "type": {
+          "kind": "number"
+        },
+        "access": "protected",
+        "default": 0,
+        "hidden": true
+      },
+      {
+        "name": "_lastVelocity",
+        "type": {
+          "kind": "vector",
+          "size": 2
+        },
+        "access": "protected",
+        "default": [0, 0],
+        "hidden": true
+      },
+      {
+        "name": "_turnTime",
+        "type": {
+          "kind": "number"
+        },
+        "access": "protected",
+        "default": 0,
+        "hidden": true
+      },
+      {
+        "name": "_wasSprinting",
+        "type": {
+          "kind": "boolean"
+        },
+        "access": "protected",
+        "default": false,
+        "hidden": true
+      },
+      {
+        "name": "_afterSprint",
+        "type": {
+          "kind": "boolean"
+        },
+        "access": "protected",
+        "default": false,
+        "hidden": true
+      },
+      {
+        "name": "_stopYaw",
+        "type": {
+          "kind": "number"
+        },
+        "access": "protected",
+        "default": 0,
+        "hidden": true
+      },
+      {
+        "name": "_jumpYaw",
+        "type": {
+          "kind": "number"
+        },
+        "access": "protected",
+        "default": 0,
+        "hidden": true
+      },
+      {
+        "name": "_acceleration",
+        "type": {
+          "kind": "number"
+        },
+        "access": "protected",
+        "default": -1,
+        "hidden": true
+      },
+      {
+        "name": "_stairBit",
+        "type": {
+          "kind": "number"
+        },
+        "access": "protected",
+        "default": -1,
+        "hidden": true
+      },
+      {
+        "name": "_stairPace",
+        "type": {
+          "kind": "number"
+        },
+        "access": "protected",
+        "default": 0,
+        "hidden": true
+      },
+      {
+        "name": "_offStairs",
+        "type": {
+          "kind": "number"
+        },
+        "access": "protected",
+        "default": 0,
+        "hidden": true
+      },
+      {
+        "name": "_stairNormal",
+        "type": {
+          "kind": "vector",
+          "size": 3
+        },
+        "access": "protected",
+        "default": [0, 1, 0],
+        "hidden": true
+      },
+      {
+        "name": "_carPhase",
+        "type": {
+          "kind": "choice",
+          "values": [
+            "none",
+            "entering",
+            "seated",
+            "exiting"
+          ]
+        },
+        "access": "protected",
+        "default": "none",
+        "hidden": true
+      },
+      {
+        "name": "_seat",
+        "type": {
+          "kind": "node",
+          "className": "Node"
+        },
+        "access": "protected",
+        "default": null,
+        "hidden": true
+      },
+      {
+        "name": "_ownController",
+        "type": {
+          "kind": "node",
+          "className": "ControllerNode"
+        },
+        "access": "protected",
+        "default": null,
+        "hidden": true
+      },
+      {
+        "name": "_alignFrom",
+        "type": {
+          "kind": "vector",
+          "size": 4
+        },
+        "access": "protected",
+        "default": [0, 0, 0, 0],
+        "hidden": true
+      },
+      {
+        "name": "_alignStep",
+        "type": {
+          "kind": "vector",
+          "size": 4
+        },
+        "access": "protected",
+        "default": [0, 0, 0, 0],
+        "hidden": true
+      },
+      {
+        "name": "_alignT",
+        "type": {
+          "kind": "number"
+        },
+        "access": "protected",
+        "default": 1,
+        "hidden": true
+      },
+      {
+        "name": "_alignTime",
+        "type": {
+          "kind": "number"
+        },
+        "access": "protected",
+        "default": 0,
+        "hidden": true
+      },
+      {
+        "name": "_carTime",
+        "type": {
+          "kind": "number"
+        },
+        "access": "protected",
+        "default": 0,
+        "hidden": true
+      },
+      {
+        "name": "_enterSeconds",
+        "type": {
+          "kind": "number"
+        },
+        "access": "protected",
+        "default": 0,
+        "hidden": true
+      },
+      {
+        "name": "_weaponWanted",
+        "type": {
+          "kind": "number"
+        },
+        "access": "protected",
+        "default": 0,
+        "hidden": true
+      },
+      {
+        "name": "_aim",
+        "type": {
+          "kind": "number"
+        },
+        "access": "protected",
+        "default": 0,
+        "hidden": true
+      },
+      {
+        "name": "_lookAmount",
+        "type": {
+          "kind": "number"
+        },
+        "access": "protected",
+        "default": 0,
+        "hidden": true
+      },
+      {
+        "name": "_lookCrouch",
+        "type": {
+          "kind": "number"
+        },
+        "access": "protected",
+        "default": 0,
+        "hidden": true
+      },
+      {
+        "name": "_turnThreshold",
+        "type": {
+          "kind": "number"
+        },
+        "access": "protected",
+        "default": -1,
+        "hidden": true
+      },
+      {
+        "name": "_time",
+        "type": {
+          "kind": "number"
+        },
+        "access": "protected",
+        "default": 0,
+        "hidden": true
+      },
+      {
+        "name": "_busyUntil",
+        "type": {
+          "kind": "number"
+        },
+        "access": "protected",
+        "default": 0,
+        "hidden": true
+      },
+      {
+        "name": "_reloadToken",
+        "type": {
+          "kind": "number"
+        },
+        "access": "protected",
+        "default": 0,
+        "hidden": true
+      },
+      {
+        "name": "_fireHold",
+        "type": {
+          "kind": "number"
+        },
+        "access": "protected",
+        "default": 0,
+        "hidden": true
+      },
+      {
+        "name": "_look",
+        "type": {
+          "kind": "vector",
+          "size": 3
+        },
+        "access": "protected",
+        "default": [0, 0, 1],
+        "hidden": true
+      },
+      {
+        "name": "_eye",
+        "type": {
+          "kind": "vector",
+          "size": 3
+        },
+        "access": "protected",
+        "default": [0, 0, 0],
+        "hidden": true
       },
       {
         "name": "recoilRecovery",
@@ -933,331 +1596,6 @@
         }
       },
       {
-        "name": "alignSeconds",
-        "type": {
-          "kind": "number"
-        },
-        "access": "private",
-        "default": 0.35,
-        "hidden": false,
-        "attribute": {
-          "group": "Car",
-          "min": 0,
-          "max": 2,
-          "step": 0.05
-        }
-      },
-      {
-        "name": "alignMaxSeconds",
-        "type": {
-          "kind": "number"
-        },
-        "access": "private",
-        "default": 0.6,
-        "hidden": false,
-        "attribute": {
-          "group": "Car",
-          "min": 0,
-          "max": 2,
-          "step": 0.05
-        }
-      },
-      {
-        "name": "settleSeconds",
-        "type": {
-          "kind": "number"
-        },
-        "access": "private",
-        "default": 0.3,
-        "hidden": false,
-        "attribute": {
-          "group": "Car",
-          "min": 0,
-          "max": 2,
-          "step": 0.05,
-          "tooltip": "Seconds what is left of getting in (a few millimetres) eases out over once seated."
-        }
-      },
-      {
-        "name": "inVehicle",
-        "type": {
-          "kind": "boolean"
-        },
-        "access": "public",
-        "default": false,
-        "hidden": true
-      },
-      {
-        "name": "seated",
-        "type": {
-          "kind": "boolean"
-        },
-        "access": "public",
-        "default": false,
-        "hidden": true
-      },
-      {
-        "name": "hasMoveInput",
-        "type": {
-          "kind": "boolean"
-        },
-        "access": "public",
-        "default": false,
-        "hidden": true
-      },
-      {
-        "name": "groundSpeed",
-        "type": {
-          "kind": "number"
-        },
-        "access": "public",
-        "default": 0,
-        "hidden": true
-      },
-      {
-        "name": "running",
-        "type": {
-          "kind": "boolean"
-        },
-        "access": "public",
-        "default": false,
-        "hidden": true
-      },
-      {
-        "name": "sprinting",
-        "type": {
-          "kind": "boolean"
-        },
-        "access": "public",
-        "default": false,
-        "hidden": true
-      },
-      {
-        "name": "moveAngle",
-        "type": {
-          "kind": "number"
-        },
-        "access": "public",
-        "default": 0,
-        "hidden": true
-      },
-      {
-        "name": "runTurn",
-        "type": {
-          "kind": "number"
-        },
-        "access": "public",
-        "default": 0,
-        "hidden": true
-      },
-      {
-        "name": "leanLeft",
-        "type": {
-          "kind": "number"
-        },
-        "access": "public",
-        "default": 0,
-        "hidden": true
-      },
-      {
-        "name": "leanRight",
-        "type": {
-          "kind": "number"
-        },
-        "access": "public",
-        "default": 0,
-        "hidden": true
-      },
-      {
-        "name": "leanForward",
-        "type": {
-          "kind": "number"
-        },
-        "access": "public",
-        "default": 0,
-        "hidden": true
-      },
-      {
-        "name": "footPlacement",
-        "type": {
-          "kind": "number"
-        },
-        "access": "public",
-        "default": 1,
-        "hidden": true
-      },
-      {
-        "name": "lookYaw",
-        "type": {
-          "kind": "number"
-        },
-        "access": "public",
-        "default": 0,
-        "hidden": true
-      },
-      {
-        "name": "lookPitch",
-        "type": {
-          "kind": "number"
-        },
-        "access": "public",
-        "default": 0,
-        "hidden": true
-      },
-      {
-        "name": "lookWeight",
-        "type": {
-          "kind": "number"
-        },
-        "access": "public",
-        "default": 0,
-        "hidden": true
-      },
-      {
-        "name": "lookHeadWeight",
-        "type": {
-          "kind": "number"
-        },
-        "access": "public",
-        "default": 0,
-        "hidden": true
-      },
-      {
-        "name": "onStairs",
-        "type": {
-          "kind": "boolean"
-        },
-        "access": "public",
-        "default": false,
-        "hidden": true
-      },
-      {
-        "name": "stairs",
-        "type": {
-          "kind": "number"
-        },
-        "access": "public",
-        "default": 0,
-        "hidden": true
-      },
-      {
-        "name": "stairRate",
-        "type": {
-          "kind": "number"
-        },
-        "access": "public",
-        "default": 1,
-        "hidden": true
-      },
-      {
-        "name": "weapon",
-        "type": {
-          "kind": "number"
-        },
-        "access": "public",
-        "default": 0,
-        "hidden": true
-      },
-      {
-        "name": "pistolWeight",
-        "type": {
-          "kind": "number"
-        },
-        "access": "public",
-        "default": 0,
-        "hidden": true
-      },
-      {
-        "name": "rifleWeight",
-        "type": {
-          "kind": "number"
-        },
-        "access": "public",
-        "default": 0,
-        "hidden": true
-      },
-      {
-        "name": "shotgunWeight",
-        "type": {
-          "kind": "number"
-        },
-        "access": "public",
-        "default": 0,
-        "hidden": true
-      },
-      {
-        "name": "stance",
-        "type": {
-          "kind": "number"
-        },
-        "access": "public",
-        "default": 0,
-        "hidden": true
-      },
-      {
-        "name": "aiming",
-        "type": {
-          "kind": "boolean"
-        },
-        "access": "public",
-        "default": false,
-        "hidden": true
-      },
-      {
-        "name": "pistolAimWeight",
-        "type": {
-          "kind": "number"
-        },
-        "access": "public",
-        "default": 0,
-        "hidden": true
-      },
-      {
-        "name": "rifleAimWeight",
-        "type": {
-          "kind": "number"
-        },
-        "access": "public",
-        "default": 0,
-        "hidden": true
-      },
-      {
-        "name": "shotgunAimWeight",
-        "type": {
-          "kind": "number"
-        },
-        "access": "public",
-        "default": 0,
-        "hidden": true
-      },
-      {
-        "name": "loweredWeight",
-        "type": {
-          "kind": "number"
-        },
-        "access": "public",
-        "default": 0,
-        "hidden": true
-      },
-      {
-        "name": "supportHand",
-        "type": {
-          "kind": "number"
-        },
-        "access": "public",
-        "default": 1,
-        "hidden": true
-      },
-      {
-        "name": "reloading",
-        "type": {
-          "kind": "boolean"
-        },
-        "access": "public",
-        "default": false,
-        "hidden": true
-      },
-      {
         "name": "firstPerson",
         "type": {
           "kind": "boolean"
@@ -1303,288 +1641,6 @@
         "hidden": true
       },
       {
-        "name": "spreadNow",
-        "type": {
-          "kind": "number"
-        },
-        "access": "public",
-        "default": 0,
-        "hidden": true
-      },
-      {
-        "name": "aimYaw",
-        "type": {
-          "kind": "number"
-        },
-        "access": "public",
-        "default": 0,
-        "hidden": true
-      },
-      {
-        "name": "aimPitch",
-        "type": {
-          "kind": "number"
-        },
-        "access": "public",
-        "default": 0,
-        "hidden": true
-      },
-      {
-        "name": "_directionScale",
-        "type": {
-          "kind": "number"
-        },
-        "access": "private",
-        "default": 1,
-        "hidden": true
-      },
-      {
-        "name": "_lean",
-        "type": {
-          "kind": "number"
-        },
-        "access": "private",
-        "default": 0,
-        "hidden": true
-      },
-      {
-        "name": "_lastVelocity",
-        "type": {
-          "kind": "vector",
-          "size": 2
-        },
-        "access": "private",
-        "default": [0, 0],
-        "hidden": true
-      },
-      {
-        "name": "_turnTime",
-        "type": {
-          "kind": "number"
-        },
-        "access": "private",
-        "default": 0,
-        "hidden": true
-      },
-      {
-        "name": "_wasSprinting",
-        "type": {
-          "kind": "boolean"
-        },
-        "access": "private",
-        "default": false,
-        "hidden": true
-      },
-      {
-        "name": "_afterSprint",
-        "type": {
-          "kind": "boolean"
-        },
-        "access": "private",
-        "default": false,
-        "hidden": true
-      },
-      {
-        "name": "_stopYaw",
-        "type": {
-          "kind": "number"
-        },
-        "access": "private",
-        "default": 0,
-        "hidden": true
-      },
-      {
-        "name": "_jumpYaw",
-        "type": {
-          "kind": "number"
-        },
-        "access": "private",
-        "default": 0,
-        "hidden": true
-      },
-      {
-        "name": "_acceleration",
-        "type": {
-          "kind": "number"
-        },
-        "access": "private",
-        "default": -1,
-        "hidden": true
-      },
-      {
-        "name": "_stairBit",
-        "type": {
-          "kind": "number"
-        },
-        "access": "private",
-        "default": -1,
-        "hidden": true
-      },
-      {
-        "name": "_stairPace",
-        "type": {
-          "kind": "number"
-        },
-        "access": "private",
-        "default": 0,
-        "hidden": true
-      },
-      {
-        "name": "_offStairs",
-        "type": {
-          "kind": "number"
-        },
-        "access": "private",
-        "default": 0,
-        "hidden": true
-      },
-      {
-        "name": "_stairNormal",
-        "type": {
-          "kind": "vector",
-          "size": 3
-        },
-        "access": "private",
-        "default": [0, 1, 0],
-        "hidden": true
-      },
-      {
-        "name": "_carPhase",
-        "type": {
-          "kind": "choice",
-          "values": [
-            "none",
-            "entering",
-            "seated",
-            "exiting"
-          ]
-        },
-        "access": "private",
-        "default": "none",
-        "hidden": true
-      },
-      {
-        "name": "_seat",
-        "type": {
-          "kind": "node",
-          "className": "Node"
-        },
-        "access": "private",
-        "default": null,
-        "hidden": true
-      },
-      {
-        "name": "_ownController",
-        "type": {
-          "kind": "node",
-          "className": "ControllerNode"
-        },
-        "access": "private",
-        "default": null,
-        "hidden": true
-      },
-      {
-        "name": "_alignFrom",
-        "type": {
-          "kind": "vector",
-          "size": 4
-        },
-        "access": "private",
-        "default": [0, 0, 0, 0],
-        "hidden": true
-      },
-      {
-        "name": "_alignStep",
-        "type": {
-          "kind": "vector",
-          "size": 4
-        },
-        "access": "private",
-        "default": [0, 0, 0, 0],
-        "hidden": true
-      },
-      {
-        "name": "_alignT",
-        "type": {
-          "kind": "number"
-        },
-        "access": "private",
-        "default": 1,
-        "hidden": true
-      },
-      {
-        "name": "_alignTime",
-        "type": {
-          "kind": "number"
-        },
-        "access": "private",
-        "default": 0,
-        "hidden": true
-      },
-      {
-        "name": "_carTime",
-        "type": {
-          "kind": "number"
-        },
-        "access": "private",
-        "default": 0,
-        "hidden": true
-      },
-      {
-        "name": "_enterSeconds",
-        "type": {
-          "kind": "number"
-        },
-        "access": "private",
-        "default": 0,
-        "hidden": true
-      },
-      {
-        "name": "_weaponWanted",
-        "type": {
-          "kind": "number"
-        },
-        "access": "private",
-        "default": 0,
-        "hidden": true
-      },
-      {
-        "name": "_aim",
-        "type": {
-          "kind": "number"
-        },
-        "access": "private",
-        "default": 0,
-        "hidden": true
-      },
-      {
-        "name": "_lookAmount",
-        "type": {
-          "kind": "number"
-        },
-        "access": "private",
-        "default": 0,
-        "hidden": true
-      },
-      {
-        "name": "_lookCrouch",
-        "type": {
-          "kind": "number"
-        },
-        "access": "private",
-        "default": 0,
-        "hidden": true
-      },
-      {
-        "name": "_turnThreshold",
-        "type": {
-          "kind": "number"
-        },
-        "access": "private",
-        "default": -1,
-        "hidden": true
-      },
-      {
         "name": "_views",
         "type": {
           "kind": "vector",
@@ -1625,33 +1681,6 @@
       },
       {
         "name": "_viewParams",
-        "type": {
-          "kind": "number"
-        },
-        "access": "private",
-        "default": 0,
-        "hidden": true
-      },
-      {
-        "name": "_time",
-        "type": {
-          "kind": "number"
-        },
-        "access": "private",
-        "default": 0,
-        "hidden": true
-      },
-      {
-        "name": "_busyUntil",
-        "type": {
-          "kind": "number"
-        },
-        "access": "private",
-        "default": 0,
-        "hidden": true
-      },
-      {
-        "name": "_reloadToken",
         "type": {
           "kind": "number"
         },
@@ -1711,15 +1740,6 @@
         },
         "access": "private",
         "default": 20,
-        "hidden": true
-      },
-      {
-        "name": "_fireHold",
-        "type": {
-          "kind": "number"
-        },
-        "access": "private",
-        "default": 0,
         "hidden": true
       },
       {
@@ -1878,16 +1898,6 @@
         },
         "access": "private",
         "default": -1,
-        "hidden": true
-      },
-      {
-        "name": "_look",
-        "type": {
-          "kind": "vector",
-          "size": 3
-        },
-        "access": "private",
-        "default": [0, 0, 1],
         "hidden": true
       }
     ],

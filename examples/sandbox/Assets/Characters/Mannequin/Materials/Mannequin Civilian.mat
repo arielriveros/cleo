@@ -1,0 +1,30 @@
+{
+  "id": "31ebef24c54d10fdc2da9cad742b971d",
+  "name": "Mannequin Civilian",
+  "material": {
+    "type": "pbr",
+    "baseColor": [0.15, 0.35, 1],
+    "metallic": 1,
+    "roughness": 1,
+    "opacity": 1,
+    "emissiveFactor": [0, 0, 0],
+    "textures": {
+      "baseColorTexture": "a1577223f44963abb2964e208d70ff60",
+      "metallicRoughnessTexture": "0350d27653c5d8043b78d316fb090f28",
+      "normalMap": "d12c954b12364b76bdf0f481936ed026"
+    },
+    "config": {
+      "side": "front",
+      "wireframe": false,
+      "transparent": false,
+      "castShadow": true,
+      "probeable": true
+    }
+  },
+  "textureIds": [
+    "a1577223f44963abb2964e208d70ff60",
+    "0350d27653c5d8043b78d316fb090f28",
+    "d12c954b12364b76bdf0f481936ed026"
+  ],
+  "thumbnail": ""
+}

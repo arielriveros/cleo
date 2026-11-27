@@ -955,7 +955,218 @@
               "r": [0.18948, 0.9772, -0.00877, -0.09539]
             }
           }
-        ]
+        ],
+        "reactionSets": {
+          "version": 1,
+          "defaultSet": "default",
+          "sets": [
+            {
+              "id": "default",
+              "name": "Default",
+              "strength": 1,
+              "muscles": {
+                "neck": {
+                  "frequency": 2.23,
+                  "damping": 1,
+                  "maxTorque": 40,
+                  "gravityCompensation": 1
+                },
+                "spine": {
+                  "frequency": 1.75,
+                  "damping": 1,
+                  "maxTorque": 250,
+                  "gravityCompensation": 1
+                },
+                "arms": {
+                  "frequency": 1.59,
+                  "damping": 1,
+                  "maxTorque": 80,
+                  "gravityCompensation": 0.8
+                },
+                "hands": {
+                  "frequency": 1.43,
+                  "damping": 1,
+                  "maxTorque": 12,
+                  "gravityCompensation": 0.5
+                },
+                "legs": {
+                  "frequency": 2.07,
+                  "damping": 1,
+                  "maxTorque": 250,
+                  "gravityCompensation": 1
+                },
+                "feet": {
+                  "frequency": 1.91,
+                  "damping": 1,
+                  "maxTorque": 120,
+                  "gravityCompensation": 1
+                }
+              },
+              "pins": {
+                "frequency": 5,
+                "damping": 1,
+                "maxForce": 3000,
+                "maxTorque": 300,
+                "regain": 1,
+                "legs": 1
+              },
+              "thresholds": {
+                "minHitImpulse": 2,
+                "staggerImpulse": 40,
+                "stumbleImpulse": 13,
+                "stumbleSpeed": 0.9,
+                "fallImpulse": 150,
+                "knockOutDistance": 0.35,
+                "fallUprightness": 0.55,
+                "highFallHeight": 1.5,
+                "tumbleAngularSpeed": 3,
+                "downSpeed": 0.6,
+                "settleSpeed": 0.25,
+                "settleTime": 0.6,
+                "maxReactionSeconds": 15
+              },
+              "behaviours": {
+                "hitReact": {
+                  "enabled": true,
+                  "params": {
+                    "weakness": 0.25,
+                    "weaknessTime": 0.5,
+                    "snap": 0.4,
+                    "reachDelay": 0.1,
+                    "holdTime": 2.5,
+                    "maxReach": 0.65,
+                    "reachStiffness": 3,
+                    "reachPull": 0.5,
+                    "lookTime": 1,
+                    "duration": 1.2
+                  }
+                },
+                "stepBalance": {
+                  "enabled": true,
+                  "params": {
+                    "maxSteps": 4,
+                    "stepTime": 0.3,
+                    "stepHeight": 0.08,
+                    "maxStepLength": 0.6,
+                    "captureMargin": 0.04,
+                    "legStiffness": 2.6,
+                    "perStepReduction": 0.8,
+                    "armStiffness": 0.6,
+                    "uprightAssist": 0.6,
+                    "leanInto": 0.1,
+                    "giveUpUprightness": 0.6,
+                    "recoverTime": 0.4
+                  }
+                },
+                "catchFall": {
+                  "enabled": true,
+                  "params": {
+                    "predictionTime": 0.5,
+                    "handDelay": 0.15,
+                    "armStiffness": 2.4,
+                    "absorbTime": 0.2,
+                    "absorb": 0.3,
+                    "armForward": 0.4,
+                    "kneeBend": 0.5
+                  }
+                },
+                "protectHead": {
+                  "enabled": true,
+                  "params": {
+                    "chinTuck": 0.4,
+                    "neckStiffness": 3,
+                    "armStiffness": 2.2,
+                    "handSpread": 0.13,
+                    "fadeTime": 0.15
+                  }
+                },
+                "landing": {
+                  "enabled": true,
+                  "params": {
+                    "leadTime": 0.3,
+                    "uprightness": 0.85,
+                    "kneeBend": 1,
+                    "hipBend": 0.6,
+                    "absorbTime": 0.25,
+                    "maxSpeed": 12
+                  }
+                },
+                "airborne": {
+                  "enabled": true,
+                  "params": {
+                    "minTime": 0.35,
+                    "armSpeed": 7.9,
+                    "armAmplitude": 1.2,
+                    "legSpeed": 7.9,
+                    "legAmplitude": 0.6,
+                    "stiffness": 1.75
+                  }
+                },
+                "tumble": {
+                  "enabled": true,
+                  "params": {
+                    "stiffness": 1.75,
+                    "damping": 1.4,
+                    "curl": 0.9,
+                    "rollTorque": 0.6,
+                    "slowDownSpeed": 1.2
+                  }
+                },
+                "vehicleBail": {
+                  "enabled": true,
+                  "params": {
+                    "inherit": 1,
+                    "ejectSpeed": 2,
+                    "ejectUp": 1,
+                    "clearTime": 0.35
+                  }
+                },
+                "struck": {
+                  "enabled": true,
+                  "params": {
+                    "kneeBend": 1.1,
+                    "hipBend": 0.8,
+                    "stiffness": 3,
+                    "duration": 0.7,
+                    "legShare": 1,
+                    "trunkShare": 0.45,
+                    "lift": 0.3
+                  }
+                },
+                "writhe": {
+                  "enabled": true,
+                  "params": {
+                    "stiffness": 1.2,
+                    "damping": 0.5,
+                    "period": 1.6,
+                    "amplitude": 0.35,
+                    "duration": 4
+                  }
+                },
+                "relax": {
+                  "enabled": true,
+                  "params": {
+                    "strength": 0.05,
+                    "friction": 2
+                  }
+                },
+                "getUp": {
+                  "enabled": true,
+                  "params": {
+                    "delay": 1,
+                    "strength": 1.5,
+                    "regainTime": 0.8,
+                    "blendTime": 0.25
+                  },
+                  "clips": {
+                    "faceDown": "Getting Up",
+                    "faceUp": "Stand Up"
+                  }
+                }
+              }
+            }
+          ]
+        }
       },
       "jointIndices": {
         "$idx": {

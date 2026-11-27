@@ -6,7 +6,8 @@
   "tests": {
     "physicsSuites": [
       "sandboxProject",
-      "reactions"
+      "reactions",
+      "npcs"
     ]
   }
 }

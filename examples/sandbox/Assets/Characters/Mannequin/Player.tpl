@@ -2,7 +2,7 @@
   "id": "085737d817f4571b3a12d5dce7d1547e",
   "name": "Player",
   "nodeJson": {
-    "id": "9c44980d7e883def707346483849267b",
+    "id": "c58bb7aa0084fb1df4c4788c575fc877",
     "name": "Player",
     "type": "collider",
     "position": [0, 0, 0],
@@ -10,15 +10,14 @@
     "scale": [1, 1, 1],
     "children": [
       {
-        "id": "877a180603a89b6f5a24840124b096e3",
-        "name": "Player",
+        "id": "2a83d93dba1e50e8c4a4a413543279de",
+        "name": "Character",
         "type": "character",
         "position": [0, 0, 0],
         "rotation": [0, 0, 0],
         "scale": [1, 1, 1],
         "children": [
           {
-            "id": "de5c142cde05f2af5a6200d0ae324adc",
             "name": "Camera Rig",
             "type": "cameraRig",
             "position": [0, 1.5, 0],
@@ -26,7 +25,6 @@
             "scale": [1, 1, 1],
             "children": [
               {
-                "id": "e40961c72ba3a6a9a4652acf1fd8cd2a",
                 "name": "Camera",
                 "type": "camera",
                 "position": [-0.5, 0.10000000149011612, -1.899999976158142],
@@ -34,7 +32,6 @@
                 "scale": [1, 1, 1],
                 "children": [
                   {
-                    "id": "5bc6a1d2bc7233dbb7b5387a61f3bb0b",
                     "name": "Viewmodels",
                     "type": "node",
                     "position": [0, 0, 0],
@@ -42,7 +39,6 @@
                     "scale": [1, 1, 1],
                     "children": [
                       {
-                        "id": "12a0a95a609e8213dd5c239e6ae518c1",
                         "name": "Pistol Viewmodel",
                         "type": "model",
                         "position": [0, -1.6009999513626099, -0.02199999988079071],
@@ -50,7 +46,6 @@
                         "scale": [1, 1, 1],
                         "children": [
                           {
-                            "id": "68b3a3b23eac769b336f35d36a15849e",
                             "name": "Muzzle",
                             "type": "node",
                             "position": [-0.08799999952316284, 1.4850000143051147, 0.6460000276565552],
@@ -58,7 +53,8 @@
                             "scale": [1, 1, 1],
                             "children": [],
                             "variables": {},
-                            "spawnOnStart": true
+                            "spawnOnStart": true,
+                            "id": "9cfd0d0b91165ba092acadadaead651a"
                           }
                         ],
                         "variables": {
@@ -3704,10 +3700,10 @@
                           ],
                           "controllerId": "090a067aee0fbeff9e874d5707b15502"
                         },
-                        "ragdoll": null
+                        "ragdoll": null,
+                        "id": "00a16e2d73a271bcd06019e7de91a906"
                       },
                       {
-                        "id": "0eb6a9902268f6f5bde0ae8e8a8ba5c6",
                         "name": "AK-47 Viewmodel",
                         "type": "model",
                         "position": [0, -1.6009999513626099, -0.02199999988079071],
@@ -3715,7 +3711,6 @@
                         "scale": [1, 1, 1],
                         "children": [
                           {
-                            "id": "738e3832e2905b50158248eba9d3433d",
                             "name": "Muzzle",
                             "type": "node",
                             "position": [-0.12200000137090683, 1.4700000286102295, 0.8320000171661377],
@@ -3723,7 +3718,8 @@
                             "scale": [1, 1, 1],
                             "children": [],
                             "variables": {},
-                            "spawnOnStart": true
+                            "spawnOnStart": true,
+                            "id": "b670a8f0d886a97d0655fae6d51b3f13"
                           }
                         ],
                         "variables": {
@@ -7323,10 +7319,10 @@
                           ],
                           "controllerId": "7f2f6f1ea94563fbeb4f016973053d46"
                         },
-                        "ragdoll": null
+                        "ragdoll": null,
+                        "id": "4c07844c75c389b772a0b8328b9bcbb5"
                       },
                       {
-                        "id": "7f38bbd831454e3bede895f8a746f2fa",
                         "name": "SAPS-12 Viewmodel",
                         "type": "model",
                         "position": [0, -1.6009999513626099, -0.02199999988079071],
@@ -7334,7 +7330,6 @@
                         "scale": [1, 1, 1],
                         "children": [
                           {
-                            "id": "504c2becce561c9fa1938f15309e235e",
                             "name": "Muzzle",
                             "type": "node",
                             "position": [-0.09799999743700027, 1.4079999923706055, 0.875],
@@ -7342,7 +7337,8 @@
                             "scale": [1, 1, 1],
                             "children": [],
                             "variables": {},
-                            "spawnOnStart": true
+                            "spawnOnStart": true,
+                            "id": "5c2bf92b5bd4ba0e0e3ffcd5eee213e0"
                           }
                         ],
                         "variables": {
@@ -11128,11 +11124,13 @@
                           ],
                           "controllerId": "b919f12894e4635ae9a56e37a7f28777"
                         },
-                        "ragdoll": null
+                        "ragdoll": null,
+                        "id": "8335cc8de77fe0fa76d7bdcf55991e7c"
                       }
                     ],
                     "variables": {},
-                    "spawnOnStart": true
+                    "spawnOnStart": true,
+                    "id": "d488e467d2b5f674f802fdbd8390d3ea"
                   }
                 ],
                 "variables": {},
@@ -11149,7 +11147,8 @@
                   "viewmodelFov": 58
                 },
                 "active": true,
-                "screenMaterials": []
+                "screenMaterials": [],
+                "id": "b22a90475f5825e2d87323457b96bb10"
               }
             ],
             "variables": {
@@ -11160,7 +11159,7 @@
               }
             },
             "spawnOnStart": true,
-            "followId": "3e46baaec2884f739ae708308980fbbe",
+            "followId": "d940bce2010ad18b802e6bf071d3fe01",
             "lookAtId": null,
             "cameraNodeId": null,
             "followOffset": [0, 1.5, 0],
@@ -11205,10 +11204,11 @@
               "aimArm": 1.25,
               "aimShoulderOffset": 0.6,
               "pivotHeight": 1.45
-            }
+            },
+            "id": "8b0a97373c33c97cae10f06de24960ea"
           },
           {
-            "id": "3e46baaec2884f739ae708308980fbbe",
+            "id": "d940bce2010ad18b802e6bf071d3fe01",
             "name": "Mannequin",
             "type": "model",
             "position": [0, 0, 0],
@@ -12675,7 +12675,218 @@
                       "r": [0.18948, 0.9772, -0.00877, -0.09539]
                     }
                   }
-                ]
+                ],
+                "reactionSets": {
+                  "version": 1,
+                  "defaultSet": "default",
+                  "sets": [
+                    {
+                      "id": "default",
+                      "name": "Default",
+                      "strength": 1,
+                      "muscles": {
+                        "neck": {
+                          "frequency": 2.23,
+                          "damping": 1,
+                          "maxTorque": 40,
+                          "gravityCompensation": 1
+                        },
+                        "spine": {
+                          "frequency": 1.75,
+                          "damping": 1,
+                          "maxTorque": 250,
+                          "gravityCompensation": 1
+                        },
+                        "arms": {
+                          "frequency": 1.59,
+                          "damping": 1,
+                          "maxTorque": 80,
+                          "gravityCompensation": 0.8
+                        },
+                        "hands": {
+                          "frequency": 1.43,
+                          "damping": 1,
+                          "maxTorque": 12,
+                          "gravityCompensation": 0.5
+                        },
+                        "legs": {
+                          "frequency": 2.07,
+                          "damping": 1,
+                          "maxTorque": 250,
+                          "gravityCompensation": 1
+                        },
+                        "feet": {
+                          "frequency": 1.91,
+                          "damping": 1,
+                          "maxTorque": 120,
+                          "gravityCompensation": 1
+                        }
+                      },
+                      "pins": {
+                        "frequency": 5,
+                        "damping": 1,
+                        "maxForce": 3000,
+                        "maxTorque": 300,
+                        "regain": 1,
+                        "legs": 1
+                      },
+                      "thresholds": {
+                        "minHitImpulse": 2,
+                        "staggerImpulse": 40,
+                        "stumbleImpulse": 13,
+                        "stumbleSpeed": 0.9,
+                        "fallImpulse": 150,
+                        "knockOutDistance": 0.35,
+                        "fallUprightness": 0.55,
+                        "highFallHeight": 1.5,
+                        "tumbleAngularSpeed": 3,
+                        "downSpeed": 0.6,
+                        "settleSpeed": 0.25,
+                        "settleTime": 0.6,
+                        "maxReactionSeconds": 15
+                      },
+                      "behaviours": {
+                        "hitReact": {
+                          "enabled": true,
+                          "params": {
+                            "weakness": 0.25,
+                            "weaknessTime": 0.5,
+                            "snap": 0.4,
+                            "reachDelay": 0.1,
+                            "holdTime": 2.5,
+                            "maxReach": 0.65,
+                            "reachStiffness": 3,
+                            "reachPull": 0.5,
+                            "lookTime": 1,
+                            "duration": 1.2
+                          }
+                        },
+                        "stepBalance": {
+                          "enabled": true,
+                          "params": {
+                            "maxSteps": 4,
+                            "stepTime": 0.3,
+                            "stepHeight": 0.08,
+                            "maxStepLength": 0.6,
+                            "captureMargin": 0.04,
+                            "legStiffness": 2.6,
+                            "perStepReduction": 0.8,
+                            "armStiffness": 0.6,
+                            "uprightAssist": 0.6,
+                            "leanInto": 0.1,
+                            "giveUpUprightness": 0.6,
+                            "recoverTime": 0.4
+                          }
+                        },
+                        "catchFall": {
+                          "enabled": true,
+                          "params": {
+                            "predictionTime": 0.5,
+                            "handDelay": 0.15,
+                            "armStiffness": 2.4,
+                            "absorbTime": 0.2,
+                            "absorb": 0.3,
+                            "armForward": 0.4,
+                            "kneeBend": 0.5
+                          }
+                        },
+                        "protectHead": {
+                          "enabled": true,
+                          "params": {
+                            "chinTuck": 0.4,
+                            "neckStiffness": 3,
+                            "armStiffness": 2.2,
+                            "handSpread": 0.13,
+                            "fadeTime": 0.15
+                          }
+                        },
+                        "landing": {
+                          "enabled": true,
+                          "params": {
+                            "leadTime": 0.3,
+                            "uprightness": 0.85,
+                            "kneeBend": 1,
+                            "hipBend": 0.6,
+                            "absorbTime": 0.25,
+                            "maxSpeed": 12
+                          }
+                        },
+                        "airborne": {
+                          "enabled": true,
+                          "params": {
+                            "minTime": 0.35,
+                            "armSpeed": 7.9,
+                            "armAmplitude": 1.2,
+                            "legSpeed": 7.9,
+                            "legAmplitude": 0.6,
+                            "stiffness": 1.75
+                          }
+                        },
+                        "tumble": {
+                          "enabled": true,
+                          "params": {
+                            "stiffness": 1.75,
+                            "damping": 1.4,
+                            "curl": 0.9,
+                            "rollTorque": 0.6,
+                            "slowDownSpeed": 1.2
+                          }
+                        },
+                        "vehicleBail": {
+                          "enabled": true,
+                          "params": {
+                            "inherit": 1,
+                            "ejectSpeed": 2,
+                            "ejectUp": 1,
+                            "clearTime": 0.35
+                          }
+                        },
+                        "struck": {
+                          "enabled": true,
+                          "params": {
+                            "kneeBend": 1.1,
+                            "hipBend": 0.8,
+                            "stiffness": 3,
+                            "duration": 0.7,
+                            "legShare": 1,
+                            "trunkShare": 0.45,
+                            "lift": 0.3
+                          }
+                        },
+                        "writhe": {
+                          "enabled": true,
+                          "params": {
+                            "stiffness": 1.2,
+                            "damping": 0.5,
+                            "period": 1.6,
+                            "amplitude": 0.35,
+                            "duration": 4
+                          }
+                        },
+                        "relax": {
+                          "enabled": true,
+                          "params": {
+                            "strength": 0.05,
+                            "friction": 2
+                          }
+                        },
+                        "getUp": {
+                          "enabled": true,
+                          "params": {
+                            "delay": 1,
+                            "strength": 1.5,
+                            "regainTime": 0.8,
+                            "blendTime": 0.25
+                          },
+                          "clips": {
+                            "faceDown": "Getting Up",
+                            "faceUp": "Stand Up"
+                          }
+                        }
+                      }
+                    }
+                  ]
+                }
               },
               "jointIndices": {
                 "$idx": {
@@ -24570,7 +24781,7 @@
             "ragdoll": null
           },
           {
-            "id": "4c6c62471b50effb899b80be8b78bb3a",
+            "id": "44e8690f34f69bd61ef47df13afa3f40",
             "name": "Weapons",
             "type": "node",
             "position": [0, 0, 0],
@@ -24578,7 +24789,7 @@
             "scale": [1, 1, 1],
             "children": [
               {
-                "id": "0122160304329b1e2c1f63c8892a7306",
+                "id": "019f9aedbd0eba202f55893bf2a6ff66",
                 "name": "Pistol Grip",
                 "type": "node",
                 "position": [-0.8134288787841797, 1.4045332670211792, -0.0243177879601717],
@@ -24586,7 +24797,7 @@
                 "scale": [1, 1, 1],
                 "children": [
                   {
-                    "id": "fab553d03e13fb28343c9a7af243ff23",
+                    "id": "c36e9635750a4b9e9ba18c6b8b0216b4",
                     "name": "Pistol",
                     "type": "node",
                     "position": [0, 0, 0],
@@ -24594,7 +24805,7 @@
                     "scale": [1, 1, 1],
                     "children": [
                       {
-                        "id": "8156d2ca1e49a626ab0d0c92ed43a5c7",
+                        "id": "25b3670d6889d31c97d7585bec60166a",
                         "name": "Pistol",
                         "type": "model",
                         "position": [0, 0, 0],
@@ -24690,7 +24901,7 @@
                     "spawnOnStart": true
                   },
                   {
-                    "id": "df66a5d10d7ad63bb46446f099832b5b",
+                    "id": "16b3b34b63b0e904c0a3fd91cb7d3c3a",
                     "name": "Muzzle",
                     "type": "node",
                     "position": [0, 0.09929999709129333, 0.23499999940395355],
@@ -24740,23 +24951,23 @@
                 }
               },
               {
-                "id": "0c42164f1f817e4a5c168032c59edca5",
+                "id": "ac8b780e382153d9f6ee8760692f6003",
                 "name": "Rifle Grip",
                 "type": "node",
                 "position": [-0.8134288787841797, 1.4045332670211792, -0.0243177879601717],
-                "rotation": [98.8871, 14.3962, -77.4495],
-                "scale": [1, 1.0000001192092896, 1],
+                "rotation": [98.8868408203125, 14.39594554901123, -77.4494400024414],
+                "scale": [1, 1, 1],
                 "children": [
                   {
-                    "id": "0013576086be602c8061bc44b307d00b",
+                    "id": "3886e5fbe290903c2a612f19732876fa",
                     "name": "Rifle",
                     "type": "node",
-                    "position": [0.01383, -0.00734, -0.031],
+                    "position": [0.013829999603331089, -0.007340000011026859, -0.03099999949336052],
                     "rotation": [0, 0, 0],
                     "scale": [1, 1, 1],
                     "children": [
                       {
-                        "id": "233b5ff349501c253faab3507fba6901",
+                        "id": "c0ce9f22ef0f7da536deaffcb57eba27",
                         "name": "Rifle",
                         "type": "model",
                         "position": [0, 0, 0],
@@ -24922,10 +25133,10 @@
                     "spawnOnStart": true
                   },
                   {
-                    "id": "b4fd8dbf76c5b05f68d8148ff302b2bf",
+                    "id": "9e21c702ba6b3e770051f0c40ccd9799",
                     "name": "Muzzle",
                     "type": "node",
-                    "position": [0.01383, 0.08686, 0.5827],
+                    "position": [0.013829999603331089, 0.08686000108718872, 0.5827000141143799],
                     "rotation": [0, 0, 0],
                     "scale": [1, 1, 1],
                     "children": [],
@@ -24972,15 +25183,15 @@
                 }
               },
               {
-                "id": "8e95fa399bc246aa250ee5384702b7e7",
+                "id": "197707b2c6dfce2ddd803c7c4f8e6c17",
                 "name": "Shotgun Grip",
                 "type": "node",
                 "position": [-0.8134288787841797, 1.4045332670211792, -0.0243177879601717],
-                "rotation": [98.8871, 14.3962, -77.4495],
-                "scale": [1, 1.0000001192092896, 1],
+                "rotation": [98.8868408203125, 14.39594554901123, -77.4494400024414],
+                "scale": [1, 1, 1],
                 "children": [
                   {
-                    "id": "5e0d9537ad4c641952253047f69be22a",
+                    "id": "cbe9be3335ca54acc85446197db73122",
                     "name": "Shotgun",
                     "type": "node",
                     "position": [0, 0, 0],
@@ -24988,7 +25199,7 @@
                     "scale": [1, 1, 1],
                     "children": [
                       {
-                        "id": "0e77d2448dec3f5b79cb87353112cc5c",
+                        "id": "5719696e9f882529b93921b8060b7343",
                         "name": "Shotgun",
                         "type": "model",
                         "position": [0, 0, 0],
@@ -25084,10 +25295,10 @@
                     "spawnOnStart": true
                   },
                   {
-                    "id": "a4fcbf41358143d9f623dc40a166c497",
+                    "id": "0487ed6646a52d0b33447de0ed861d1d",
                     "name": "Muzzle",
                     "type": "node",
-                    "position": [0, 0.0914, 0.7781],
+                    "position": [0, 0.09139999747276306, 0.7781000137329102],
                     "rotation": [0, 0, 0],
                     "scale": [1, 1, 1],
                     "children": [],
@@ -25138,7 +25349,7 @@
             "spawnOnStart": true
           },
           {
-            "id": "c0b6e3afc90a9c20eae11735eb5252e4",
+            "id": "1ca2b0a26e4d0d451a753288cd236ce3",
             "name": "Sounds",
             "type": "node",
             "position": [0, 0, 0],
@@ -25146,7 +25357,7 @@
             "scale": [1, 1, 1],
             "children": [
               {
-                "id": "9aef8f1568f901d2f2fc60e1b5fa88d3",
+                "id": "c8a8a3687337ae65d9f806c68b3e9b63",
                 "name": "ShotPistol",
                 "type": "sound",
                 "position": [0, 0, 0],
@@ -25172,7 +25383,7 @@
                 }
               },
               {
-                "id": "660a81adbc9ecb33c0bf19c23310a99c",
+                "id": "fcd4ff7f5467a6709eb77a8124c3a31a",
                 "name": "ShotRifle",
                 "type": "sound",
                 "position": [0, 0, 0],
@@ -25198,7 +25409,7 @@
                 }
               },
               {
-                "id": "c5680d81294da08b697c370a103aa26a",
+                "id": "737991e3f05659fc42b8e0e53b18293e",
                 "name": "ShotShotgun",
                 "type": "sound",
                 "position": [0, 0, 0],
@@ -25228,7 +25439,6 @@
             "spawnOnStart": true
           },
           {
-            "id": "d813ff63187a08339b1596f1fc195b3d",
             "name": "HUD",
             "type": "uiRoot",
             "position": [0, 0, 0],
@@ -25236,7 +25446,6 @@
             "scale": [1, 1, 1],
             "children": [
               {
-                "id": "bbd94e5bc54a7483a586d775350d706d",
                 "name": "Crosshair",
                 "type": "uiPanel",
                 "position": [0, 0, 0],
@@ -25244,7 +25453,6 @@
                 "scale": [1, 1, 1],
                 "children": [
                   {
-                    "id": "a969f77bc70f07a3abfa6c1134b482c1",
                     "name": "Crosshair Dot",
                     "type": "uiPanel",
                     "position": [0, 0, 0],
@@ -25272,10 +25480,10 @@
                       "borderRadius": 1.5,
                       "borderWidth": 0,
                       "borderColor": [0, 0, 0, 1]
-                    }
+                    },
+                    "id": "921fbe8c70c8ea11e72999a2a028215f"
                   },
                   {
-                    "id": "9c6b663749d406b8c69c3c5de0443b45",
                     "name": "Crosshair Top",
                     "type": "uiPanel",
                     "position": [0, 0, 0],
@@ -25303,10 +25511,10 @@
                       "borderRadius": 0,
                       "borderWidth": 0,
                       "borderColor": [0, 0, 0, 1]
-                    }
+                    },
+                    "id": "5dc7ef10429621edb057612669f54ca3"
                   },
                   {
-                    "id": "ec09ccee8e7267bb6b5f82c4fe2a87a9",
                     "name": "Crosshair Bottom",
                     "type": "uiPanel",
                     "position": [0, 0, 0],
@@ -25334,10 +25542,10 @@
                       "borderRadius": 0,
                       "borderWidth": 0,
                       "borderColor": [0, 0, 0, 1]
-                    }
+                    },
+                    "id": "801f198e6839280946cd26987e32631b"
                   },
                   {
-                    "id": "a2c57f64dea184a0c8bbf6d90e191fa5",
                     "name": "Crosshair Left",
                     "type": "uiPanel",
                     "position": [0, 0, 0],
@@ -25365,10 +25573,10 @@
                       "borderRadius": 0,
                       "borderWidth": 0,
                       "borderColor": [0, 0, 0, 1]
-                    }
+                    },
+                    "id": "ae36318ca9854327f202294e7c210ff9"
                   },
                   {
-                    "id": "f9ae884373db39864c31acc000491a8c",
                     "name": "Crosshair Right",
                     "type": "uiPanel",
                     "position": [0, 0, 0],
@@ -25396,7 +25604,8 @@
                       "borderRadius": 0,
                       "borderWidth": 0,
                       "borderColor": [0, 0, 0, 1]
-                    }
+                    },
+                    "id": "1b2e1619598e34d8804477a3b472055a"
                   }
                 ],
                 "variables": {},
@@ -25420,10 +25629,10 @@
                   "borderRadius": 0,
                   "borderWidth": 0,
                   "borderColor": [0, 0, 0, 1]
-                }
+                },
+                "id": "41d2f020f3d0f37d07364d864d2c4193"
               },
               {
-                "id": "477bda99ae6d64cf64296a7e8708bcd4",
                 "name": "Ammunition",
                 "type": "uiPanel",
                 "position": [0, 0, 0],
@@ -25431,7 +25640,6 @@
                 "scale": [1, 1, 1],
                 "children": [
                   {
-                    "id": "2dac41892b622683b2fe42f2c83c2255",
                     "name": "Ammo",
                     "type": "uiText",
                     "position": [0, 0, 0],
@@ -25467,10 +25675,10 @@
                       "vAlign": "top",
                       "wrap": false,
                       "lineHeight": 1.2
-                    }
+                    },
+                    "id": "d806c1266b04d0bbda630e60c6e3c195"
                   },
                   {
-                    "id": "b628399e02b2569a411bc3a4b321be5b",
                     "name": "Reserve",
                     "type": "uiText",
                     "position": [0, 0, 0],
@@ -25506,10 +25714,10 @@
                       "vAlign": "top",
                       "wrap": false,
                       "lineHeight": 1.2
-                    }
+                    },
+                    "id": "6fd95bc0b7f194773686e9fa832fffa9"
                   },
                   {
-                    "id": "93fb6445467fefcd72bab6620147f9f6",
                     "name": "Weapon Name",
                     "type": "uiText",
                     "position": [0, 0, 0],
@@ -25545,7 +25753,8 @@
                       "vAlign": "top",
                       "wrap": false,
                       "lineHeight": 1.2
-                    }
+                    },
+                    "id": "521bcf8fd28e04ec17e7d8699079047e"
                   }
                 ],
                 "variables": {},
@@ -25569,10 +25778,10 @@
                   "borderRadius": 10,
                   "borderWidth": 0,
                   "borderColor": [0, 0, 0, 1]
-                }
+                },
+                "id": "6682bb573843620c8af6fb4d4795b7fa"
               },
               {
-                "id": "b7cd7dda6dc0c2dba3408ff5cb450a8f",
                 "name": "Reloading",
                 "type": "uiText",
                 "position": [0, 0, 0],
@@ -25608,7 +25817,8 @@
                   "vAlign": "top",
                   "wrap": false,
                   "lineHeight": 1.2
-                }
+                },
+                "id": "d9b005ff452fe9ae9d47f5d559dfe7fc"
               }
             ],
             "variables": {},
@@ -25644,10 +25854,10 @@
               "billboard": true,
               "clampToScreen": false,
               "hideBehindCamera": true
-            }
+            },
+            "id": "8c5155fbbeced7663c646515d4cf2778"
           },
           {
-            "id": "24b7466308efdd034856e4d68a25d0a6",
             "name": "Player Controller",
             "type": "controller",
             "position": [0, 0, 0],
@@ -25656,8 +25866,8 @@
             "children": [],
             "variables": {},
             "spawnOnStart": true,
-            "possessedId": "877a180603a89b6f5a24840124b096e3",
-            "aimSourceId": "de5c142cde05f2af5a6200d0ae324adc",
+            "possessedId": "2a83d93dba1e50e8c4a4a413543279de",
+            "aimSourceId": "8b0a97373c33c97cae10f06de24960ea",
             "navMeshId": null,
             "controlSource": "player",
             "moveAction": "Move",
@@ -25703,7 +25913,8 @@
             "waypointRadius": 0.5,
             "whiskerCount": 3,
             "whiskerSpread": 60,
-            "brain": "machine"
+            "brain": "machine",
+            "id": "542b07997984af485ec787870e2f2ee6"
           }
         ],
         "variables": {
@@ -25807,10 +26018,11818 @@
     "d12c954b12364b76bdf0f481936ed026"
   ],
   "scripts": {
-    "877a180603a89b6f5a24840124b096e3": "import { CharacterNode, Game, Input, MathUtils, lerp } from 'cleo'\nimport type { Animator, CameraRigNode, ColliderNode, ControllerNode, LayerName, Node, TriggerName, UIPanelNode, UITextNode } from 'cleo'\nimport { animTrigger, attribute, child, eventListener, observable } from 'cleo/decorators'\n\n/**\n * The Sandbox player: input only. Attach to the **Character** node (\"Player\").\n *\n *   Player Collider     capsule, friction 0 (the root of the Player template)\n *   └─ Player           THIS script, on a Character node\n *      ├─ Camera Rig    SandboxCamera: over the shoulder, third person while sprinting, or first person\n *      │  └─ Camera\n *      │     └─ Viewmodels   the first-person arms and weapons (Firing Line's), one per weapon\n *      ├─ Mannequin     the animated model: its Animator decides every pose\n *      ├─ Weapons       the pistol, the rifle and the shotgun, each on its grip socket on the right hand (SandboxGun)\n *      ├─ Sounds        the shots\n *      ├─ HUD           its own screen canvas: the crosshair, the ammunition, the reload (every copy has its own)\n *      └─ Player Controller   crouch toggles on the Crouch action\n *\n * The Controller reads Move / Look / Jump / Sprint and writes this frame's intent; the Character turns it into\n * velocity, facing, the jump and the turn-in-place request; the Mannequin's Animator reads all of that by itself\n * (Linked parameters). What is left for a script is what only the game knows, in the style of Advanced\n * Locomotion System v4:\n *\n *   - the GAIT: jog by default (the Character's walkSpeed), Walk held for a walk, Sprint held for a sprint (its\n *     runSpeed), a stick picking walk or jog by how far it is pushed;\n *   - the ROTATION MODE: walking and jogging face the camera and strafe (facing `aim`), sprinting faces where it\n *     goes, in any direction (facing `velocity`); after a sprint the body stays as it stopped until the camera moves;\n *   - the RUNNING TURN: a sprint reversed holds `runTurn` (-1 left, +1 right) while the animator's turn clip turns\n *     the body by its root motion;\n *   - the JUMP's facing: a jump taken off on the move faces the way it flies, not the camera (as on the stairs, and\n *     as ALS's in-air rotation), turning to its velocity through the flight; a standing jump keeps facing;\n *   - the LEAN: the sideways acceleration in the body's frame, as two layer weights (`leanLeft`, `leanRight`), and\n *     the forward one as a third (`leanForward`), weight into the step as it sets off and speeds up;\n *   - travel eased down when going backwards, to the speed the backward clips cover, so their feet do not slide;\n *   - `hasMoveInput`, `running`, `sprinting` and `moveAngle`, which the animator cannot measure (a Stop needs \"the\n *     player let go\", the start \"a sprint, set off the way the body faces\");\n *   - `groundSpeed`, the body's speed unsmoothed, for the blend space (the measured one lags a speeding body);\n *   - `footPlacement`, the foot IK weight while moving: full at a walk, light at a run (the solver plants the\n *     lower foot whenever it nears the ground, which a run's flight phase between strides must not do);\n *   - the LOOK-AT: where the camera faces off the body (`lookYaw`, `lookPitch`) and the Look layer's weight\n *     (`lookWeight`, up standing still; crouched, the Look Head layer's `lookHeadWeight` instead: the head alone\n *     turns), and the turn in place held back `turnDelay` seconds so the head turns first;\n *   - the CAR: a car hands it its seat (`boardVehicle`) and takes it back (`leaveVehicle`): it lets go of its own\n *     Controller, takes its body out of the physics world and rides in the seat, getting in and out by the animator's\n *     root motion (`enterTrigger`, `exitTrigger`), and takes its Controller back once on its feet (SandboxCar);\n *   - the STAIRS: whether the body is on a flight (`onStairs`, the ramp under it on `stairsLayer`) and which way it\n *     goes along it (`stairs`, +1 up, -1 down, from the climb under its travel), the flight's pace (one tread a\n *     step, slowing down BEFORE the first riser, seen ahead), facing where it goes on the flight, and `stairRate`,\n *     how much faster the stair clips play while the body still slows onto it;\n *   - the WEAPONS: Equip (or the mouse wheel) cycles none, the pistol, the rifle, the shotgun: the one in the hands\n *     goes down and is put away, the next is shown and comes up (its layer's weight, `pistolWeight` / `rifleWeight` /\n *     `shotgunWeight`), and the body takes its STANCE as it does (`stance`: 0 unarmed, 1 the pistol pack's moves, 2\n *     the rifle pack's, which the shotgun shares); Aim held aims it (`aiming`, the aim layers' weights, where the\n *     camera aims off the body in `aimYaw` / `aimPitch`), facing the camera and strafing, turning in place sooner; not\n *     aimed, it is held at the low ready, the aim's own hold turned muzzle-down (`loweredWeight`, the Lowered layer),\n *     and a sprint carries it as the sprint clip does (the pistol one-handed: `supportHand`); in third person, Aim\n *     held also zooms the camera in and blurs everything but what the crosshair is on (`aimingDown`);\n *   - FIRING: Fire pulls the trigger of the weapon in the hands (its SandboxGun shoots by raycast, a round off its\n *     magazine, and pushes what it hits). Fired from the hip in third person, the weapon comes up first and stays up\n *     `fireAimHold` seconds after the last shot. Each shot kicks the camera up and a little aside, most of which comes\n *     back (`recoilRecovery`), and the body takes the weapon's recoil (its gun's `fireTrigger`); the HUD's\n *     Crosshair shows where it goes, its ticks spread as the shot does; the HUD's Ammunition counts what is left;\n *   - RELOADING: Reload, or a pull on an empty magazine, fills the magazine from the reserve (`reloading`: the weapon\n *     layer's Reload in third person, the viewmodel's reload clips in first person); out of the reserve, the weapon is\n *     dry;\n *   - CROUCHING: the Crouch action toggles it (the Controller's), the Character shortens its capsule (`crouched`, which\n *     the animator reads), and the eye drops in first person;\n *   - FIRST PERSON: View toggles it (`firstPerson`): the camera folds in to the eyes (`eyeHeight`), the body is drawn\n *     into the shadows alone, the weapon in the hands is its viewmodel, and the mechanics are Firing Line's: aiming\n *     down the sights (`ads`, a narrower lens and a slower mouse, the background softened), the Fire, AimFire, Pump,\n *     Equip and Reload clips, the viewmodel kept out of walls; the body faces the camera, sprinting only ahead.\n *\n * It names no clip, no state and no key, and plays no animation (a car is got into by firing a trigger by name).\n *\n * The attributes the CHARACTER decides are public (how fast its clips go backwards, where its foot placement eases\n * off, how long it takes to turn round to the camera), so every copy of the Player template can set its own; how the behavior feels (the stick, the lean, the\n * running turn) is private, set once here.\n */\n/** The weapons' grip holders (their SandboxGun) on the hand, and their viewmodels under the camera: 1 the pistol, 2 the rifle, 3 the shotgun. */\nconst WEAPON_GRIPS = ['Pistol Grip', 'Rifle Grip', 'Shotgun Grip']\n/** The body's stance with each weapon in the hands: the pistol's, then the rifle's for both long guns. */\nconst STANCES = [1, 2, 2]\nconst WEAPON_VIEWMODELS = ['Pistol Viewmodel', 'AK-47 Viewmodel', 'SAPS-12 Viewmodel']\n\nexport default class SandboxPlayerNode extends CharacterNode {\n    /** Walk speed as a share of the jog (the Character's walkSpeed): the walk clips' speed over the jog's. */\n    @attribute('Gait', { min: 0, max: 1, step: 0.01 })\n    public walkScale: number = 0.38\n\n    /** A stick pushed less than this walks; past it, it jogs. */\n    @attribute('Gait', { min: 0, max: 1, step: 0.05 })\n    private walkDeflection: number = 0.6\n\n    /** Speed share travelling straight back: the backward clips cover less ground than the forward ones. */\n    @attribute('Gait', { min: 0.1, max: 1, step: 0.01 })\n    public backScale: number = 0.73\n\n    /** Speed share travelling diagonally back at a jog (the back-diagonal clip's speed), and at a walk. */\n    @attribute('Gait', { min: 0.1, max: 1, step: 0.01 })\n    public backDiagonalScale: number = 0.48\n\n    @attribute('Gait', { min: 0.1, max: 1, step: 0.01 })\n    public walkBackDiagonalScale: number = 0.86\n\n    /** Seconds the speed share takes to follow a change of direction. */\n    @attribute('Gait', { min: 0, max: 1, step: 0.01 })\n    private directionEase: number = 0.15\n\n    /** A sprint faster than this (m/s) that is asked to go more than `runTurnAngle` the other way turns round. */\n    @attribute('Running Turn', { min: 0, max: 10, step: 0.1 })\n    public runTurnSpeed: number = 3.5\n\n    /**\n     * The acceleration (m/s2) a sprint takes off at, from a standstill or speeding up the way it already goes: the\n     * start clip's own, so it plays at its own speed and is seen. Everything else (a jog, a walk, braking, a turn)\n     * keeps the Character's Acceleration.\n     */\n    @attribute('Gait', { min: 0.5, max: 30, step: 0.1 })\n    public sprintTakeoff: number = 5\n\n    @attribute('Running Turn', { min: 90, max: 180, step: 1 })\n    private runTurnAngle: number = 135\n\n    /** The turn lets go once the body is this close to the way it is asked to go (degrees), or after `runTurnSeconds`. */\n    @attribute('Running Turn', { min: 0, max: 90, step: 1 })\n    private runTurnRelease: number = 30\n\n    @attribute('Running Turn', { min: 0.2, max: 3, step: 0.05 })\n    private runTurnSeconds: number = 1.2\n\n    /** Taking off faster than this over the ground (m/s), a jump faces the way it flies; slower, as it stood. */\n    @attribute('Jump', { min: 0, max: 5, step: 0.1 })\n    private jumpTurnSpeed: number = 1\n\n    /** Sideways acceleration (m/s2) that leans the body all the way. */\n    @attribute('Lean', { min: 0.5, max: 20, step: 0.5 })\n    private leanAcceleration: number = 4\n\n    /** How fast the lean follows, per second (ALS's lean interpolation speed). */\n    @attribute('Lean', { min: 0.5, max: 20, step: 0.5 })\n    private leanSpeed: number = 4\n\n    /** Forward acceleration (m/s2) that leans the body forward all the way: setting off, speeding up. */\n    @attribute('Lean', { min: 0.5, max: 30, step: 0.5 })\n    private leanForwardAcceleration: number = 8\n\n    /** How fast the forward lean follows, per second: a start is over in half a second. */\n    @attribute('Lean', { min: 0.5, max: 30, step: 0.5 })\n    private leanForwardSpeed: number = 8\n\n    /** After a sprint, how far the camera must swing (degrees) before standing still turns to face it again. */\n    @attribute('Turn In Place', { min: 0, max: 180, step: 1 })\n    private lookAroundAngle: number = 20\n\n    /**\n     * Seconds the camera must stay round past the turn threshold before the body turns in place to it: meanwhile\n     * the head looks round (the Look layer). A character's own reaction time, so public.\n     */\n    @attribute('Turn In Place', { min: 0, max: 3, step: 0.05 })\n    public turnDelay: number = 1\n\n    /** The share of `turnDelay` waited before a turn to a camera swung right round behind (past 135 degrees). */\n    @attribute('Turn In Place', { min: 0, max: 1, step: 0.05 })\n    private farTurnShare: number = 0.35\n\n    /** How fast the look-at comes in standing still, and goes as the body moves off, per second. */\n    @attribute('Look', { min: 0.5, max: 20, step: 0.5 })\n    private lookSpeed: number = 5\n\n    /**\n     * The camera pitch (degrees, down +) that is a level look: the rig's resting pitch, which looks a little down\n     * at the character. Pitched further down the head looks down, pitched up it looks up.\n     */\n    @attribute('Look', { min: -45, max: 45, step: 1 })\n    private lookPitchRest: number = 12\n\n    /** Foot placement is full up to this speed (m/s)... */\n    @attribute('Foot Placement', { min: 0, max: 10, step: 0.1 })\n    public walkFootSpeed: number = 1.9\n\n    /** ...and down to `runFootWeight` from this one. The lean fades in over the same range. */\n    @attribute('Foot Placement', { min: 0, max: 10, step: 0.1 })\n    public runFootSpeed: number = 3.8\n\n    @attribute('Foot Placement', { min: 0, max: 1, step: 0.05 })\n    public runFootWeight: number = 0.3\n\n    /** The collision layer of the ramps laid over flights of stairs: what the capsule climbs, and how a flight is known. */\n    @attribute('Stairs')\n    public stairsLayer: LayerName = 'Stair Ramp'\n\n    /**\n     * A flight's pace, horizontal m/s, walking and running, up and down: one tread a step at the stair clips'\n     * rate (the build fits them to the clips and the course's treads). Faster, and the feet slide on the treads.\n     */\n    @attribute('Stairs', { min: 0.1, max: 5, step: 0.01 })\n    public stairUpWalkSpeed: number = 0.55\n\n    @attribute('Stairs', { min: 0.1, max: 5, step: 0.01 })\n    public stairUpRunSpeed: number = 1.25\n\n    @attribute('Stairs', { min: 0.1, max: 5, step: 0.01 })\n    public stairDownWalkSpeed: number = 0.8\n\n    @attribute('Stairs', { min: 0.1, max: 5, step: 0.01 })\n    public stairDownRunSpeed: number = 1.88\n\n    /** The climb along the travel (rise over run) that counts as going up or down a flight; it lets go at 60% of it. */\n    @attribute('Stairs', { min: 0.05, max: 1, step: 0.01 })\n    private stairGrade: number = 0.25\n\n    /** Seconds a flight still counts after the ramp last showed under the body (it meets the ground at its foot). */\n    @attribute('Stairs', { min: 0, max: 1, step: 0.01 })\n    private stairGrace: number = 0.15\n\n    /**\n     * How much harder than its Acceleration the body brakes for a flight ahead: it starts slowing that much later,\n     * and still reaches the flight's pace by its first step.\n     */\n    @attribute('Stairs', { min: 1, max: 4, step: 0.05 })\n    private stairBrake: number = 1.5\n\n    /** The animator's trigger that plays getting into a car, and the one that plays getting out of it. */\n    @attribute('Car')\n    public enterTrigger: TriggerName = 'EnterCar'\n\n    @attribute('Car')\n    public exitTrigger: TriggerName = 'ExitCar'\n\n    /**\n     * Seconds a metre the body takes to step onto where getting in starts, from where it stood when the player\n     * pressed Interact (the clip reaches for the door meanwhile), and the most it may take.\n     */\n    /** Seconds a weapon takes to come up into the hands, and to go down out of them. */\n    @attribute('Weapons', { min: 0.05, max: 2, step: 0.05 })\n    private equipSeconds: number = 0.3\n\n    /** Seconds the aim takes to come up, and to go down. */\n    @attribute('Weapons', { min: 0.02, max: 1, step: 0.01 })\n    private aimSeconds: number = 0.15\n\n    /** Aiming and standing still, the camera turned further than this (degrees) turns the body in place to it, at once. */\n    @attribute('Weapons', { min: 10, max: 120, step: 1 })\n    private aimTurnThreshold: number = 45\n\n    /** Fired from the hip, the weapon stays up (aimed) this many seconds after the last shot. */\n    @attribute('Weapons', { min: 0, max: 3, step: 0.05 })\n    private fireAimHold: number = 0.6\n\n    /** How far up the weapon must be (its aim's weight) before a shot goes. */\n    @attribute('Weapons', { min: 0, max: 1, step: 0.05 })\n    private fireAimReady: number = 0.7\n\n    /** The share of the camera's kick that comes back, and how fast (per second, of what is left). */\n    @attribute('Weapons', { min: 0, max: 1, step: 0.05 })\n    private recoilRecovery: number = 0.7\n\n    @attribute('Weapons', { min: 0.5, max: 30, step: 0.5 })\n    private recoilRecoverySpeed: number = 6\n\n    /** First person: the eye's height over the feet standing, and crouched (m). The character's own, so public. */\n    @attribute('First Person', { min: 0.3, max: 2.5, step: 0.01 })\n    public eyeStand: number = 1.62\n\n    @attribute('First Person', { min: 0.3, max: 2.5, step: 0.01 })\n    public eyeCrouch: number = 1.1\n\n    /** Seconds the eye takes to drop for a crouch, and to come back up. */\n    @attribute('First Person', { min: 0.01, max: 1, step: 0.01 })\n    private crouchSmoothing: number = 0.09\n\n    /** First person: the field of view from the hip, degrees, and how much wider at a sprint. */\n    @attribute('First Person', { min: 30, max: 120, step: 1 })\n    private hipFov: number = 78\n\n    @attribute('First Person', { min: 0, max: 30, step: 1 })\n    private sprintFovBoost: number = 5\n\n    /** Seconds the aim down the sights takes, and the mouse's speed down them (a share of its speed from the hip). */\n    @attribute('First Person', { min: 0.03, max: 1, step: 0.01 })\n    private adsSeconds: number = 0.14\n\n    @attribute('First Person', { min: 0.1, max: 1, step: 0.05 })\n    private adsSensitivity: number = 0.55\n\n    /** The lens the viewmodels are drawn at (degrees), and how far in front of the camera they reach (m: what a wall must leave room for). */\n    @attribute('First Person', { min: 20, max: 120, step: 1 })\n    private viewmodelFov: number = 58\n\n    @attribute('First Person', { min: 0.2, max: 3, step: 0.05 })\n    private viewmodelReach: number = 0.95\n\n    /** Aimed with aim clips, how far the viewmodel comes up (m). */\n    @attribute('First Person', { min: 0, max: 0.2, step: 0.001 })\n    private aimClipRaise: number = 0.028\n\n    /** Down the sights: the depth of field's aperture, its widest blur (px), what stays sharp near (m), its farthest focus (m). */\n    @attribute('First Person', { min: 0.5, max: 32, step: 0.5 })\n    private dofAperture: number = 2\n\n    @attribute('First Person', { min: 0, max: 64, step: 1 })\n    private dofMaxBlur: number = 14\n\n    @attribute('First Person', { min: 0, max: 10, step: 0.1 })\n    private dofNearCutoff: number = 1.2\n\n    @attribute('First Person', { min: 5, max: 500, step: 5 })\n    private dofFarFocus: number = 60\n\n    /**\n     * Aimed in third person (Aim held), a hard depth of field: its aperture (wide open), its widest blur (px), and how\n     * deep the sharp band round what the crosshair is on (m).\n     */\n    @attribute('Third Person Aim', { min: 0.7, max: 16, step: 0.1 })\n    private aimDofAperture: number = 1.2\n\n    @attribute('Third Person Aim', { min: 0, max: 64, step: 1 })\n    private aimDofMaxBlur: number = 32\n\n    @attribute('Third Person Aim', { min: 0, max: 10, step: 0.1 })\n    private aimDofRange: number = 1\n\n    /** First person: a sprint goes only this far off straight ahead (degrees); past it, the body jogs. */\n    @attribute('First Person', { min: 10, max: 180, step: 5 })\n    private sprintAngle: number = 50\n\n    @attribute('Car', { min: 0, max: 2, step: 0.05 })\n    private alignSeconds: number = 0.35\n\n    @attribute('Car', { min: 0, max: 2, step: 0.05 })\n    private alignMaxSeconds: number = 0.6\n\n    /** Seconds what is left of getting in (a few millimetres) eases out over once seated. */\n    @attribute('Car', { min: 0, max: 2, step: 0.05 })\n    private settleSeconds: number = 0.3\n\n    // ----- read by the car (SandboxCar) -----------------------------------------------------------------------\n\n    /** In a car: getting in, seated or getting out. */\n    public inVehicle: boolean = false\n    /** Seated: done getting in. The car may drive off. */\n    public seated: boolean = false\n\n    // ----- read by the animator (Linked parameters) -----------------------------------------------------------\n\n    /** MoveInput: the player is asking to move. */\n    public hasMoveInput: boolean = false\n    /**\n     * GroundSpeed: how fast the body crosses the ground this frame, as the physics has it. The blend space's\n     * speed: the measured `planarSpeed` is smoothed, and reads a body speeding up into a sprint a metre a second\n     * slow, which slides the feet forward.\n     */\n    public groundSpeed: number = 0\n    /** Running: at a jog or a sprint, not a walk. */\n    public running: boolean = false\n    /** Sprinting: Sprint held with the stick all the way, which is what the start clip sets off into. */\n    public sprinting: boolean = false\n    /** MoveAngle: degrees from the body's facing to the input, unsmoothed (+ left, - right). */\n    public moveAngle: number = 0\n    /** RunTurn: -1 a running turn to the left, +1 to the right, 0 none. */\n    public runTurn: number = 0\n    /** LeanLeft, LeanRight, LeanForward: the lean layers' weights. */\n    public leanLeft: number = 0\n    public leanRight: number = 0\n    public leanForward: number = 0\n    /** FootPlacement: the locomotion's foot IK weight. */\n    public footPlacement: number = 1\n    /**\n     * LookYaw, LookPitch: where the camera faces, off the body (degrees; yaw + left, pitch + down), clamped to the\n     * Look blend space's range. LookWeight: the Look layer's weight, up while standing still. LookHeadWeight: the Look\n     * Head layer's, which takes over crouched: the head alone turns, not the trunk.\n     */\n    public lookYaw: number = 0\n    public lookPitch: number = 0\n    public lookWeight: number = 0\n    public lookHeadWeight: number = 0\n    /** OnStairs: standing or moving on a flight of stairs (its ramp is under the body). */\n    public onStairs: boolean = false\n    /** Stairs: on a flight, the way along it: +1 up, -1 down, 0 across it or off it. */\n    public stairs: number = 0\n    /** StairRate: how much faster the stair clips play while the body is still faster than their pace. */\n    public stairRate: number = 1\n    /**\n     * The weapon in the hands: 0 none, 1 the pistol, 2 the rifle, 3 the shotgun (the one shown; Equip picks the next).\n     * Setting it tells `weapon:Equipped` (the weapon and the one before), which shows the model in the hand.\n     */\n    @observable('weapon:Equipped')\n    public weapon: number = 0\n    /** PistolWeight, RifleWeight, ShotgunWeight: the weapon layers' weights, the one in the hands up, faded in and out. */\n    public pistolWeight: number = 0\n    public rifleWeight: number = 0\n    public shotgunWeight: number = 0\n    /**\n     * Stance: how the body moves with what it holds, the animator's sets of moves: 0 unarmed, 1 the pistol, 2 a long gun\n     * (the rifle and the shotgun). It changes once the weapon coming up is halfway in the hands.\n     */\n    public stance: number = 0\n    /** Aiming: Aim held with a weapon in the hands, not sprinting. PistolAimWeight, RifleAimWeight, ShotgunAimWeight: the aim layers'. */\n    public aiming: boolean = false\n    public pistolAimWeight: number = 0\n    public rifleAimWeight: number = 0\n    public shotgunAimWeight: number = 0\n    /**\n     * LoweredWeight: the Lowered layer's weight: the weapon in the hands at the low ready (its aim's own hold turned\n     * muzzle-down), all the way while it is not aimed, lifting as it aims.\n     */\n    public loweredWeight: number = 0\n    /** SupportHand: the pistol's left hand on it (the Pistol layer's hand IK), let go over a sprint. */\n    public supportHand: number = 1\n    /** Reloading: the weapon in the hands is being reloaded (the Reload pose). */\n    public reloading: boolean = false\n    /** First person (View toggles it), the eye's height over the feet, and the field of view the camera takes there. */\n    public firstPerson: boolean = false\n    public eyeHeight: number = 1.62\n    public viewFov: number = 78\n    /** First person: how far down the sights the aim is, 0..1. */\n    public ads: number = 0\n    /**\n     * Third person: Aim held (not a shot from the hip), which zooms the camera in (SandboxCamera's `aimFov`) and blurs\n     * everything but what the crosshair is on.\n     */\n    public aimingDown: boolean = false\n    /** The spread of the weapon in the hands now, degrees (the crosshair's). */\n    public spreadNow: number = 0\n    /** AimYaw, AimPitch: where the camera aims, off the body (degrees; yaw + left, pitch + down), for the aim blend spaces. */\n    public aimYaw: number = 0\n    public aimPitch: number = 0\n\n    private _directionScale: number = 1\n    private _lean: number = 0\n    private _lastVelocity: number[] = [0, 0]\n    private _turnTime: number = 0\n    private _wasSprinting: boolean = false\n    private _afterSprint: boolean = false\n    private _stopYaw: number = 0\n    /** The heading the jump in flight faces (degrees); null a jump that keeps facing, undefined on the ground. */\n    private _jumpYaw: number | null | undefined = undefined\n    /** The Character's own Acceleration, as authored: what everything but a sprint take-off uses. */\n    private _acceleration: number = -1\n    /** The stairs' collision layer bit (`stairsLayer`), looked up once. */\n    private _stairBit: number = -1\n    /** The horizontal pace the stairs ask for this frame (`_stairsToward`), m/s. */\n    private _stairPace: number = 0\n    /** Seconds since the ramp of a flight was last under the body, and its normal then. */\n    private _offStairs: number = Infinity\n    private _stairNormal: number[] = [0, 1, 0]\n\n    /** The car: what this character is doing in one, and what that needs. */\n    private _carPhase: 'none' | 'entering' | 'seated' | 'exiting' = 'none'\n    /** The seat it rides on, and its own Controller, given back once it is out. */\n    private _seat: Node | null = null\n    private _ownController: ControllerNode | null = null\n    /** Stepping onto where getting in starts: the body's pose when it sat down to it, the step, and how far along. */\n    private _alignFrom: MathUtils.YawPose = [0, 0, 0, 0]\n    private _alignStep: MathUtils.YawPose = [0, 0, 0, 0]\n    private _alignT: number = 1\n    private _alignTime: number = 0\n    /** Seconds since getting in started, and how long its clip plays. */\n    private _carTime: number = 0\n    private _enterSeconds: number = 0\n\n    /** The weapon the hands go to next (Equip): 0 none, 1 the pistol, 2 the rifle, 3 the shotgun. */\n    private _weaponWanted: number = 0\n    /** The aim's weight, before the weapon's own scales it. */\n    private _aim: number = 0\n    /** The look-at's weight before the crouch splits it, and how far into the crouch's head-only look it is (0..1). */\n    private _lookAmount: number = 0\n    private _lookCrouch: number = 0\n    /** The Character's turn threshold as authored: aiming turns in place sooner. */\n    private _turnThreshold: number = -1\n    /** The weapons' nodes on the hand: the grip holders (their SandboxGun), and their viewmodels under the camera. */\n    private _weaponNodes: (Node | null)[] | null = null\n    private _views: any[] = []\n    private _viewmodels: Node | null = null\n    /** Where the Viewmodels group sits, before the aim brings it in. */\n    private _vmBase: number[] = [0, 0, 0]\n    /** The share of its true distance the viewmodel is drawn at (kept out of walls). */\n    private _vmDepth: number = 1\n    /** The viewmodels' animator bools as last sent. */\n    private _viewParams: Record<string, boolean> = {}\n    /** Seconds played, and until when the weapon in the hands is busy (coming up, reloading). */\n    private _time: number = 0\n    private _busyUntil: number = 0\n    /** Bumped by a weapon change: a reload it cuts short leaves the magazine as it was. */\n    private _reloadToken: number = 0\n    /** The wheel waits this long between two picks. */\n    private _wheelWait: number = 0\n    /** The rig's mouse speeds as authored: the aim down the sights slows them. */\n    private _baseYawSens: number = -1\n    private _basePitchSens: number = -1\n    /** Depth of field down the sights: on, its last settings, its focus. */\n    private _dofOn: boolean = false\n    private _dofKey: string = ''\n    private _dofFocus: number = 20\n    /** Seconds the weapon stays up for a shot from the hip. */\n    private _fireHold: number = 0\n    /** The camera's kick still to come back, degrees. */\n    private _recoilBack: number = 0\n    /**\n     * Its own HUD (the HUD canvas under it, not the scene's): the crosshair and its four ticks, the ammunition (the\n     * magazine, the reserve, the weapon's name) and the reload. And the crosshair's gap as last laid out.\n     */\n    @child('HUD/Crosshair')\n    private _crosshair: UIPanelNode | null = null\n    @child('HUD/Crosshair Top')\n    private _tickTop: UIPanelNode | null = null\n    @child('HUD/Crosshair Bottom')\n    private _tickBottom: UIPanelNode | null = null\n    @child('HUD/Crosshair Left')\n    private _tickLeft: UIPanelNode | null = null\n    @child('HUD/Crosshair Right')\n    private _tickRight: UIPanelNode | null = null\n    @child('HUD/Ammunition')\n    private _ammunition: UIPanelNode | null = null\n    @child('HUD/Ammo')\n    private _ammoText: UITextNode | null = null\n    @child('HUD/Reserve')\n    private _reserveText: UITextNode | null = null\n    @child('HUD/Weapon Name')\n    private _weaponName: UITextNode | null = null\n    @child('HUD/Reloading')\n    private _reloadingText: UITextNode | null = null\n    private _gap: number = -1\n    private readonly _look: number[] = [0, 0, 1]\n\n    onUpdate(delta: number) {\n        if (this._carPhase !== 'none') { this._ride(delta); return }\n        if (this._reacting(delta)) return\n        if (this._acceleration < 0) this._acceleration = this.acceleration\n        if (this._turnThreshold < 0) this._turnThreshold = this.turnThreshold\n        const v = this.velocity\n        this.groundSpeed = Math.hypot(v[0], v[2])\n        const intent = this.drive()\n        const [right, forward] = intent.move\n        const amount = Math.min(1, Math.hypot(right, forward))\n        this.hasMoveInput = amount > 0.1\n        const run = Math.min(1, Math.max(0, (this.planarSpeed - this.walkFootSpeed) / Math.max(0.01, this.runFootSpeed - this.walkFootSpeed)))\n        this.footPlacement = 1 + (this.runFootWeight - 1) * run\n\n        // The view: first person or third (not in a car, where the car's camera has it).\n        if (Input.started('View')) this.firstPerson = !this.firstPerson\n        const fp = this.firstPerson\n\n        const facing = this.worldForward\n        const bodyYaw = Math.atan2(facing[0], facing[2]) * 180 / Math.PI\n        // The input as a world heading (angles are counter-clockwise: right is negative), then off the body.\n        const inputYaw = intent.basisYaw + Math.atan2(-right, forward) * 180 / Math.PI\n        this.moveAngle = this.hasMoveInput ? this._wrap(inputYaw - bodyYaw) : 0\n        // The way it goes over the ground: the stick's, or while it brakes with none, its travel's.\n        const travel = this.hasMoveInput ? [Math.sin(inputYaw * Math.PI / 180), Math.cos(inputYaw * Math.PI / 180)]\n            : this.groundSpeed > 0.3 ? [v[0] / this.groundSpeed, v[2] / this.groundSpeed] : null\n        // The gait the stick asks for, as below: a run (a jog or a sprint) or a walk; the stairs brake to its pace.\n        const runGait = (intent.sprint && amount > 0.9) || !(Input.pressed('Walk') || amount < this.walkDeflection)\n        const pace = this._stairsToward(delta, travel, runGait)\n        this._lean = this._leanToward(delta, facing, run)\n        // The weapons: what is in the hands, and whether it aims (a sprint lowers it). No sprint crouched, reloading or\n        // aiming down the sights; in first person, only ahead.\n        const ahead = !fp || Math.abs(this.moveAngle) <= this.sprintAngle\n        const sprintAsked = intent.sprint && amount > 0.9 && this.hasMoveInput && !this.crouched && ahead\n            && !(fp && (this.reloading || Input.pressed('Aim')))\n        this._weaponsToward(delta, false, sprintAsked, intent.aimYaw - bodyYaw, intent.aimPitch)\n        this._lookToward(delta, intent.aimYaw - bodyYaw, intent.aimPitch)\n        // In a jump taken off on the move, the body faces the way it flies, whatever the stick and the camera do.\n        const jumpFacing = this._jumpTurn(delta, v, bodyYaw)\n        // The turn in place waits for the head: it engages only once the camera has stayed round this long. Aiming,\n        // it turns at once, and sooner.\n        this.turnSettleSeconds = this.aiming ? 0.05 : this.turnDelay\n        this.turnSettleFarSeconds = this.aiming ? 0.05 : this.turnDelay * this.farTurnShare\n        this.turnThreshold = this.aiming ? this.aimTurnThreshold : this._turnThreshold\n\n        // First person: the body faces the camera, always (its shadow is all that shows of it), and walks slower aimed.\n        if (fp) {\n            this.facingMode = 'none'\n            this.setWorldYaw(intent.aimYaw)\n            const gun = this.weapon > 0 ? this._weaponNodes?.[this.weapon - 1] as any : null\n            if (gun && this.ads > 0) intent.speedScale *= lerp(1, gun.aimMove, this.ads)\n        }\n\n        if (!this.hasMoveInput) {\n            this.acceleration = this._acceleration\n            this.running = false\n            this.sprinting = false\n            this.runTurn = 0\n            // Stopping out of a sprint: stay as stopped until the camera is swung, rather than turning to it at once\n            // (or aiming).\n            if (this._wasSprinting) { this._afterSprint = true; this._stopYaw = intent.aimYaw; this._wasSprinting = false }\n            if (this._afterSprint && (this.aiming || Math.abs(this._wrap(intent.aimYaw - this._stopYaw)) > this.lookAroundAngle)) this._afterSprint = false\n            // Standing on a flight: no turning in place on the steps.\n            if (!fp) this.facingMode = jumpFacing || this._afterSprint || this.onStairs ? 'none' : 'aim'\n            return\n        }\n\n        // Sprint: in any direction, with the stick (nearly) all the way (not crouched; in first person, only ahead).\n        const sprinting = sprintAsked\n        intent.sprint = sprinting\n        this.sprinting = sprinting\n        // The take-off: speeding up into a sprint from a standstill, or along the way the body already goes (not\n        // braking to reverse, which the running turn and the stop expect at the Character's own rate).\n        const along = this.groundSpeed < 0.5 || Math.abs(this._wrap(inputYaw - Math.atan2(v[0], v[2]) * 180 / Math.PI)) < 60\n        // Onto or on a flight, the Character's own: a sprint's gentle take-off would carry it up the steps too fast.\n        // Slowing for one, `stairBrake` times harder, which is what lets the slowing start that late.\n        this.acceleration = pace !== 0 && this.groundSpeed > this._stairPace + 0.05 ? this._acceleration * this.stairBrake\n            : sprinting && along && pace === 0 && this.groundSpeed < this.runSpeed - 0.05 ? this.sprintTakeoff : this._acceleration\n\n        // The running turn: a fast sprint asked to go back the way it came.\n        if (sprinting && this.runTurn === 0 && this.planarSpeed > this.runTurnSpeed && Math.abs(this.moveAngle) > this.runTurnAngle) {\n            this.runTurn = this.moveAngle > 0 ? -1 : 1\n            this._turnTime = 0\n        }\n        if (this.runTurn !== 0) {\n            this._turnTime += delta\n            if (!sprinting || Math.abs(this.moveAngle) < this.runTurnRelease || this._turnTime > this.runTurnSeconds) this.runTurn = 0\n        }\n        // While the turn clip turns the body, nothing else may. On a flight it faces the way it goes: the stair\n        // clips go forward only. In first person it faces the camera (above).\n        if (!fp) this.facingMode = jumpFacing || this.runTurn !== 0 ? 'none' : sprinting || this.stairs !== 0 ? 'velocity' : 'aim'\n        else if (this.runTurn !== 0) this.runTurn = 0\n        this._wasSprinting = sprinting\n        this._afterSprint = false\n\n        // Walk: the Walk action, or a stick pushed less than walkDeflection (scaled up to a full walk at it).\n        let scale = 1\n        const walking = !sprinting && (Input.pressed('Walk') || amount < this.walkDeflection)\n        if (walking) scale = Input.pressed('Walk') ? this.walkScale : this.walkScale * Math.min(1, amount / this.walkDeflection) / amount\n        this.running = !walking\n\n        // Strafing backwards: full speed up to the side, the diagonal share at 135 degrees, the back share straight\n        // back: the speeds the backward clips cover. A sprint faces where it goes, so it is always \"forward\".\n        // Each stance's clips have their own: the rifle pack moves as fast every way, as does every crouch; the pistol\n        // pack backs off at 0.7 (its diagonals are the rifle's legs, at 0.85).\n        const angle = Math.abs(Math.atan2(right, forward) * 180 / Math.PI)\n        const [backShare, diagonal] = this.crouched || this.stance === 2 ? [1, 1]\n            : this.stance === 1 ? [0.7, 0.85]\n            : [this.backScale, walking ? this.walkBackDiagonalScale : this.backDiagonalScale]\n        const target = sprinting || angle <= 90 ? 1\n            : angle <= 135 ? 1 + (diagonal - 1) * (angle - 90) / 45\n            : diagonal + (backShare - diagonal) * (angle - 135) / 45\n        const k = this.directionEase > 0 ? 1 - Math.exp(-delta / this.directionEase) : 1\n        this._directionScale += (target - this._directionScale) * k\n\n        if (pace !== 0) {\n            // A flight, or one ahead: its pace, walking or running as on the flat. The Character's speed runs along\n            // the ground, the pace over it: sqrt(1 + grade^2) of it along a flight's slope (on the flat before one, 1).\n            const up = pace > 0\n            const flat = walking ? (up ? this.stairUpWalkSpeed : this.stairDownWalkSpeed) * (Input.pressed('Walk') ? 1 : Math.min(1, amount / this.walkDeflection))\n                : up ? this.stairUpRunSpeed : this.stairDownRunSpeed\n            const nominal = sprinting ? this.runSpeed : this.walkSpeed\n            const slope = this.onStairs ? Math.hypot(1, this._grade(travel)) : 1\n            intent.speedScale *= Math.min(1, flat * slope / Math.max(0.01, nominal))\n            return\n        }\n        intent.speedScale *= scale * this._directionScale\n    }\n\n    /**\n     * The jump's facing. Decided at take-off (`isJumping` comes up the frame after the jump launches, with its\n     * velocity): faster than `jumpTurnSpeed` over the ground, the body turns toward its horizontal velocity at the\n     * Character's turnSpeed until it lands, as `velocity` facing turns it on the stairs (holding the last heading\n     * while the velocity is too slow to read, against a wall); slower, nothing turns it. True while it turns the\n     * body itself, which the Character must then leave alone (`facingMode` 'none').\n     */\n    private _jumpTurn(delta: number, v: ArrayLike<number>, bodyYaw: number): boolean {\n        if (!this.isJumping) { this._jumpYaw = undefined; return false }\n        const speed = Math.hypot(v[0], v[2])\n        if (this._jumpYaw === undefined) this._jumpYaw = speed > this.jumpTurnSpeed ? Math.atan2(v[0], v[2]) * 180 / Math.PI : null\n        if (this._jumpYaw === null) return false\n        if (speed > 0.3) this._jumpYaw = Math.atan2(v[0], v[2]) * 180 / Math.PI\n        const diff = this._wrap(this._jumpYaw - bodyYaw)\n        const step = Math.min(Math.abs(diff), this.turnSpeed * delta)\n        if (step > 1e-4) this.setWorldYaw(bodyYaw + Math.sign(diff) * step)\n        return true\n    }\n\n    /**\n     * The stairs, every frame: whether a flight is under the body (`onStairs`), which way the travel goes along it\n     * (`stairs`), how much faster the stair clips play while the body is still faster than their pace\n     * (`stairRate`), and the pace to keep: +1 a flight going up (under the body or ahead of it, as close as braking\n     * to the gait's pace at `stairBrake` takes), -1 down, 0 none.\n     */\n    private _stairsToward(delta: number, travel: number[] | null, run: boolean): number {\n        const physics = this.scene?.physics as any\n        if (this._stairBit < 0) this._stairBit = physics?.layer?.(this.stairsLayer) ?? 0\n        const p = this.worldPosition\n        // Straight down onto the stairs' ramps alone (their layer), `reach` above and below the feet, and only onto\n        // the top of one: a ramp's end, where it meets a landing, leans the other way.\n        const ramp = (x: number, z: number, y: number, reach: number) => {\n            const hit = this._stairBit && physics ? physics.raycast([x, y + reach, z], [x, y - reach, z], { layerMask: this._stairBit }) : null\n            return hit && hit.normal[1] >= 0.7 ? hit : null\n        }\n        const here = ramp(p[0], p[2], p[1], 0.6)\n        if (here) { this._offStairs = 0; this._stairNormal = [here.normal[0], here.normal[1], here.normal[2]] }\n        else this._offStairs += delta\n        this.onStairs = this.isGrounded && this._offStairs <= this.stairGrace\n        // Up or down it, by the climb under the travel: let go below 60% of the grade, not at once.\n        if (!this.onStairs) this.stairs = 0\n        else if (travel) {\n            const grade = this._grade(travel)\n            if (Math.abs(grade) >= this.stairGrade) this.stairs = Math.sign(grade)\n            else if (Math.abs(grade) < this.stairGrade * 0.6) this.stairs = 0\n        }\n        // No travel on a flight: it keeps the way it went, so a stop there settles into Idle, not the walk.\n        const fastest = this.stairs > 0 ? this.stairUpRunSpeed : this.stairDownRunSpeed\n        this.stairRate = this.stairs !== 0 ? Math.max(1, this.groundSpeed / Math.max(0.01, fastest)) : 1\n        // The gait's pace: up or down once known, else the slower of the two (up).\n        const paceOf = (dir: number) => run ? (dir < 0 ? this.stairDownRunSpeed : dir > 0 ? this.stairUpRunSpeed : Math.min(this.stairUpRunSpeed, this.stairDownRunSpeed))\n            : (dir < 0 ? this.stairDownWalkSpeed : dir > 0 ? this.stairUpWalkSpeed : Math.min(this.stairUpWalkSpeed, this.stairDownWalkSpeed))\n        this._stairPace = paceOf(this.stairs)\n        if (this.stairs !== 0) return this.stairs\n        if (this.onStairs || !travel || !this.hasMoveInput) return 0\n        // Ahead: as far as braking from this speed to the gait's pace takes at `stairBrake`, no further (at least\n        // past the capsule's front).\n        const brake = 2 * Math.max(0.5, this._acceleration * this.stairBrake)\n        const reach = Math.max(0.3, (this.groundSpeed ** 2 - this._stairPace ** 2) / brake)\n        // Tall enough to meet a ramp that far up (or down) a flight at its steepest.\n        const ahead = ramp(p[0] + travel[0] * reach, p[2] + travel[1] * reach, p[1], 0.5 + reach)\n        if (!ahead) return 0\n        const n = ahead.normal\n        const grade = -(travel[0] * n[0] + travel[1] * n[2]) / Math.max(1e-3, n[1])\n        if (Math.abs(grade) < this.stairGrade) return 0\n        this._stairPace = paceOf(Math.sign(grade))\n        return Math.sign(grade)\n    }\n\n    /** The climb along `travel` (rise over run, + up) of the flight last under the body. */\n    private _grade(travel: number[] | null): number {\n        if (!travel) return 0\n        const n = this._stairNormal\n        return -(travel[0] * n[0] + travel[1] * n[2]) / Math.max(1e-3, n[1])\n    }\n\n    /**\n     * The lean: the body's sideways acceleration (its velocity's change, on the body's left axis), as a share of\n     * `leanAcceleration`, faded in from a walk to a run and followed at `leanSpeed`. Positive leans left.\n     */\n    private _leanToward(delta: number, facing: ArrayLike<number>, run: number): number {\n        const v = this.velocity\n        if (!(delta > 0)) return this._lean\n        const ax = (v[0] - this._lastVelocity[0]) / delta, az = (v[2] - this._lastVelocity[1]) / delta\n        this._lastVelocity = [v[0], v[2]]\n        // The body's left is (forward.z, 0, -forward.x): +X when it faces +Z.\n        const sideways = ax * facing[2] - az * facing[0]\n        // Forward: speeding up along the way the body faces. Never back: a stop has its own clip.\n        const ahead = ax * facing[0] + az * facing[2]\n        const forwardTarget = !this.isGrounded ? 0 : Math.max(0, Math.min(1, ahead / this.leanForwardAcceleration))\n        this.leanForward += (forwardTarget - this.leanForward) * (1 - Math.exp(-this.leanForwardSpeed * delta))\n        const target = this.runTurn !== 0 || !this.isGrounded ? 0 : Math.max(-1, Math.min(1, sideways / this.leanAcceleration)) * run\n        const lean = this._lean + (target - this._lean) * (1 - Math.exp(-this.leanSpeed * delta))\n        this.leanLeft = Math.max(0, lean)\n        this.leanRight = Math.max(0, -lean)\n        return lean\n    }\n\n    /**\n     * ALS's look-at: the head (and the trunk under it) toward where the camera faces, at full weight standing still\n     * and faded out once the body moves, for the Look layer.\n     */\n    private _lookToward(delta: number, yaw: number, pitch: number) {\n        this.lookYaw = Math.max(-90, Math.min(90, this._wrap(yaw)))\n        this.lookPitch = Math.max(-45, Math.min(45, pitch - this.lookPitchRest))\n        // Aiming, the aim turns the head with the weapon.\n        const still = !this.hasMoveInput && this.isGrounded && this.groundSpeed < 0.3 && !this.aiming\n        if (delta > 0) {\n            this._lookAmount += ((still ? 1 : 0) - this._lookAmount) * (1 - Math.exp(-this.lookSpeed * delta))\n            // Crouched, the head alone turns (the Look Head layer); standing, the trunk under it too (Look).\n            this._lookCrouch = Math.max(0, Math.min(1, this._lookCrouch + (this.crouched ? delta : -delta) / 0.25))\n        }\n        this._lookWeights()\n    }\n\n    /** The look-at's weight split between the trunk's look (Look) and the head's alone (Look Head, crouched). */\n    private _lookWeights() {\n        const c = MathUtils.smoothstep(0, 1, this._lookCrouch)\n        this.lookWeight = this._lookAmount * (1 - c)\n        this.lookHeadWeight = this._lookAmount * c\n    }\n\n    /**\n     * The weapons, every frame, in either view. Equip (or the mouse wheel) picks the next weapon (none, the pistol,\n     * the rifle, the shotgun, round again): the one in the hands goes down and away, the next comes up (its layer's\n     * weight in third person over `equipSeconds`; its viewmodel's Equip clip in first person) and fires once it is up.\n     * Reload, or a pull on an empty magazine, reloads it (the Reload pose held in third person, the viewmodel's\n     * reload clips in first person), filling the magazine from the reserve near the end. Aim held with one up aims it\n     * (third person: the aim layers, facing the camera and strafing, turning in place sooner; first person: down the\n     * sights, Firing Line's way), unless the body sprints, reloads or is told to put it away (`holster`: in a car).\n     * `yaw` and `pitch`: where the camera aims, off the body.\n     */\n    private _weaponsToward(delta: number, holster: boolean, sprinting: boolean, yaw: number, pitch: number) {\n        if (!this._weaponNodes) {\n            const weapons = this.getChildByName('Weapons')[0]\n            this._weaponNodes = WEAPON_GRIPS.map(n => weapons?.getChildByName(n)[0] ?? null)\n            const rig = this.cameraRig()\n            const camera = rig?.children.find(c => c.nodeType === 'camera') ?? null\n            this._viewmodels = camera?.getChildByName('Viewmodels')[0] ?? null\n            this._views = WEAPON_VIEWMODELS.map(n => this._viewmodels?.getChildByName(n)[0] ?? null)\n            for (const v of this._views) if (v) { v.viewmodel = true; v.motionBlur = 'none' }\n            if (this._viewmodels) this._vmBase = [this._viewmodels.position[0], this._viewmodels.position[1], this._viewmodels.position[2]]\n            this._showWeapon(this.weapon)\n        }\n        this._time += delta\n        const fp = this.firstPerson && !holster\n        // Picking the next weapon (or the last, the wheel turned back).\n        if (!holster) {\n            let step = Input.started('Equip') ? 1 : 0\n            const wheel = Input.value('Zoom')\n            this._wheelWait = Math.max(0, this._wheelWait - delta)\n            if (wheel !== 0 && this._wheelWait <= 0) { step = wheel > 0 ? 1 : -1; this._wheelWait = 0.15 }\n            if (step) this._weaponWanted = (this._weaponWanted + step + 4) % 4\n        } else this._weaponWanted = 0\n        const gun = this._gun\n        // A reload: asked for, or a pull with nothing in the magazine.\n        if (!holster && gun && this.weapon === this._weaponWanted && (Input.started('Reload') || (gun.ammo <= 0 && Input.started('Fire')))) this._tryReload(fp)\n        // Fired from the hip in third person: up it comes, and stays up a moment after.\n        const firing = !holster && !fp && this.weapon > 0 && this.weapon === this._weaponWanted && !sprinting && !this.reloading && Input.pressed('Fire')\n        this._fireHold = firing ? this.fireAimHold : Math.max(0, this._fireHold - delta)\n        const step = delta > 0 ? delta / Math.max(0.01, this.equipSeconds) : 0\n        const weights = [this.pistolWeight, this.rifleWeight, this.shotgunWeight]\n        if (this.weapon !== this._weaponWanted) {\n            // Down out of the hands, then away; the next one shown, coming up.\n            const k = this.weapon - 1\n            if (k >= 0) weights[k] = Math.max(0, weights[k] - step)\n            if (k < 0 || weights[k] < 0.35 || fp) {\n                if (k >= 0) weights[k] = 0\n                this._reloadToken++\n                this.reloading = false\n                this.weapon = this._weaponWanted   // weapon:Equipped shows it\n                this._busyUntil = this._time + this._equipTime(fp)\n            }\n        } else if (this.weapon > 0) weights[this.weapon - 1] = Math.min(1, weights[this.weapon - 1] + step)\n        ;[this.pistolWeight, this.rifleWeight, this.shotgunWeight] = weights\n        // The stance follows the weapon more than halfway in the hands; with none, the body is unarmed. Between two\n        // weapons it keeps the last one's, so a swap is one cross-fade, not two.\n        const top = weights.indexOf(Math.max(...weights))\n        if (weights[top] >= 0.5) this.stance = STANCES[top]\n        else if (weights[top] < 0.05) this.stance = 0\n        const up = this.weapon > 0 && this.weapon === this._weaponWanted && this._time >= this._busyUntil\n        // Aiming: Aim held (or, in third person, a shot from the hip), the weapon up, not sprinting or reloading.\n        this.aiming = !holster && up && !sprinting && !this.reloading && (Input.pressed('Aim') || this._fireHold > 0)\n        const aimStep = delta > 0 ? delta / Math.max(0.01, this.aimSeconds) : 0\n        this._aim = Math.max(0, Math.min(1, this._aim + (this.aiming && !fp ? aimStep : -aimStep)))\n        // First person: down the sights, Firing Line's way (exponential, about adsSeconds).\n        this.ads = MathUtils.damp(this.ads, this.aiming && fp ? 1 : 0, 3 / Math.max(0.03, this.adsSeconds), delta)\n        this.pistolAimWeight = this._aim * this.pistolWeight\n        this.rifleAimWeight = this._aim * this.rifleWeight\n        this.shotgunAimWeight = this._aim * this.shotgunWeight\n        // Not aimed, the weapon is held at the low ready: the aim's own hold, turned muzzle-down (the Lowered layer).\n        this.loweredWeight = Math.max(...weights) * (1 - this._aim)\n        // The pistol's left hand lets go over a sprint, as the arms go over to the sprint's (0.3 s, as their blend).\n        const supportStep = delta > 0 ? delta / 0.3 : 0\n        this.supportHand = Math.max(0, Math.min(1, this.supportHand + (this.sprinting && !this.aiming ? -supportStep : supportStep)))\n        // Aim held in third person zooms in and blurs all but the target (not a shot from the hip).\n        this.aimingDown = this.aiming && !fp && Input.pressed('Aim')\n        // Where the camera aims off the body: the aim layers' blend.\n        this.aimYaw = Math.max(-90, Math.min(90, this._wrap(yaw)))\n        this.aimPitch = Math.max(-60, Math.min(60, pitch))\n        this._fire(delta, holster, sprinting, fp, up)\n        this._firstPersonToward(delta, fp)\n        this._hudToward(fp)\n    }\n\n    /** The SandboxGun of the weapon in the hands, or null. */\n    private get _gun(): any {\n        return this.weapon > 0 ? this._weaponNodes?.[this.weapon - 1] ?? null : null\n    }\n\n    /** The viewmodel of the weapon in the hands, or null. */\n    private get _view(): any {\n        return this.weapon > 0 ? this._views[this.weapon - 1] ?? null : null\n    }\n\n    /** Seconds the weapon coming into the hands keeps them busy: its Equip clip in first person, the layer's fade in third. */\n    private _equipTime(fp: boolean): number {\n        if (this.weapon === 0) return 0\n        if (fp) {\n            const secs = this._playClip(this._view, 'Equip')\n            return Math.max(0.3, secs ?? this._gun?.equipSeconds ?? 0.5)\n        }\n        return this.equipSeconds\n    }\n\n    /**\n     * A reload, if one would fill anything and the weapon is up and not reloading already: in first person the\n     * viewmodel's clips (the shotgun's three: into the reload, the shells, out of it), the magazine filled near their\n     * end; in third person the Reload pose held for the gun's `reloadSeconds`.\n     */\n    private _tryReload(fp: boolean) {\n        const gun = this._gun\n        if (!gun || this.reloading || this._time < this._busyUntil || !gun.canReload) return\n        const token = ++this._reloadToken\n        this.reloading = true\n        const view = fp ? this._view : null\n        const fill = () => { if (token === this._reloadToken) gun.reload() }\n        const finish = () => { if (token === this._reloadToken) { this.reloading = false } }\n        const start = fp ? this._playClip(view, 'ReloadStart') : undefined\n        if (start !== undefined) {\n            this.after(start, () => {\n                if (token !== this._reloadToken) return\n                const shells = this._playClip(view, 'Reload') ?? 1.6\n                this.after(shells * 0.9, () => {\n                    if (token !== this._reloadToken) return\n                    fill()\n                    const end = this._playClip(view, 'ReloadEnd') ?? 0.9\n                    this._busyUntil = this._time + end\n                    this.after(end, finish)\n                })\n            })\n            this._busyUntil = Infinity\n            return\n        }\n        const secs = (fp ? this._playClip(view, 'Reload') : undefined) ?? gun.reloadSeconds\n        this._busyUntil = this._time + secs\n        this.after(secs * 0.82, fill)\n        this.after(secs, finish)\n    }\n\n    /**\n     * The trigger: the weapon in the hands (its SandboxGun) fires along the camera's aim once it is up, a round off its\n     * magazine a shot. Each shot comes back as `weapon:Shot`, whose recoil kicks the camera and the body (`_shot`);\n     * most of the camera's kick comes back. In first person the viewmodel plays the shot (its Fire clip, or AimFire\n     * down the sights; the shotgun pumps after).\n     */\n    private _fire(delta: number, holster: boolean, sprinting: boolean, fp: boolean, up: boolean) {\n        const gun = this._gun\n        const rig = this.cameraRig()\n        const camera = rig?.children.find(c => c.nodeType === 'camera') ?? rig\n        const moving = this.planarSpeed > 0.4\n        this.spreadNow = gun ? gun.spread(fp ? this.ads : this._aim, moving, this.sprinting, this.crouched, this.isGrounded) : 0\n        if (gun?.pull && rig && camera) {\n            camera.updateTransforms(camera.parent ? camera.parent.worldTransform : null)\n            const eye = camera.worldPosition\n            const look = MathUtils.directionFromAim(this._look, rig.yaw, rig.pitch)\n            const weight = [this.pistolWeight, this.rifleWeight, this.shotgunWeight][this.weapon - 1] ?? 0\n            const ready = !holster && !sprinting && up && !this.reloading && (fp || (weight >= 0.95 && this._aim >= this.fireAimReady))\n            const view = { firstPerson: fp, muzzle: fp ? this._muzzleDrawn() : null }\n            const recoil = gun.pull(!holster && Input.pressed('Fire'), ready, eye, look, this.spreadNow, (this.collider as ColliderNode | null)?.body ?? null, view)\n            if (recoil && fp) {\n                const clip = this.ads > 0.5 && gun.aimClips ? 'AimFire' : 'Fire'\n                this._playClip(this._view, clip)\n                if (gun.pellets > 1) {\n                    const token = this._reloadToken\n                    this.after(0.35, () => { if (token === this._reloadToken && !this.reloading) this._playClip(this._view, 'Pump') })\n                }\n            }\n        }\n        // The camera's kick coming back: a share of it, faster the more is left (Firing Line's).\n        if (rig && this._recoilBack > 5e-4 && delta > 0) {\n            const back = Math.min(this._recoilBack, (this._recoilBack * this.recoilRecoverySpeed + 0.4) * delta)\n            rig.pitch = rig.pitch + back\n            this._recoilBack -= back\n        }\n    }\n\n    /**\n     * First person, every frame: the viewmodel of the weapon in the hands shown once the camera is in at the eyes, its\n     * animator told what the body does (Moving, Sprinting, Aim), brought in to the sights as it aims, kept out of walls,\n     * the lens narrowed and the mouse slowed down the sights, the background softened (depth of field).\n     */\n    private _firstPersonToward(delta: number, fp: boolean) {\n        const rig = this.cameraRig() as any\n        const mix = rig?.firstPersonMix ?? (fp ? 1 : 0)\n        const shown = fp && mix > 0.8\n        this._views.forEach((v, k) => { if (v && v.visible !== (shown && this.weapon === k + 1)) v.visible = shown && this.weapon === k + 1 })\n        // The eye: standing or crouched, eased; the lens: Firing Line's, narrowing down the sights.\n        this.eyeHeight = MathUtils.damp(this.eyeHeight, this.crouched ? this.eyeCrouch : this.eyeStand, 2.2 / Math.max(0.02, this.crouchSmoothing), delta)\n        const gun = this._gun\n        const fovGoal = this.hipFov + (this.sprinting ? this.sprintFovBoost : 0)\n        this.viewFov = MathUtils.damp(this.viewFov, gun ? lerp(fovGoal, gun.aimFov, this.ads) : fovGoal, 14, delta)\n        if (rig) {\n            if (this._baseYawSens < 0) { this._baseYawSens = rig.yawSensitivity; this._basePitchSens = rig.pitchSensitivity }\n            // Slower down the sights, and with the third person's zoom (the view turning as fast on the screen).\n            const sens = lerp(1, this.adsSensitivity, this.ads) * (rig.zoomSensitivity ?? 1)\n            rig.yawSensitivity = this._baseYawSens * sens\n            rig.pitchSensitivity = this._basePitchSens * sens\n        }\n        if (!shown) { this._depthOfField(delta, 0, rig?.zoomMix ?? 0); return }\n        const moving = this.planarSpeed > 0.4\n        this._setViewParam('Moving', moving)\n        this._setViewParam('Sprinting', moving && this.sprinting)\n        this._setViewParam('Aim', this.ads > 0.4 && !!gun?.aimClips)\n        // Aimed without aim clips, the whole viewmodel comes in to the sights; with them, a touch up.\n        const g = this._viewmodels\n        if (g && gun) {\n            const shift = gun.aimClips ? [0, this.aimClipRaise, 0] : gun.aimOffset\n            const t = this.ads\n            g.setPosition([this._vmBase[0] + shift[0] * t, this._vmBase[1] + shift[1] * t, this._vmBase[2] + shift[2] * t])\n        }\n        this._viewmodelClearance(delta)\n        this._depthOfField(delta, this.ads, 0)\n    }\n\n    /** A viewmodel animator's bool, sent down to the viewmodels when it changes. */\n    private _setViewParam(name: string, value: boolean) {\n        if (this._viewParams[name] === value) return\n        this._viewParams[name] = value\n        this._viewmodels?.dispatchDown('animator:SetParam', name, value)\n    }\n\n    /**\n     * Fire the one-shot `name` on a viewmodel's animator (its Actions layer state of that name) and return how long\n     * it lasts in seconds, or undefined when the weapon has no such clip.\n     */\n    private _playClip(view: any, name: string): number | undefined {\n        const info = view?.animator?.triggerInfo?.(name)\n        if (!view || !info) return undefined\n        view.dispatchDown('animator:SetTrigger', name)\n        return info.seconds > 0 ? info.seconds : info.clipLength\n    }\n\n    /**\n     * Where the viewmodel's muzzle is DRAWN: the viewmodel is drawn through the camera's viewmodel lens and at a share\n     * of its true distance, so its muzzle is not where its node is. The tracer starts there.\n     */\n    private _muzzleDrawn(): number[] | null {\n        const muzzle = this._view?.getChildByName('Muzzle')[0]\n        const camera: any = this.cameraRig()?.children.find(c => c.nodeType === 'camera')\n        if (!muzzle || !camera) return null\n        const w = muzzle.worldPosition, t = camera.worldTransform\n        const dx = w[0] - t[12], dy = w[1] - t[13], dz = w[2] - t[14]\n        const x = t[0] * dx + t[1] * dy + t[2] * dz, y = t[4] * dx + t[5] * dy + t[6] * dz, z = t[8] * dx + t[9] * dy + t[10] * dz\n        const k = this._vmDepth\n        const f = Math.tan(this.viewFov * Math.PI / 360) / Math.tan(this.viewmodelFov * Math.PI / 360)\n        const lx = x * f * k, ly = y * f * k, lz = z * k\n        return [t[0] * lx + t[4] * ly + t[8] * lz + t[12], t[1] * lx + t[5] * ly + t[9] * lz + t[13], t[2] * lx + t[6] * ly + t[10] * lz + t[14]]\n    }\n\n    /**\n     * Keep the viewmodel out of a wall: the share of its true distance it is drawn at, from the clearest of a few rays\n     * ahead of the camera. It shrinks toward the camera along every view ray, so it stays the same size on the screen.\n     */\n    private _viewmodelClearance(delta: number) {\n        const camera: any = this.cameraRig()?.children.find(c => c.nodeType === 'camera')\n        const physics: any = this.scene?.physics\n        if (!camera || !physics) return\n        camera.viewmodelFov = this.viewmodelFov\n        const p = camera.worldPosition, t = camera.worldTransform\n        const body = (this.collider as ColliderNode | null)?.body ?? null\n        let nearest = Infinity\n        // Camera-local +Z is forward, +X left, +Y up: a ray for the middle and four about it.\n        for (const [lx, ly] of [[0, 0], [0.22, 0], [-0.22, 0], [0, 0.18], [0, -0.22]]) {\n            const dir = [t[8] + t[0] * lx + t[4] * ly, t[9] + t[1] * lx + t[5] * ly, t[10] + t[2] * lx + t[6] * ly]\n            const len = Math.hypot(dir[0], dir[1], dir[2])\n            const reach = this.viewmodelReach + 0.1\n            const hit = physics.raycast([p[0], p[1], p[2]], [p[0] + dir[0] / len * reach, p[1] + dir[1] / len * reach, p[2] + dir[2] / len * reach], { ignore: body })\n            if (hit) nearest = Math.min(nearest, hit.distance)\n        }\n        const want = nearest === Infinity ? 1 : Math.max(0.3, Math.min(1, (nearest - 0.05) / this.viewmodelReach))\n        // In fast (never through a wall), out a little slower.\n        this._vmDepth = MathUtils.damp(this._vmDepth, want, want < this._vmDepth ? 40 : 9, delta)\n        camera.viewmodelDepth = this._vmDepth\n    }\n\n    /**\n     * Depth of field, focused where the crosshair points. Down the sights in first person (`amount`): the background\n     * softens, the weapon (nearer than `dofNearCutoff`) stays sharp. Aimed in third person (`zoom`, the camera's zoom):\n     * hard, only what the crosshair is on sharp, the character in front of it blurred too. Off the rest of the time, so\n     * it costs nothing; written only on a change.\n     */\n    private _depthOfField(delta: number, amount: number, zoom: number) {\n        const third = zoom > amount\n        const level = Math.max(amount, zoom)\n        if (level < 0.01) {\n            if (this._dofOn) { Game.updateRenderSettings({ dofEnabled: false }); this._dofOn = false }\n            return\n        }\n        const camera: any = this.cameraRig()?.children.find(c => c.nodeType === 'camera')\n        const physics: any = this.scene?.physics\n        let focus = this.dofFarFocus\n        if (camera && physics) {\n            const p = camera.worldPosition, t = camera.worldTransform\n            const len = Math.hypot(t[8], t[9], t[10]) || 1\n            const hit = physics.raycast([p[0], p[1], p[2]], [p[0] + t[8] / len * focus, p[1] + t[9] / len * focus, p[2] + t[10] / len * focus],\n                { ignore: (this.collider as ColliderNode | null)?.body ?? null })\n            if (hit) focus = Math.max(1.5, hit.distance)\n        }\n        this._dofFocus = MathUtils.damp(this._dofFocus, focus, 8, delta)\n        const q = Math.round(level * 20) / 20, f = Math.round(this._dofFocus * 10) / 10\n        const key = (third ? 'third:' : 'first:') + q + ':' + f\n        if (this._dofOn && key === this._dofKey) return\n        this._dofOn = true\n        this._dofKey = key\n        Game.updateRenderSettings(third ? {\n            dofEnabled: true, dofNearCutoff: 0, dofFocusDistance: f,\n            dofFocusRange: lerp(12, this.aimDofRange, q), dofAperture: lerp(16, this.aimDofAperture, q), dofMaxBlur: lerp(0.5, this.aimDofMaxBlur, q),\n        } : {\n            dofEnabled: true, dofNearCutoff: this.dofNearCutoff, dofFocusDistance: f,\n            dofFocusRange: lerp(12, 2, q), dofAperture: lerp(16, this.dofAperture, q), dofMaxBlur: lerp(0.5, this.dofMaxBlur, q),\n        })\n    }\n\n    /**\n     * The HUD: the crosshair (shown with a weapon out, brighter aimed, its ticks as far out as the shot spreads; gone\n     * down the sights in first person), the ammunition (the magazine, the reserve, the weapon's name) and the reload.\n     */\n    private _hudToward(fp: boolean) {\n        const gun = this._gun\n        const out = Math.max(this.pistolWeight, this.rifleWeight, this.shotgunWeight, fp && gun ? 1 : 0)\n        const crosshair = this._crosshair\n        if (crosshair) {\n            const aimed = fp && this.ads > 0.6 && !!gun?.aimClips\n            crosshair.opacity = aimed || (fp && this.sprinting) ? 0 : out * (fp ? 0.9 : 0.5 + 0.5 * this._aim)\n            // Pixels from the middle: the spread's angle at the screen's scale (1080 px over the field of view).\n            const fov = fp ? this.viewFov : ((this.cameraRig() as any)?.fov ?? 60)\n            const perDegree = 540 / Math.tan(fov * Math.PI / 360) * Math.PI / 180\n            const gap = Math.round(4 + this.spreadNow * perDegree)\n            if (gap !== this._gap) {\n                this._gap = gap\n                const top = this._tickTop, bottom = this._tickBottom, left = this._tickLeft, right = this._tickRight\n                if (top) { top.offsetMin = [-1, -gap - 7]; top.offsetMax = [1, -gap] }\n                if (bottom) { bottom.offsetMin = [-1, gap]; bottom.offsetMax = [1, gap + 7] }\n                if (left) { left.offsetMin = [-gap - 7, -1]; left.offsetMax = [-gap, 1] }\n                if (right) { right.offsetMin = [gap, -1]; right.offsetMax = [gap + 7, 1] }\n            }\n        }\n        const shown = !!gun && this._carPhase === 'none'\n        const ammunition = this._ammunition\n        if (ammunition && ammunition.visible !== shown) ammunition.visible = shown\n        if (shown) {\n            if (this._ammoText) this._ammoText.text = String(gun.ammo)\n            if (this._reserveText) this._reserveText.text = `/ ${gun.reserve}`\n            if (this._weaponName) this._weaponName.text = gun.displayName\n        }\n        const reloading = shown && this.reloading\n        const reload = this._reloadingText\n        if (reload && reload.visible !== reloading) reload.visible = reloading\n    }\n\n    /**\n     * A shot from the weapon in the hands (SandboxGun's `weapon:Shot`, bubbling up from the grip): its recoil kicks\n     * the camera up and aside (less crouched and down the sights) and shakes it, and the body takes the gun's recoil clip. A\n     * shot fired some other way carries no recoil.\n     */\n    @eventListener('weapon:Shot')\n    private _shot(shot: { recoil?: { pitch: number, yaw: number, kick: number, shake?: number } | null }) {\n        const recoil = shot?.recoil\n        const rig = this.cameraRig()\n        if (!recoil || !rig) return\n        const pitch = recoil.pitch * (this.crouched ? 0.75 : 1) * (1 - this.ads * 0.35)\n        rig.pitch = rig.pitch - pitch\n        rig.yaw = rig.yaw + recoil.yaw\n        if (recoil.shake) rig.shake(recoil.shake)\n        this._recoilBack += pitch * this.recoilRecovery\n        this._bodyRecoil()\n    }\n\n    /** The body's recoil for the shot just fired: the gun's `fireTrigger`, sent down to the animator under this character. */\n    @animTrigger()\n    private _bodyRecoil() {\n        return this._gun?.fireTrigger ?? ''\n    }\n\n    /** The weapon in the hands changed (`weapon:Equipped`, from setting `weapon`): its model shown, the others hidden. */\n    @eventListener('weapon:Equipped')\n    private _equipped(weapon: number) {\n        this._showWeapon(weapon)\n    }\n\n    /** Show the weapon `weapon` (1 the pistol, 2 the rifle, 3 the shotgun) on the hand, and hide the others; 0 hides them all. */\n    private _showWeapon(weapon: number) {\n        this._weaponNodes?.forEach((n, k) => { if (n) n.visible = weapon === k + 1 })\n    }\n\n    /** An angle into -180..180 degrees. */\n    private _wrap(degrees: number): number {\n        return ((degrees + 180) % 360 + 360) % 360 - 180\n    }\n\n    // ----- the car ------------------------------------------------------------------------------------------------\n\n    /** The Mannequin's animator (the model under this Character). */\n    private get _animator(): Animator | null {\n        for (const c of this.children) {\n            const animator = (c as unknown as { animator?: Animator | null }).animator\n            if (animator) return animator\n        }\n        return null\n    }\n\n    /**\n     * Thrown out of the car at speed (it was asked to stop going faster than its `bailSpeed`): out of the seat at\n     * once and into the world, its body its reactions' from there, leaving with the car's `velocity` out through\n     * `exitDirection`, clear of the car for a moment; it tumbles, comes to rest and gets up where it lies. Its own\n     * Controller has it again (it ignores the stick until it is up). False, and nothing done, when it has no reactions\n     * or is not seated.\n     */\n    public bailOut(velocity: ArrayLike<number>, exitDirection: ArrayLike<number>, vehicle: Node): boolean {\n        const reactions = this.reactions\n        const body = this.collider as ColliderNode | null\n        const scene = this.scene\n        if (this._carPhase !== 'seated' || !reactions || !body || !scene) return false\n        // Out of the seat where it sits, upright; its body stays out of the world (the reaction has it now).\n        const f = body.worldForward\n        body.reparent(scene.root)\n        body.setRotation([0, Math.atan2(f[0], f[2]) * 180 / Math.PI, 0])\n        body.updateTransforms(null)\n        this._ownController?.possess(this)\n        this._ownController = null\n        this._seat = null\n        this._carPhase = 'none'\n        this.inVehicle = false\n        this.seated = false\n        // Out of the seated clip: the body flies on whatever the animator stands it in.\n        this._animator?.forceState('Idle', 0.2)\n        reactions.bail({ velocity, exitDirection, vehicle })\n        return true\n    }\n\n    /** The camera rig this character is seen through: its Controller's aim. */\n    public cameraRig(): CameraRigNode | null {\n        return (this._ownController ?? this.controller)?.aimRig ?? null\n    }\n\n    /**\n     * A car hands this character its seat: it gets in. It lets go of its Controller, takes its body out of the\n     * physics world (`physicsEnabled`) and moves under `seat`, keeping where it stands; fires `enterTrigger`, and\n     * steps onto `enterPoint` (a child of the seat: where getting in starts) while the clip reaches for the door.\n     * The clip's root motion then carries it into the seat. False, and nothing done, when it cannot: in the air,\n     * already in a car, or with an animator that has no such trigger.\n     */\n    public boardVehicle(seat: Node, enterPoint: Node): boolean {\n        const body = this.collider as ColliderNode | null\n        const animator = this._animator\n        const info = animator?.triggerInfo(this.enterTrigger)\n        if (this._carPhase !== 'none' || !body || !animator || !info || !this.isGrounded || this.isJumping) return false\n        this._ownController = this.controller\n        this._ownController?.release()\n        body.physicsEnabled = false\n        // Where the character faces is its own turn (the Character turns itself, not its Collider), and the step\n        // and the clip's root motion turn the Collider: fold the one into the other first, so they turn all of it.\n        const facing = this.worldForward\n        const heading = Math.atan2(facing[0], facing[2]) * 180 / Math.PI\n        body.setWorldYaw(heading)\n        body.updateTransforms(body.parent ? body.parent.worldTransform : null)\n        // The same heading in the world: no turn of its own left under the Collider.\n        this.setWorldYaw(heading)\n        this.updateTransforms(body.worldTransform)\n        body.reparent(seat)\n        this._seat = seat\n        // The step: from where it stands to where the clip starts, both in the seat's frame, eased in over the\n        // first part of the clip (time by distance).\n        this._alignFrom = this._localPose(body)\n        // Onto the start along the ground, at the height it stands at: the car may sit lower or higher on its springs\n        // than modelled (the backends' springs differ), and once seated the body eases onto the Seat itself.\n        const to: MathUtils.YawPose = this._localPose(enterPoint)\n        to[1] = this._alignFrom[1]\n        this._alignStep = MathUtils.yawPoseMul(MathUtils.yawPoseInvert(this._alignFrom), to)\n        const distance = Math.hypot(this._alignStep[0], this._alignStep[2])\n        this._alignTime = Math.min(this.alignMaxSeconds, this.alignSeconds * distance + 0.1)\n        this._alignT = 0\n        this._getIn()\n        this._enterSeconds = info.clipLength / Math.max(0.01, info.speed)\n        this._carTime = 0\n        this._carPhase = 'entering'\n        this.inVehicle = true\n        this.seated = false\n        return true\n    }\n\n    /** The car lets this character out: it gets out (`exitTrigger`), carried by the clip to the car's side. False when not seated. */\n    public leaveVehicle(): boolean {\n        const animator = this._animator\n        if (this._carPhase !== 'seated' || !animator || !animator.triggerInfo(this.exitTrigger)) return false\n        this._getOut()\n        this._carPhase = 'exiting'\n        this.seated = false\n        return true\n    }\n\n    /** The animator's getting-in clip: `enterTrigger`, sent down to the animator under this character. */\n    @animTrigger()\n    private _getIn() {\n        return this.enterTrigger\n    }\n\n    /** The animator's getting-out clip: `exitTrigger`, the same way. */\n    @animTrigger()\n    private _getOut() {\n        return this.exitTrigger\n    }\n\n    /**\n     * Getting out is over once the animator has left the exit trigger's states (back where it rests): it says so\n     * with `animation:TriggerEnded`, bubbling up from the model, and the character stands up.\n     */\n    @eventListener('animation:TriggerEnded')\n    private _triggerEnded(info: { trigger?: string, layer?: string | null }) {\n        if (this._carPhase !== 'exiting' || info?.trigger !== this.exitTrigger || info.layer) return\n        const body = this.collider as ColliderNode | null\n        if (body) this._standUp(body)\n    }\n\n    /** In a car: no walking (no intent asked for), nothing for the animator but the car's clips. */\n    private _ride(delta: number) {\n        const body = this.collider as ColliderNode | null\n        if (!body) return\n        this.hasMoveInput = false\n        this.running = false\n        this.sprinting = false\n        this.runTurn = 0\n        this.groundSpeed = 0\n        this.onStairs = false\n        this.stairs = 0\n        this.stairRate = 1\n        this.footPlacement = 0\n        this.facingMode = 'none'\n        const ease = delta > 0 ? 1 - Math.exp(-this.lookSpeed * delta) : 0\n        this.leanLeft = 0\n        this.leanRight = 0\n        this.leanForward = 0\n        this._lookAmount -= this._lookAmount * ease\n        this._lookWeights()\n        // No weapon in a car: put away.\n        this._weaponsToward(delta, true, false, 0, 0)\n        this._carTime += delta\n\n        if (this._carPhase === 'entering') {\n            // The step onto the start, as a correction under the root motion that is already carrying the body:\n            // pose = start * step(t) * motion, applied by how much further along the step is this frame.\n            if (this._alignT < 1) {\n                const t0 = MathUtils.smoothstep(0, 1, this._alignT)\n                this._alignT = this._alignTime > 0 ? Math.min(1, this._alignT + delta / this._alignTime) : 1\n                const t1 = MathUtils.smoothstep(0, 1, this._alignT)\n                const none: MathUtils.YawPose = [0, 0, 0, 0]\n                const from = MathUtils.yawPoseLerp(none, this._alignStep, t0)\n                const to = MathUtils.yawPoseLerp(none, this._alignStep, t1)\n                const start = this._alignFrom\n                const shift = MathUtils.yawPoseMul(start, MathUtils.yawPoseMul(to, MathUtils.yawPoseMul(MathUtils.yawPoseInvert(from), MathUtils.yawPoseInvert(start))))\n                this._setLocalPose(body, MathUtils.yawPoseMul(shift, this._localPose(body)))\n            }\n            if (this._carTime >= this._enterSeconds) { this._carPhase = 'seated'; this.seated = true }\n            return\n        }\n        if (this._carPhase === 'seated') {\n            // On the seat: what the clip's travel left over (a few millimetres) eased out.\n            const k = this.settleSeconds > 0 && delta > 0 ? 1 - Math.exp(-3 * delta / this.settleSeconds) : 1\n            const pose = this._localPose(body)\n            if (Math.hypot(pose[0], pose[1], pose[2]) > 1e-4 || Math.abs(pose[3]) > 0.01)\n                this._setLocalPose(body, MathUtils.yawPoseLerp(pose, [0, 0, 0, 0], k))\n            return\n        }\n        // Getting out: the clip carries the body; `_triggerEnded` stands it up when the animator is done.\n    }\n\n    /** Out of the car: on its feet in the world again, upright, its body back in the physics world, its Controller back. */\n    private _standUp(body: ColliderNode) {\n        const scene = this.scene\n        if (!scene) return\n        const f = body.worldForward\n        const yaw = Math.atan2(f[0], f[2]) * 180 / Math.PI\n        body.reparent(scene.root)\n        body.setRotation([0, yaw, 0])\n        // On the ground under it: the clip stands it at the Seat's floor, which is the car's (on its springs).\n        const p = body.worldPosition, physics = scene.physics\n        const ground = physics?.raycast([p[0], p[1] + 1, p[2]], [p[0], p[1] - 1.5, p[2]], { collidingWith: body.body, groundOnly: true })\n        if (ground) body.setPosition([p[0], ground.point[1] + 0.02, p[2]])\n        body.updateTransforms(null)\n        body.physicsEnabled = true\n        this._ownController?.possess(this)\n        this._ownController = null\n        this._seat = null\n        this._carPhase = 'none'\n        this.inVehicle = false\n        this.seated = false\n    }\n\n    // ----- reactions ------------------------------------------------------------------------------------------------\n\n    /**\n     * Its reactions (the skeleton's, physics/reactive/): Trip (T) knocks its feet from under it, Shove (G) pushes it\n     * back off balance, for trying them out. While a reaction has the body (it staggers, falls, lies, gets up) the body\n     * is the physics', not the stick's: nothing it is asked does anything, and its weapon is put away. A flinch it\n     * stands through keeps it in hand. True while it sits a reaction out.\n     */\n    private _reacting(delta: number): boolean {\n        const reactions = this.reactions\n        if (!reactions) return false\n        if (!reactions.reacting && this.isGrounded && !this.isJumping) {\n            if (Input.started('Trip')) reactions.trip()\n            else if (Input.started('Shove')) {\n                const f = this.worldForward\n                reactions.push([-f[0] * 1.3, 0.1, -f[2] * 1.3])\n            }\n        }\n        if (!reactions.reacting || reactions.state === 'hitReact') return false\n        this.hasMoveInput = false\n        this.running = false\n        this.sprinting = false\n        this.runTurn = 0\n        this.groundSpeed = 0\n        this.facingMode = 'none'\n        this._weaponsToward(delta, true, false, 0, 0)\n        return true\n    }\n\n    /** A node's upright pose in its parent's frame: `[x, y, z, yaw]`. */\n    private _localPose(node: Node): MathUtils.YawPose {\n        const p = node.position, q = node.quaternion\n        // +Z turned by the rotation: its heading is the yaw.\n        const fx = 2 * (q[0] * q[2] + q[3] * q[1]), fz = 1 - 2 * (q[0] * q[0] + q[1] * q[1])\n        return [p[0], p[1], p[2], Math.atan2(fx, fz) * 180 / Math.PI]\n    }\n\n    /** Places `node` at an upright pose in its parent's frame, its world transform brought up to date at once. */\n    private _setLocalPose(node: Node, pose: MathUtils.YawPose) {\n        node.setPosition([pose[0], pose[1], pose[2]])\n        node.setRotation([0, pose[3], 0])\n        node.updateTransforms(node.parent ? node.parent.worldTransform : null)\n    }\n}\n",
-    "de5c142cde05f2af5a6200d0ae324adc": "import { CameraRigNode, MathUtils, lerp } from 'cleo'\nimport type { Node } from 'cleo'\nimport { attribute } from 'cleo/decorators'\n\n/** What the camera reads from the character it belongs to (SandboxPlayer). */\ninterface Framed {\n    sprinting?: boolean\n    aiming?: boolean\n    /** Aim held in third person (not a shot from the hip): the camera zooms in. */\n    aimingDown?: boolean\n    crouched?: boolean\n    inVehicle?: boolean\n    /** The view the player asks for: first person, or third. */\n    firstPerson?: boolean\n    /** First person: the eye's height over the feet (m), and the field of view (degrees). */\n    eyeHeight?: number\n    viewFov?: number\n}\n\n/**\n * The Sandbox camera: one Camera Rig with its third-person framings, the aim's, and first person. It sits over the\n * shoulder, pulls out to third person while the character sprints, and moves in closer over the shoulder while it\n * aims a weapon; in first person it is at the character's eyes. Attach to the character's **Camera Rig**.\n *\n * The boom (arm length, the side offset of the camera, the height it orbits at) eases between the shoulder and third\n * person over `switchSeconds`, starting and ending gently either way. Where the camera looks stays the Controller's: it\n * turns the rig from the Look input, and this script never touches yaw or pitch. No action switches the third-person\n * framing; the character's sprint and aim do. They are read from the Character the rig belongs to (the one under the\n * Collider above it): its script's `sprinting` and `aiming`. The aim comes in quickly (`aimSeconds`), on top of\n * whichever of the two framings it is in; with Aim held (`aimingDown`, not a shot from the hip) the lens narrows to\n * `aimFov` as well (`zoomMix`), and the mouse slows with it (`zoomSensitivity`, read by the character). Crouched (the\n * Character's `crouched`), it orbits `crouchDrop` lower.\n *\n * FIRST PERSON (the character's `firstPerson`, which the View action toggles): the boom folds in to the eyes over\n * `viewSeconds` (eased), to the character's `eyeHeight` over its feet, with no follow damping and no collision (the\n * camera is inside the capsule), a wider pitch and the character's own field of view (`viewFov`: Firing Line's 78\n * degrees, narrowing as it aims). Once the camera is in at the head, the character's body and the weapons in its\n * hands are drawn into the shadows alone (`Node.shadowOnly`): gone from the view they would fill, their shadow still\n * on the ground. In a car it is third person whatever was asked: the car's camera sees the driver.\n *\n * The framing distances are the character's (a taller one wants a higher pivot and a longer arm), so they are\n * public: each copy of the Player template can set its own. How the switch feels is the behavior's, so it is\n * private: set once, here.\n */\nexport default class SandboxCameraNode extends CameraRigNode {\n    /** Third person (while sprinting): how far behind the character the camera sits (m). */\n    @attribute('Framing', { min: 0.5, max: 12, step: 0.05 })\n    public thirdPersonArm: number = 3.4\n\n    /** Over the shoulder: how far behind (m). */\n    @attribute('Framing', { min: 0.5, max: 12, step: 0.05 })\n    public shoulderArm: number = 1.9\n\n    /** Over the shoulder: how far to the right of the character the camera sits (m). */\n    @attribute('Framing', { min: 0, max: 2, step: 0.05 })\n    public shoulderOffset: number = 0.5\n\n    /** Aiming: how far behind the character the camera sits (m), and how far to the right. */\n    @attribute('Framing', { min: 0.3, max: 12, step: 0.05 })\n    public aimArm: number = 1.25\n\n    @attribute('Framing', { min: 0, max: 2, step: 0.05 })\n    public aimShoulderOffset: number = 0.6\n\n    /** How high over the character's feet the camera orbits (m), and how much lower crouched. */\n    @attribute('Framing', { min: 0, max: 4, step: 0.05 })\n    public pivotHeight: number = 1.45\n\n    @attribute('Framing', { min: 0, max: 2, step: 0.05 })\n    public crouchDrop: number = 0.45\n\n    /** Seconds the switch between the two framings takes, either way. */\n    @attribute('Switch', { min: 0, max: 5, step: 0.05 })\n    private switchSeconds: number = 2\n\n    /** Seconds the aim's framing takes to come in, and to go out. */\n    @attribute('Switch', { min: 0, max: 2, step: 0.05 })\n    private aimSeconds: number = 0.25\n\n    /** Seconds the third-person framing stays after a sprint ends, so letting go for a moment does not swing it. */\n    @attribute('Switch', { min: 0, max: 2, step: 0.05 })\n    private sprintHold: number = 0.4\n\n    /** Seconds the switch to first person (and back) takes. */\n    @attribute('Switch', { min: 0, max: 2, step: 0.05 })\n    private viewSeconds: number = 0.3\n\n    /** Seconds the orbit takes to drop for a crouch, and to come back up. */\n    @attribute('Switch', { min: 0, max: 2, step: 0.05 })\n    private crouchSeconds: number = 0.25\n\n    /** The field of view in third person (degrees). */\n    @attribute('Switch', { min: 20, max: 120, step: 1 })\n    private thirdPersonFov: number = 60\n\n    /** Aim held in third person: the narrower field of view it zooms to (degrees). */\n    @attribute('Switch', { min: 10, max: 120, step: 1 })\n    private aimFov: number = 45\n\n    /** First person: the pitch's reach, degrees up and down. */\n    @attribute('Switch', { min: 30, max: 89, step: 1 })\n    private firstPersonPitch: number = 85\n\n    private _sinceSprint: number = 1e9\n    /** Where the switch is: 0 over the shoulder, 1 third person. It moves at an even rate; the framing eases. */\n    private _mix: number = 0\n    /** Where the aim's framing is: 0 out, 1 in. */\n    private _aimMix: number = 0\n    private _aiming: boolean = false\n    /** Where the switch to first person is: 0 third person, 1 at the eyes (even rate; eased into `firstPersonMix`). */\n    private _fpMix: number = 0\n    private _crouchMix: number = 0\n    /** The rig as authored: what third person keeps. */\n    private _authored: { damping: number[], pitchMin: number, pitchMax: number, collision: boolean } | null = null\n\n    /** How far into first person the camera is: 0 third person, 1 at the eyes (eased). */\n    public firstPersonMix: number = 0\n    /** How far into the aim's zoom the third-person lens is: 0 `thirdPersonFov`, 1 `aimFov` (eased). */\n    public zoomMix: number = 0\n    /** The mouse's share of its speed under that zoom, so the view turns as fast on the screen (1 unzoomed). */\n    public zoomSensitivity: number = 1\n    private _zoom: number = 0\n\n    onStart() {\n        this._authored = {\n            damping: [this.followDamping[0], this.followDamping[1], this.followDamping[2]],\n            pitchMin: this.pitchMin, pitchMax: this.pitchMax, collision: this.collisionEnabled,\n        }\n        this.fovEnabled = true\n        // Start framed, not easing in from the rig's authored values.\n        this._frame(0, true)\n    }\n\n    onUpdate(delta: number) {\n        this._frame(delta, false)\n    }\n\n    /** Whether the camera is (heading) out to third person: while sprinting, and `sprintHold` after. */\n    get wide(): boolean {\n        return this._sinceSprint <= this.sprintHold\n    }\n\n    private get _character(): Framed | null {\n        return (this.collider?.character as unknown as Framed | null | undefined) ?? null\n    }\n\n    private _frame(delta: number, snap: boolean) {\n        const character = this._character\n        this._sinceSprint = character?.sprinting ? 0 : this._sinceSprint + delta\n        this._aiming = !!character?.aiming\n        const step = snap || this.switchSeconds <= 0 ? 1 : delta / this.switchSeconds\n        const target = this.wide ? 1 : 0\n        this._mix = target > this._mix ? Math.min(target, this._mix + step) : Math.max(target, this._mix - step)\n        // Eased in and out: the boom sets off and arrives gently. A switch reversed half way turns back from where\n        // it is.\n        const k = MathUtils.smoothstep(0, 1, this._mix)\n        const aimStep = snap || this.aimSeconds <= 0 ? 1 : delta / this.aimSeconds\n        this._aimMix = this._aiming ? Math.min(1, this._aimMix + aimStep) : Math.max(0, this._aimMix - aimStep)\n        const a = MathUtils.smoothstep(0, 1, this._aimMix)\n        const fpStep = snap || this.viewSeconds <= 0 ? 1 : delta / this.viewSeconds\n        const firstPerson = !!character?.firstPerson && !character?.inVehicle\n        this._fpMix = firstPerson ? Math.min(1, this._fpMix + fpStep) : Math.max(0, this._fpMix - fpStep)\n        const f = MathUtils.smoothstep(0, 1, this._fpMix)\n        this.firstPersonMix = f\n        const crouchStep = snap || this.crouchSeconds <= 0 ? 1 : delta / this.crouchSeconds\n        this._crouchMix = character?.crouched ? Math.min(1, this._crouchMix + crouchStep) : Math.max(0, this._crouchMix - crouchStep)\n        const c = MathUtils.smoothstep(0, 1, this._crouchMix)\n\n        // Third person, then folded in toward the eyes by `f`.\n        const arm = lerp(lerp(this.shoulderArm, this.thirdPersonArm, k), this.aimArm, a)\n        this.armLength = lerp(arm, 0, f)\n        // Socket +X is the rig's left: the right shoulder is negative.\n        this.socketOffset[0] = lerp(lerp(lerp(-this.shoulderOffset, 0, k), -this.aimShoulderOffset, a), 0, f)\n        this.socketOffset[1] = lerp(lerp(0.1, 0.15, k), 0, f)\n        this.socketOffset[2] = 0\n        const pivot = lerp(this.pivotHeight + 0.05, this.pivotHeight, k) - this.crouchDrop * c\n        this.followOffset[1] = lerp(pivot, character?.eyeHeight ?? pivot, f)\n        const authored = this._authored\n        if (authored) {\n            for (let i = 0; i < 3; i++) this.followDamping[i] = authored.damping[i] * (1 - f)\n            this.pitchMin = lerp(authored.pitchMin, -this.firstPersonPitch, f)\n            this.pitchMax = lerp(authored.pitchMax, this.firstPersonPitch, f)\n            this.collisionEnabled = authored.collision && f < 0.5\n        }\n        // The aim's zoom (Aim held, third person), eased in and out over the aim's framing time.\n        this._zoom = character?.aimingDown && !firstPerson ? Math.min(1, this._zoom + aimStep) : Math.max(0, this._zoom - aimStep)\n        const z = MathUtils.smoothstep(0, 1, this._zoom)\n        this.zoomMix = z * (1 - f)\n        const thirdFov = lerp(this.thirdPersonFov, this.aimFov, z)\n        const half = (deg: number) => Math.tan(deg * Math.PI / 360)\n        this.zoomSensitivity = lerp(half(thirdFov) / half(this.thirdPersonFov), 1, f)\n        this.fov = lerp(thirdFov, character?.viewFov ?? this.thirdPersonFov, f)\n\n        // At the eyes, the body and the weapons it holds are drawn into the shadows only.\n        const inside = f > 0.6\n        const body = this.follow as Node | null\n        if (body && body.shadowOnly !== inside) body.shadowOnly = inside\n        const weapons = (this.collider?.character as unknown as Node | null)?.getChildByName('Weapons')[0]\n        if (weapons && weapons.shadowOnly !== inside) weapons.shadowOnly = inside\n    }\n}\n",
-    "0122160304329b1e2c1f63c8892a7306": "import { Logger, MathUtils, Node } from 'cleo'\nimport type { LayerName, TemplateName, TriggerName } from 'cleo'\nimport { attribute, eventDispatch } from 'cleo/decorators'\n\n/** What one shot was, as the gun tells it (`weapon:Shot`). */\nexport interface SandboxShot {\n    gun: Node\n    /** What the first pellet hit (the only one, but for a shotgun), or null: nothing within `range`. */\n    hit: { point: number[], node: Node | null } | null\n    /** Every pellet's hit (a shotgun fires `pellets` of them); null where a pellet hit nothing. */\n    hits: ({ point: number[], node: Node | null } | null)[]\n    /** The kick a pull of the trigger gives (camera pitch up and yaw, degrees, the weapon's own, the camera's shake); null for a shot fired directly. */\n    recoil: { pitch: number, yaw: number, kick: number, shake: number } | null\n}\n\n/** Where a shot is seen from: the third person's weapon in the hands, or the first person's viewmodel. */\nexport interface SandboxShotView {\n    /** Fired in first person: the camera's ray alone, and no flash or sound of the gun's own (the viewmodel's clip has them). */\n    firstPerson: boolean\n    /** Where the tracer starts in first person: the viewmodel's muzzle where it is drawn. */\n    muzzle?: ArrayLike<number> | null\n}\n\n/**\n * A Sandbox gun: the weapon in the hands, in either view. Attach to a weapon's holder (the `Pistol Grip`, `Rifle Grip`\n * and `Shotgun Grip` nodes on the Mannequin's hand), whose child `Muzzle` is the end of its bore. Its numbers are the\n * weapon's (Firing Line's pistol, AK-47 and SAPS-12), set on each holder in the Player template. The character\n * holding it (SandboxPlayer) calls {@link pull} every frame with the trigger and where the crosshair looks; the gun\n * decides when a shot goes, spends a round from its magazine, and returns the recoil for the holder to apply. It\n * keeps its own magazine and reserve (`ammo`, `reserve`), so a weapon put away and taken out again is as it was left;\n * {@link reload} fills the magazine from the reserve. Out of the reserve, it is dry until the scene starts again.\n *\n * A SHOT is a raycast per pellet (a pistol and a rifle fire one; the shotgun `pellets`), each its own way inside the\n * spread's cone. In third person a pellet is two raycasts: from the camera through the crosshair, up to `range`\n * (what the player aims at), then from the muzzle to that point (what the bullet meets on its way: a corner the\n * camera sees past but the gun does not). In first person the camera's alone, as Firing Line fires. Neither meets the\n * shooter's own body, the trigger zones or the layers named in `passThroughLayers` (the stairs' ramps: there to be\n * walked on, not seen).\n *\n * A HIT on a dynamic body pushes it: the shot's `impulse` (shared by its pellets) along the shot at the point it hit\n * (so a crate hit high tips, a ball spins), no more than `maxPushSpeed` of speed at once. Every hit leaves sparks and\n * dust (`impactTemplate`) and a hole (`holeTemplate`), the hole moving with what it is on; the shot draws a tracer\n * (`tracerTemplate`). In third person the gun flashes at its muzzle (`flashTemplate`) and plays its shot (`shotSound`,\n * a cue in the character's `Sounds` group); in first person the viewmodel's fire clip does both. A template the scene\n * does not have is skipped, with a warning once.\n *\n * SPREAD is Firing Line's: a cone round the crosshair, from `hipSpread` to `aimSpread` as the weapon aims, half again\n * moving (2.2 times at a sprint), less crouched, much more in the air, and wider the longer it fires (bloom, up to 1.6\n * times the hip spread, settling at 5 degrees a second). The holder reads {@link spread} for its crosshair.\n *\n * EVERY SHOT is told as the event `weapon:Shot` (a {@link SandboxShot}), dispatched at the gun: it bubbles up to the\n * character holding it, whose `@eventListener('weapon:Shot')` applies the recoil, and then reaches anything listening\n * with `@onEvent('weapon:Shot')` anywhere (a hit marker, a sound, a score).\n */\nexport default class SandboxGunNode extends Node {\n    /** The weapon's name, on the HUD. */\n    @attribute('Weapon')\n    public displayName: string = 'Pistol'\n\n    /** Holding the trigger keeps firing (a rifle); a pistol or the shotgun fires once per pull. */\n    @attribute('Firing')\n    public auto: boolean = false\n\n    @attribute('Firing', { min: 30, max: 1500, step: 1 })\n    public roundsPerMinute: number = 380\n\n    /** Pellets a shot fires, each its own way inside the spread: 1, but for a shotgun. */\n    @attribute('Firing', { min: 1, max: 24, step: 1 })\n    public pellets: number = 1\n\n    /** How far a shot reaches, m. */\n    @attribute('Firing', { min: 5, max: 1000, step: 5 })\n    public range: number = 140\n\n    /**\n     * The push a shot gives a dynamic body, newton-seconds (shared by its pellets): far more than a real bullet's (a\n     * rifle's carries about 4), so a shot crate shoves. No body is sped up by more than `maxPushSpeed` by one hit, so a\n     * ball is not shot away.\n     */\n    @attribute('Firing', { min: 0, max: 500, step: 0.5 })\n    public impulse: number = 14\n\n    @attribute('Firing', { min: 0, max: 50, step: 0.25 })\n    public maxPushSpeed: number = 2.5\n\n    /** Damage a pellet deals at close range (nothing in the Sandbox takes it yet: kept for game modes). */\n    @attribute('Firing', { min: 0, max: 500, step: 1 })\n    public damage: number = 26\n\n    /**\n     * A pull that comes while the gun cannot fire yet (still coming up from the hip, or between two shots) fires as soon\n     * as it can, if that is within this many seconds.\n     */\n    @attribute('Firing', { min: 0, max: 1, step: 0.05 })\n    public pullBuffer: number = 0.35\n\n    /** Rounds a magazine holds, and the rounds carried besides it. */\n    @attribute('Ammunition', { min: 1, max: 200, step: 1 })\n    public magazine: number = 12\n\n    @attribute('Ammunition', { min: 0, max: 2000, step: 1 })\n    public reserveRounds: number = 84\n\n    /** Spread, degrees from the crosshair at most: from the hip, and aimed. */\n    @attribute('Spread', { min: 0, max: 20, step: 0.05 })\n    public hipSpread: number = 1.6\n\n    @attribute('Spread', { min: 0, max: 20, step: 0.05 })\n    public aimSpread: number = 0.25\n\n    /** The camera's kick per shot, degrees: up, and up to this either way; and how hard the camera shakes (0..1). */\n    @attribute('Recoil', { min: 0, max: 20, step: 0.05 })\n    public recoilPitch: number = 1.5\n\n    @attribute('Recoil', { min: 0, max: 10, step: 0.05 })\n    public recoilYaw: number = 0.45\n\n    @attribute('Recoil', { min: 0, max: 1, step: 0.01 })\n    public shake: number = 0.04\n\n    /** The weapon's own kick per shot, degrees up, carried on `weapon:Shot` for listeners (the Sandbox's body takes `fireTrigger`'s clip instead). */\n    @attribute('Recoil', { min: 0, max: 30, step: 0.5 })\n    public kick: number = 7\n\n    /** Seconds a reload and the weapon coming into the hands take where no clip says (third person). */\n    @attribute('Timing', { min: 0.1, max: 10, step: 0.05 })\n    public reloadSeconds: number = 2.2\n\n    @attribute('Timing', { min: 0.1, max: 5, step: 0.05 })\n    public equipSeconds: number = 1.2\n\n    /** First person, aimed: the field of view (degrees), the share of the walk it moves at, and whether its viewmodel has aim clips. */\n    @attribute('First Person', { min: 10, max: 120, step: 1 })\n    public aimFov: number = 62\n\n    @attribute('First Person', { min: 0.1, max: 1, step: 0.05 })\n    public aimMove: number = 0.7\n\n    @attribute('First Person')\n    public aimClips: boolean = true\n\n    /** First person, aimed without aim clips: how far the viewmodel comes in to the sights (m: left, up, forward). */\n    @attribute('First Person')\n    public aimOffset: number[] = [0, 0.012, 0]\n\n    /** Collision layers a shot passes through, by name. */\n    @attribute('Hits')\n    public passThroughLayers: LayerName[] = ['Stair Ramp']\n\n    /** Bullet holes this gun keeps; the oldest goes when there are more. */\n    @attribute('Hits', { min: 0, max: 500, step: 1 })\n    public maxHoles: number = 60\n\n    @attribute('Effects')\n    public flashTemplate: TemplateName = 'Muzzle Flash' as TemplateName\n\n    @attribute('Effects')\n    public impactTemplate: TemplateName = 'Bullet Impact' as TemplateName\n\n    @attribute('Effects')\n    public holeTemplate: TemplateName = 'Bullet Hole' as TemplateName\n\n    @attribute('Effects')\n    public tracerTemplate: TemplateName = 'Tracer' as TemplateName\n\n    /** The shot's cue in the holder's `Sounds` group (third person; in first person the fire clip plays it). */\n    @attribute('Effects')\n    public shotSound: string = 'ShotPistol'\n\n    /** The holder's body recoil, an animator trigger (the Recoil layer's kick of this weapon), raised on every shot. */\n    @attribute('Effects')\n    public fireTrigger: TriggerName = '' as TriggerName\n\n    /** Rounds in the magazine, and in the reserve. */\n    public ammo: number = 12\n    public reserve: number = 84\n    /** Shots fired, ever, and what the last one hit (null: nothing within `range`). */\n    public shots: number = 0\n    public lastHit: { point: number[], node: Node | null } | null = null\n    /** The last pull found the magazine empty. */\n    public dry: boolean = false\n\n    /** Seconds to the next shot the rate allows (below 0: the shot is late by that much, and the next comes as early). */\n    private _cooldown: number = 0\n    private _held: boolean = false\n    /** Seconds a pull that could not fire yet still waits to. */\n    private _queued: number = 0\n    private _bloom: number = 0\n    private _mask: number | null = null\n    private _holes: Node[] = []\n    private _missing: Set<string> = new Set()\n    private readonly _dir: number[] = [0, 0, 0]\n\n    onStart() {\n        this.ammo = this.magazine\n        this.reserve = this.reserveRounds\n    }\n\n    onUpdate(delta: number) {\n        this._cooldown -= delta\n        this._queued = Math.max(0, this._queued - delta)\n        this._bloom = Math.max(0, this._bloom - 5 * delta)\n    }\n\n    /**\n     * The spread now, degrees: `aim` 0 from the hip to 1 aimed, and whether the holder is moving, sprinting,\n     * crouching and on the ground.\n     */\n    public spread(aim: number, moving: boolean, sprinting = false, crouched = false, grounded = true): number {\n        const a = Math.max(0, Math.min(1, aim))\n        const base = this.hipSpread + (this.aimSpread - this.hipSpread) * a\n        return base * (moving ? (sprinting ? 2.2 : 1.5) : 1) * (crouched ? 0.7 : 1) * (grounded ? 1 : 2.5) + this._bloom * (1 - a * 0.6)\n    }\n\n    /** Whether a reload would put anything in the magazine. */\n    public get canReload(): boolean {\n        return this.ammo < this.magazine && this.reserve > 0\n    }\n\n    /** Fill the magazine from the reserve; returns the rounds moved. */\n    public reload(): number {\n        const take = Math.min(this.magazine - this.ammo, this.reserve)\n        this.ammo += take\n        this.reserve -= take\n        return take\n    }\n\n    /**\n     * The trigger, every frame: `held` whether it is pulled, `ready` whether the weapon is up to fire, `eye` and\n     * `look` the camera's position and the way the crosshair looks (unit), `spread` the cone (degrees), `shooter` the\n     * body the shots never meet, `view` where it is seen from. Fires when the trigger asks, the gun is ready and the\n     * magazine holds a round; returns the recoil of the shot, or null when it did not fire (`dry` says whether that\n     * was an empty magazine).\n     */\n    public pull(held: boolean, ready: boolean, eye: ArrayLike<number>, look: ArrayLike<number>, spread: number, shooter: unknown, view: SandboxShotView)\n        : SandboxShot['recoil'] {\n        // A pull (the trigger going down) waits `pullBuffer` for the gun to be able to fire; an automatic fires while held.\n        const pulled = held && !this._held\n        if (pulled) this._queued = this.pullBuffer\n        this._held = held\n        this.dry = false\n        const wants = this.auto ? held : this._queued > 0\n        if (!wants || !ready) { this._cooldown = Math.max(0, this._cooldown); return null }\n        if (this._cooldown > 0) return null\n        if (this.ammo <= 0) { this.dry = pulled || this.auto; this._queued = 0; return null }\n        // The rate kept on average, whatever the frame rate: a shot late by part of a frame brings the next one forward.\n        const interval = 60 / Math.max(1, this.roundsPerMinute)\n        this._cooldown = Math.max(this._cooldown, -interval) + interval\n        this._queued = 0\n        this.ammo--\n        const recoil = { pitch: this.recoilPitch, yaw: (Math.random() * 2 - 1) * this.recoilYaw, kick: this.kick, shake: this.shake }\n        this.fire(eye, look, spread, shooter, recoil, view)\n        this._bloom = Math.min(this.hipSpread * 1.6, this._bloom + this.hipSpread * 0.12)\n        return recoil\n    }\n\n    /**\n     * One shot from the camera at `eye` along `look`, `spread` degrees round it at most, passing `shooter`'s body:\n     * a raycast (or two) per pellet, the push, the effects, and the `weapon:Shot` event (with `recoil`, when a pull\n     * fired it). Spends no round. Returns what the first pellet hit, or null.\n     */\n    public fire(eye: ArrayLike<number>, look: ArrayLike<number>, spread: number, shooter?: unknown,\n        recoil: SandboxShot['recoil'] = null, view: SandboxShotView = { firstPerson: false }): { point: number[], node: Node | null } | null {\n        const hits = this._shoot(eye, look, spread, shooter, view)\n        this._told({ gun: this, hit: hits[0] ?? null, hits, recoil })\n        return hits[0] ?? null\n    }\n\n    /** Tell the shot: what this returns is the `weapon:Shot` event, dispatched here and bubbling to the holder. */\n    @eventDispatch('weapon:Shot')\n    private _told(shot: SandboxShot): SandboxShot {\n        return shot\n    }\n\n    /** The shot itself: its pellets' raycasts, the pushes and the effects. */\n    private _shoot(eye: ArrayLike<number>, look: ArrayLike<number>, spread: number, shooter: unknown, view: SandboxShotView) {\n        const physics = this.scene?.physics as any\n        this.shots++\n        const muzzleNode = this.getChildByName('Muzzle')[0] ?? this\n        muzzleNode.updateTransforms(muzzleNode.parent ? muzzleNode.parent.worldTransform : null)\n        const m = view.firstPerson && view.muzzle ? view.muzzle : muzzleNode.worldPosition\n        const muzzle = [m[0], m[1], m[2]]\n        if (!view.firstPerson) {\n            const f = muzzleNode.worldForward\n            this._spawn(this.flashTemplate, muzzle, eulerAlong([f[0], f[1], f[2]]))\n            this._playSound()\n        }\n        this.lastHit = null\n        const hits: ({ point: number[], node: Node | null } | null)[] = []\n        if (!physics) return hits\n        const options = { ignore: shooter ?? null, layerMask: this._layerMask(physics) }\n        const pellets = Math.max(1, Math.round(this.pellets))\n        const push = this.impulse / pellets\n        for (let k = 0; k < pellets; k++) {\n            const dir = MathUtils.randomInCone(this._dir, look, spread) as number[]\n            // What the crosshair looks at...\n            const far = [eye[0] + dir[0] * this.range, eye[1] + dir[1] * this.range, eye[2] + dir[2] * this.range]\n            const seen = physics.raycast([eye[0], eye[1], eye[2]], far, options)\n            let hit = seen, way = [dir[0], dir[1], dir[2]]\n            if (!view.firstPerson) {\n                // ...and, in third person, what the bullet meets on its way there from the muzzle (a little past it,\n                // so it meets the surface).\n                const target = seen ? seen.point : far\n                const toTarget = [target[0] - muzzle[0], target[1] - muzzle[1], target[2] - muzzle[2]]\n                const length = Math.hypot(toTarget[0], toTarget[1], toTarget[2])\n                if (length < 1e-3) { hits.push(null); continue }\n                way = [toTarget[0] / length, toTarget[1] / length, toTarget[2] / length]\n                const end = [muzzle[0] + way[0] * (length + 0.05), muzzle[1] + way[1] * (length + 0.05), muzzle[2] + way[2] * (length + 0.05)]\n                hit = physics.raycast(muzzle, end, options)\n                // One tracer a shot: the first pellet's.\n                if (k === 0) this._tracer(muzzle, hit ? hit.point : target)\n            } else if (k === 0) this._tracer(muzzle, seen ? seen.point : far)\n            const record = hit ? { point: [hit.point[0], hit.point[1], hit.point[2]], node: hit.node ?? null } : null\n            hits.push(record)\n            if (k === 0) this.lastHit = record\n            if (!hit) continue\n            this._push(hit, way, push)\n            this._impact(hit)\n        }\n        return hits\n    }\n\n    /** Every layer but `passThroughLayers`, looked up by name once. */\n    private _layerMask(physics: any): number {\n        if (this._mask === null) {\n            let mask = -1\n            for (const name of this.passThroughLayers ?? []) if (name) mask &= ~(physics.layer?.(name) ?? 0)\n            this._mask = mask\n        }\n        return this._mask\n    }\n\n    /**\n     * A dynamic body hit is pushed along the shot, at the point hit (measured from its centre). A character hit (its\n     * capsule, or a limb of a body already reacting) takes the shot with its whole body instead: its reactions, on\n     * the limb the shot meets (`physics.applyHit`), flinch, stagger or fall by how hard it lands.\n     */\n    private _push(hit: any, way: number[], impulse: number): void {\n        const physics = this.scene?.physics as any\n        if (impulse > 0 && physics?.reactionsFor?.(hit.body) && physics.applyHit(hit, way, impulse)) return\n        const body = hit.body\n        if (!body || !body.isDynamic || impulse <= 0) return\n        const origin = body.owner?.worldPosition ?? hit.point\n        const push = Math.min(impulse, this.maxPushSpeed * Math.max(0, body.mass ?? 0))\n        if (push <= 0) return\n        body.wakeUp?.()\n        body.impulse([way[0] * push, way[1] * push, way[2] * push],\n            [hit.point[0] - origin[0], hit.point[1] - origin[1], hit.point[2] - origin[2]])\n    }\n\n    /** Sparks and dust off the surface, and a hole in it: one that moves with what it is on. */\n    private _impact(hit: any): void {\n        const n = hit.normal\n        const at = [hit.point[0] + n[0] * 0.01, hit.point[1] + n[1] * 0.01, hit.point[2] + n[2] * 0.01]\n        const rotation = eulerOntoNormal(n)\n        this._spawn(this.impactTemplate, at, rotation)\n        const hole = this._spawn(this.holeTemplate, at, [rotation[0], rotation[1], Math.random() * 360])\n        if (!hole) return\n        // On a body that moves, the hole goes with it.\n        if (hit.node && hit.body?.isDynamic) hole.reparent(hit.node)\n        this._holes.push(hole)\n        while (this._holes.length > this.maxHoles) {\n            const old = this._holes.shift()!\n            if (old.scene) old.remove({ immediate: true })\n        }\n    }\n\n    /** A streak from the muzzle to where the shot ended (none for a shot too short to see one). */\n    private _tracer(from: number[], to: number[]): void {\n        const d = [to[0] - from[0], to[1] - from[1], to[2] - from[2]]\n        const length = Math.hypot(d[0], d[1], d[2])\n        if (length < 2) return\n        const node: any = this._spawn(this.tracerTemplate, from, eulerAlong(d))\n        if (node) node.tracerLength = length\n    }\n\n    /** The shot's cue, from the nearest `Sounds` group above the gun (the character's). */\n    private _playSound(): void {\n        if (!this.shotSound) return\n        for (let n: Node | null = this.parent; n; n = n.parent) {\n            const group = n.getChildByName('Sounds')[0]\n            if (!group) continue\n            const cue = group.getChildByName(this.shotSound)[0] as any\n            cue?.play?.()\n            return\n        }\n    }\n\n    /** Spawn an effect template, or nothing (and a warning, once) when the scene has none of that name. */\n    private _spawn(template: string, position: number[], rotation: number[]): Node | null {\n        if (!template || this._missing.has(template)) return null\n        const node = (this.scene as any)?.instantiate(template, { position, rotation }) ?? null\n        if (!node) {\n            this._missing.add(template)\n            Logger.warn(`SandboxGun: no \"${template}\" template, so that effect is skipped`, 'Script')\n        }\n        return node\n    }\n}\n\n/** Euler degrees [pitch, yaw, 0] that turn a node's +Z along `d`. */\nfunction eulerAlong(d: ArrayLike<number>): number[] {\n    const aim = MathUtils.aimFromDirection([d[0], d[1], d[2]] as any)\n    return [aim.pitch, aim.yaw, 0]\n}\n\n/** Euler degrees [pitch, yaw, 0] that turn a node's +Y onto `normal` (a decal projects down its -Y). */\nfunction eulerOntoNormal(normal: ArrayLike<number>): number[] {\n    const ny = Math.max(-1, Math.min(1, normal[1]))\n    return [Math.acos(ny) * 180 / Math.PI, Math.atan2(normal[0], normal[2]) * 180 / Math.PI, 0]\n}\n",
-    "0c42164f1f817e4a5c168032c59edca5": "import { Logger, MathUtils, Node } from 'cleo'\nimport type { LayerName, TemplateName, TriggerName } from 'cleo'\nimport { attribute, eventDispatch } from 'cleo/decorators'\n\n/** What one shot was, as the gun tells it (`weapon:Shot`). */\nexport interface SandboxShot {\n    gun: Node\n    /** What the first pellet hit (the only one, but for a shotgun), or null: nothing within `range`. */\n    hit: { point: number[], node: Node | null } | null\n    /** Every pellet's hit (a shotgun fires `pellets` of them); null where a pellet hit nothing. */\n    hits: ({ point: number[], node: Node | null } | null)[]\n    /** The kick a pull of the trigger gives (camera pitch up and yaw, degrees, the weapon's own, the camera's shake); null for a shot fired directly. */\n    recoil: { pitch: number, yaw: number, kick: number, shake: number } | null\n}\n\n/** Where a shot is seen from: the third person's weapon in the hands, or the first person's viewmodel. */\nexport interface SandboxShotView {\n    /** Fired in first person: the camera's ray alone, and no flash or sound of the gun's own (the viewmodel's clip has them). */\n    firstPerson: boolean\n    /** Where the tracer starts in first person: the viewmodel's muzzle where it is drawn. */\n    muzzle?: ArrayLike<number> | null\n}\n\n/**\n * A Sandbox gun: the weapon in the hands, in either view. Attach to a weapon's holder (the `Pistol Grip`, `Rifle Grip`\n * and `Shotgun Grip` nodes on the Mannequin's hand), whose child `Muzzle` is the end of its bore. Its numbers are the\n * weapon's (Firing Line's pistol, AK-47 and SAPS-12), set on each holder in the Player template. The character\n * holding it (SandboxPlayer) calls {@link pull} every frame with the trigger and where the crosshair looks; the gun\n * decides when a shot goes, spends a round from its magazine, and returns the recoil for the holder to apply. It\n * keeps its own magazine and reserve (`ammo`, `reserve`), so a weapon put away and taken out again is as it was left;\n * {@link reload} fills the magazine from the reserve. Out of the reserve, it is dry until the scene starts again.\n *\n * A SHOT is a raycast per pellet (a pistol and a rifle fire one; the shotgun `pellets`), each its own way inside the\n * spread's cone. In third person a pellet is two raycasts: from the camera through the crosshair, up to `range`\n * (what the player aims at), then from the muzzle to that point (what the bullet meets on its way: a corner the\n * camera sees past but the gun does not). In first person the camera's alone, as Firing Line fires. Neither meets the\n * shooter's own body, the trigger zones or the layers named in `passThroughLayers` (the stairs' ramps: there to be\n * walked on, not seen).\n *\n * A HIT on a dynamic body pushes it: the shot's `impulse` (shared by its pellets) along the shot at the point it hit\n * (so a crate hit high tips, a ball spins), no more than `maxPushSpeed` of speed at once. Every hit leaves sparks and\n * dust (`impactTemplate`) and a hole (`holeTemplate`), the hole moving with what it is on; the shot draws a tracer\n * (`tracerTemplate`). In third person the gun flashes at its muzzle (`flashTemplate`) and plays its shot (`shotSound`,\n * a cue in the character's `Sounds` group); in first person the viewmodel's fire clip does both. A template the scene\n * does not have is skipped, with a warning once.\n *\n * SPREAD is Firing Line's: a cone round the crosshair, from `hipSpread` to `aimSpread` as the weapon aims, half again\n * moving (2.2 times at a sprint), less crouched, much more in the air, and wider the longer it fires (bloom, up to 1.6\n * times the hip spread, settling at 5 degrees a second). The holder reads {@link spread} for its crosshair.\n *\n * EVERY SHOT is told as the event `weapon:Shot` (a {@link SandboxShot}), dispatched at the gun: it bubbles up to the\n * character holding it, whose `@eventListener('weapon:Shot')` applies the recoil, and then reaches anything listening\n * with `@onEvent('weapon:Shot')` anywhere (a hit marker, a sound, a score).\n */\nexport default class SandboxGunNode extends Node {\n    /** The weapon's name, on the HUD. */\n    @attribute('Weapon')\n    public displayName: string = 'Pistol'\n\n    /** Holding the trigger keeps firing (a rifle); a pistol or the shotgun fires once per pull. */\n    @attribute('Firing')\n    public auto: boolean = false\n\n    @attribute('Firing', { min: 30, max: 1500, step: 1 })\n    public roundsPerMinute: number = 380\n\n    /** Pellets a shot fires, each its own way inside the spread: 1, but for a shotgun. */\n    @attribute('Firing', { min: 1, max: 24, step: 1 })\n    public pellets: number = 1\n\n    /** How far a shot reaches, m. */\n    @attribute('Firing', { min: 5, max: 1000, step: 5 })\n    public range: number = 140\n\n    /**\n     * The push a shot gives a dynamic body, newton-seconds (shared by its pellets): far more than a real bullet's (a\n     * rifle's carries about 4), so a shot crate shoves. No body is sped up by more than `maxPushSpeed` by one hit, so a\n     * ball is not shot away.\n     */\n    @attribute('Firing', { min: 0, max: 500, step: 0.5 })\n    public impulse: number = 14\n\n    @attribute('Firing', { min: 0, max: 50, step: 0.25 })\n    public maxPushSpeed: number = 2.5\n\n    /** Damage a pellet deals at close range (nothing in the Sandbox takes it yet: kept for game modes). */\n    @attribute('Firing', { min: 0, max: 500, step: 1 })\n    public damage: number = 26\n\n    /**\n     * A pull that comes while the gun cannot fire yet (still coming up from the hip, or between two shots) fires as soon\n     * as it can, if that is within this many seconds.\n     */\n    @attribute('Firing', { min: 0, max: 1, step: 0.05 })\n    public pullBuffer: number = 0.35\n\n    /** Rounds a magazine holds, and the rounds carried besides it. */\n    @attribute('Ammunition', { min: 1, max: 200, step: 1 })\n    public magazine: number = 12\n\n    @attribute('Ammunition', { min: 0, max: 2000, step: 1 })\n    public reserveRounds: number = 84\n\n    /** Spread, degrees from the crosshair at most: from the hip, and aimed. */\n    @attribute('Spread', { min: 0, max: 20, step: 0.05 })\n    public hipSpread: number = 1.6\n\n    @attribute('Spread', { min: 0, max: 20, step: 0.05 })\n    public aimSpread: number = 0.25\n\n    /** The camera's kick per shot, degrees: up, and up to this either way; and how hard the camera shakes (0..1). */\n    @attribute('Recoil', { min: 0, max: 20, step: 0.05 })\n    public recoilPitch: number = 1.5\n\n    @attribute('Recoil', { min: 0, max: 10, step: 0.05 })\n    public recoilYaw: number = 0.45\n\n    @attribute('Recoil', { min: 0, max: 1, step: 0.01 })\n    public shake: number = 0.04\n\n    /** The weapon's own kick per shot, degrees up, carried on `weapon:Shot` for listeners (the Sandbox's body takes `fireTrigger`'s clip instead). */\n    @attribute('Recoil', { min: 0, max: 30, step: 0.5 })\n    public kick: number = 7\n\n    /** Seconds a reload and the weapon coming into the hands take where no clip says (third person). */\n    @attribute('Timing', { min: 0.1, max: 10, step: 0.05 })\n    public reloadSeconds: number = 2.2\n\n    @attribute('Timing', { min: 0.1, max: 5, step: 0.05 })\n    public equipSeconds: number = 1.2\n\n    /** First person, aimed: the field of view (degrees), the share of the walk it moves at, and whether its viewmodel has aim clips. */\n    @attribute('First Person', { min: 10, max: 120, step: 1 })\n    public aimFov: number = 62\n\n    @attribute('First Person', { min: 0.1, max: 1, step: 0.05 })\n    public aimMove: number = 0.7\n\n    @attribute('First Person')\n    public aimClips: boolean = true\n\n    /** First person, aimed without aim clips: how far the viewmodel comes in to the sights (m: left, up, forward). */\n    @attribute('First Person')\n    public aimOffset: number[] = [0, 0.012, 0]\n\n    /** Collision layers a shot passes through, by name. */\n    @attribute('Hits')\n    public passThroughLayers: LayerName[] = ['Stair Ramp']\n\n    /** Bullet holes this gun keeps; the oldest goes when there are more. */\n    @attribute('Hits', { min: 0, max: 500, step: 1 })\n    public maxHoles: number = 60\n\n    @attribute('Effects')\n    public flashTemplate: TemplateName = 'Muzzle Flash' as TemplateName\n\n    @attribute('Effects')\n    public impactTemplate: TemplateName = 'Bullet Impact' as TemplateName\n\n    @attribute('Effects')\n    public holeTemplate: TemplateName = 'Bullet Hole' as TemplateName\n\n    @attribute('Effects')\n    public tracerTemplate: TemplateName = 'Tracer' as TemplateName\n\n    /** The shot's cue in the holder's `Sounds` group (third person; in first person the fire clip plays it). */\n    @attribute('Effects')\n    public shotSound: string = 'ShotPistol'\n\n    /** The holder's body recoil, an animator trigger (the Recoil layer's kick of this weapon), raised on every shot. */\n    @attribute('Effects')\n    public fireTrigger: TriggerName = '' as TriggerName\n\n    /** Rounds in the magazine, and in the reserve. */\n    public ammo: number = 12\n    public reserve: number = 84\n    /** Shots fired, ever, and what the last one hit (null: nothing within `range`). */\n    public shots: number = 0\n    public lastHit: { point: number[], node: Node | null } | null = null\n    /** The last pull found the magazine empty. */\n    public dry: boolean = false\n\n    /** Seconds to the next shot the rate allows (below 0: the shot is late by that much, and the next comes as early). */\n    private _cooldown: number = 0\n    private _held: boolean = false\n    /** Seconds a pull that could not fire yet still waits to. */\n    private _queued: number = 0\n    private _bloom: number = 0\n    private _mask: number | null = null\n    private _holes: Node[] = []\n    private _missing: Set<string> = new Set()\n    private readonly _dir: number[] = [0, 0, 0]\n\n    onStart() {\n        this.ammo = this.magazine\n        this.reserve = this.reserveRounds\n    }\n\n    onUpdate(delta: number) {\n        this._cooldown -= delta\n        this._queued = Math.max(0, this._queued - delta)\n        this._bloom = Math.max(0, this._bloom - 5 * delta)\n    }\n\n    /**\n     * The spread now, degrees: `aim` 0 from the hip to 1 aimed, and whether the holder is moving, sprinting,\n     * crouching and on the ground.\n     */\n    public spread(aim: number, moving: boolean, sprinting = false, crouched = false, grounded = true): number {\n        const a = Math.max(0, Math.min(1, aim))\n        const base = this.hipSpread + (this.aimSpread - this.hipSpread) * a\n        return base * (moving ? (sprinting ? 2.2 : 1.5) : 1) * (crouched ? 0.7 : 1) * (grounded ? 1 : 2.5) + this._bloom * (1 - a * 0.6)\n    }\n\n    /** Whether a reload would put anything in the magazine. */\n    public get canReload(): boolean {\n        return this.ammo < this.magazine && this.reserve > 0\n    }\n\n    /** Fill the magazine from the reserve; returns the rounds moved. */\n    public reload(): number {\n        const take = Math.min(this.magazine - this.ammo, this.reserve)\n        this.ammo += take\n        this.reserve -= take\n        return take\n    }\n\n    /**\n     * The trigger, every frame: `held` whether it is pulled, `ready` whether the weapon is up to fire, `eye` and\n     * `look` the camera's position and the way the crosshair looks (unit), `spread` the cone (degrees), `shooter` the\n     * body the shots never meet, `view` where it is seen from. Fires when the trigger asks, the gun is ready and the\n     * magazine holds a round; returns the recoil of the shot, or null when it did not fire (`dry` says whether that\n     * was an empty magazine).\n     */\n    public pull(held: boolean, ready: boolean, eye: ArrayLike<number>, look: ArrayLike<number>, spread: number, shooter: unknown, view: SandboxShotView)\n        : SandboxShot['recoil'] {\n        // A pull (the trigger going down) waits `pullBuffer` for the gun to be able to fire; an automatic fires while held.\n        const pulled = held && !this._held\n        if (pulled) this._queued = this.pullBuffer\n        this._held = held\n        this.dry = false\n        const wants = this.auto ? held : this._queued > 0\n        if (!wants || !ready) { this._cooldown = Math.max(0, this._cooldown); return null }\n        if (this._cooldown > 0) return null\n        if (this.ammo <= 0) { this.dry = pulled || this.auto; this._queued = 0; return null }\n        // The rate kept on average, whatever the frame rate: a shot late by part of a frame brings the next one forward.\n        const interval = 60 / Math.max(1, this.roundsPerMinute)\n        this._cooldown = Math.max(this._cooldown, -interval) + interval\n        this._queued = 0\n        this.ammo--\n        const recoil = { pitch: this.recoilPitch, yaw: (Math.random() * 2 - 1) * this.recoilYaw, kick: this.kick, shake: this.shake }\n        this.fire(eye, look, spread, shooter, recoil, view)\n        this._bloom = Math.min(this.hipSpread * 1.6, this._bloom + this.hipSpread * 0.12)\n        return recoil\n    }\n\n    /**\n     * One shot from the camera at `eye` along `look`, `spread` degrees round it at most, passing `shooter`'s body:\n     * a raycast (or two) per pellet, the push, the effects, and the `weapon:Shot` event (with `recoil`, when a pull\n     * fired it). Spends no round. Returns what the first pellet hit, or null.\n     */\n    public fire(eye: ArrayLike<number>, look: ArrayLike<number>, spread: number, shooter?: unknown,\n        recoil: SandboxShot['recoil'] = null, view: SandboxShotView = { firstPerson: false }): { point: number[], node: Node | null } | null {\n        const hits = this._shoot(eye, look, spread, shooter, view)\n        this._told({ gun: this, hit: hits[0] ?? null, hits, recoil })\n        return hits[0] ?? null\n    }\n\n    /** Tell the shot: what this returns is the `weapon:Shot` event, dispatched here and bubbling to the holder. */\n    @eventDispatch('weapon:Shot')\n    private _told(shot: SandboxShot): SandboxShot {\n        return shot\n    }\n\n    /** The shot itself: its pellets' raycasts, the pushes and the effects. */\n    private _shoot(eye: ArrayLike<number>, look: ArrayLike<number>, spread: number, shooter: unknown, view: SandboxShotView) {\n        const physics = this.scene?.physics as any\n        this.shots++\n        const muzzleNode = this.getChildByName('Muzzle')[0] ?? this\n        muzzleNode.updateTransforms(muzzleNode.parent ? muzzleNode.parent.worldTransform : null)\n        const m = view.firstPerson && view.muzzle ? view.muzzle : muzzleNode.worldPosition\n        const muzzle = [m[0], m[1], m[2]]\n        if (!view.firstPerson) {\n            const f = muzzleNode.worldForward\n            this._spawn(this.flashTemplate, muzzle, eulerAlong([f[0], f[1], f[2]]))\n            this._playSound()\n        }\n        this.lastHit = null\n        const hits: ({ point: number[], node: Node | null } | null)[] = []\n        if (!physics) return hits\n        const options = { ignore: shooter ?? null, layerMask: this._layerMask(physics) }\n        const pellets = Math.max(1, Math.round(this.pellets))\n        const push = this.impulse / pellets\n        for (let k = 0; k < pellets; k++) {\n            const dir = MathUtils.randomInCone(this._dir, look, spread) as number[]\n            // What the crosshair looks at...\n            const far = [eye[0] + dir[0] * this.range, eye[1] + dir[1] * this.range, eye[2] + dir[2] * this.range]\n            const seen = physics.raycast([eye[0], eye[1], eye[2]], far, options)\n            let hit = seen, way = [dir[0], dir[1], dir[2]]\n            if (!view.firstPerson) {\n                // ...and, in third person, what the bullet meets on its way there from the muzzle (a little past it,\n                // so it meets the surface).\n                const target = seen ? seen.point : far\n                const toTarget = [target[0] - muzzle[0], target[1] - muzzle[1], target[2] - muzzle[2]]\n                const length = Math.hypot(toTarget[0], toTarget[1], toTarget[2])\n                if (length < 1e-3) { hits.push(null); continue }\n                way = [toTarget[0] / length, toTarget[1] / length, toTarget[2] / length]\n                const end = [muzzle[0] + way[0] * (length + 0.05), muzzle[1] + way[1] * (length + 0.05), muzzle[2] + way[2] * (length + 0.05)]\n                hit = physics.raycast(muzzle, end, options)\n                // One tracer a shot: the first pellet's.\n                if (k === 0) this._tracer(muzzle, hit ? hit.point : target)\n            } else if (k === 0) this._tracer(muzzle, seen ? seen.point : far)\n            const record = hit ? { point: [hit.point[0], hit.point[1], hit.point[2]], node: hit.node ?? null } : null\n            hits.push(record)\n            if (k === 0) this.lastHit = record\n            if (!hit) continue\n            this._push(hit, way, push)\n            this._impact(hit)\n        }\n        return hits\n    }\n\n    /** Every layer but `passThroughLayers`, looked up by name once. */\n    private _layerMask(physics: any): number {\n        if (this._mask === null) {\n            let mask = -1\n            for (const name of this.passThroughLayers ?? []) if (name) mask &= ~(physics.layer?.(name) ?? 0)\n            this._mask = mask\n        }\n        return this._mask\n    }\n\n    /**\n     * A dynamic body hit is pushed along the shot, at the point hit (measured from its centre). A character hit (its\n     * capsule, or a limb of a body already reacting) takes the shot with its whole body instead: its reactions, on\n     * the limb the shot meets (`physics.applyHit`), flinch, stagger or fall by how hard it lands.\n     */\n    private _push(hit: any, way: number[], impulse: number): void {\n        const physics = this.scene?.physics as any\n        if (impulse > 0 && physics?.reactionsFor?.(hit.body) && physics.applyHit(hit, way, impulse)) return\n        const body = hit.body\n        if (!body || !body.isDynamic || impulse <= 0) return\n        const origin = body.owner?.worldPosition ?? hit.point\n        const push = Math.min(impulse, this.maxPushSpeed * Math.max(0, body.mass ?? 0))\n        if (push <= 0) return\n        body.wakeUp?.()\n        body.impulse([way[0] * push, way[1] * push, way[2] * push],\n            [hit.point[0] - origin[0], hit.point[1] - origin[1], hit.point[2] - origin[2]])\n    }\n\n    /** Sparks and dust off the surface, and a hole in it: one that moves with what it is on. */\n    private _impact(hit: any): void {\n        const n = hit.normal\n        const at = [hit.point[0] + n[0] * 0.01, hit.point[1] + n[1] * 0.01, hit.point[2] + n[2] * 0.01]\n        const rotation = eulerOntoNormal(n)\n        this._spawn(this.impactTemplate, at, rotation)\n        const hole = this._spawn(this.holeTemplate, at, [rotation[0], rotation[1], Math.random() * 360])\n        if (!hole) return\n        // On a body that moves, the hole goes with it.\n        if (hit.node && hit.body?.isDynamic) hole.reparent(hit.node)\n        this._holes.push(hole)\n        while (this._holes.length > this.maxHoles) {\n            const old = this._holes.shift()!\n            if (old.scene) old.remove({ immediate: true })\n        }\n    }\n\n    /** A streak from the muzzle to where the shot ended (none for a shot too short to see one). */\n    private _tracer(from: number[], to: number[]): void {\n        const d = [to[0] - from[0], to[1] - from[1], to[2] - from[2]]\n        const length = Math.hypot(d[0], d[1], d[2])\n        if (length < 2) return\n        const node: any = this._spawn(this.tracerTemplate, from, eulerAlong(d))\n        if (node) node.tracerLength = length\n    }\n\n    /** The shot's cue, from the nearest `Sounds` group above the gun (the character's). */\n    private _playSound(): void {\n        if (!this.shotSound) return\n        for (let n: Node | null = this.parent; n; n = n.parent) {\n            const group = n.getChildByName('Sounds')[0]\n            if (!group) continue\n            const cue = group.getChildByName(this.shotSound)[0] as any\n            cue?.play?.()\n            return\n        }\n    }\n\n    /** Spawn an effect template, or nothing (and a warning, once) when the scene has none of that name. */\n    private _spawn(template: string, position: number[], rotation: number[]): Node | null {\n        if (!template || this._missing.has(template)) return null\n        const node = (this.scene as any)?.instantiate(template, { position, rotation }) ?? null\n        if (!node) {\n            this._missing.add(template)\n            Logger.warn(`SandboxGun: no \"${template}\" template, so that effect is skipped`, 'Script')\n        }\n        return node\n    }\n}\n\n/** Euler degrees [pitch, yaw, 0] that turn a node's +Z along `d`. */\nfunction eulerAlong(d: ArrayLike<number>): number[] {\n    const aim = MathUtils.aimFromDirection([d[0], d[1], d[2]] as any)\n    return [aim.pitch, aim.yaw, 0]\n}\n\n/** Euler degrees [pitch, yaw, 0] that turn a node's +Y onto `normal` (a decal projects down its -Y). */\nfunction eulerOntoNormal(normal: ArrayLike<number>): number[] {\n    const ny = Math.max(-1, Math.min(1, normal[1]))\n    return [Math.acos(ny) * 180 / Math.PI, Math.atan2(normal[0], normal[2]) * 180 / Math.PI, 0]\n}\n",
-    "8e95fa399bc246aa250ee5384702b7e7": "import { Logger, MathUtils, Node } from 'cleo'\nimport type { LayerName, TemplateName, TriggerName } from 'cleo'\nimport { attribute, eventDispatch } from 'cleo/decorators'\n\n/** What one shot was, as the gun tells it (`weapon:Shot`). */\nexport interface SandboxShot {\n    gun: Node\n    /** What the first pellet hit (the only one, but for a shotgun), or null: nothing within `range`. */\n    hit: { point: number[], node: Node | null } | null\n    /** Every pellet's hit (a shotgun fires `pellets` of them); null where a pellet hit nothing. */\n    hits: ({ point: number[], node: Node | null } | null)[]\n    /** The kick a pull of the trigger gives (camera pitch up and yaw, degrees, the weapon's own, the camera's shake); null for a shot fired directly. */\n    recoil: { pitch: number, yaw: number, kick: number, shake: number } | null\n}\n\n/** Where a shot is seen from: the third person's weapon in the hands, or the first person's viewmodel. */\nexport interface SandboxShotView {\n    /** Fired in first person: the camera's ray alone, and no flash or sound of the gun's own (the viewmodel's clip has them). */\n    firstPerson: boolean\n    /** Where the tracer starts in first person: the viewmodel's muzzle where it is drawn. */\n    muzzle?: ArrayLike<number> | null\n}\n\n/**\n * A Sandbox gun: the weapon in the hands, in either view. Attach to a weapon's holder (the `Pistol Grip`, `Rifle Grip`\n * and `Shotgun Grip` nodes on the Mannequin's hand), whose child `Muzzle` is the end of its bore. Its numbers are the\n * weapon's (Firing Line's pistol, AK-47 and SAPS-12), set on each holder in the Player template. The character\n * holding it (SandboxPlayer) calls {@link pull} every frame with the trigger and where the crosshair looks; the gun\n * decides when a shot goes, spends a round from its magazine, and returns the recoil for the holder to apply. It\n * keeps its own magazine and reserve (`ammo`, `reserve`), so a weapon put away and taken out again is as it was left;\n * {@link reload} fills the magazine from the reserve. Out of the reserve, it is dry until the scene starts again.\n *\n * A SHOT is a raycast per pellet (a pistol and a rifle fire one; the shotgun `pellets`), each its own way inside the\n * spread's cone. In third person a pellet is two raycasts: from the camera through the crosshair, up to `range`\n * (what the player aims at), then from the muzzle to that point (what the bullet meets on its way: a corner the\n * camera sees past but the gun does not). In first person the camera's alone, as Firing Line fires. Neither meets the\n * shooter's own body, the trigger zones or the layers named in `passThroughLayers` (the stairs' ramps: there to be\n * walked on, not seen).\n *\n * A HIT on a dynamic body pushes it: the shot's `impulse` (shared by its pellets) along the shot at the point it hit\n * (so a crate hit high tips, a ball spins), no more than `maxPushSpeed` of speed at once. Every hit leaves sparks and\n * dust (`impactTemplate`) and a hole (`holeTemplate`), the hole moving with what it is on; the shot draws a tracer\n * (`tracerTemplate`). In third person the gun flashes at its muzzle (`flashTemplate`) and plays its shot (`shotSound`,\n * a cue in the character's `Sounds` group); in first person the viewmodel's fire clip does both. A template the scene\n * does not have is skipped, with a warning once.\n *\n * SPREAD is Firing Line's: a cone round the crosshair, from `hipSpread` to `aimSpread` as the weapon aims, half again\n * moving (2.2 times at a sprint), less crouched, much more in the air, and wider the longer it fires (bloom, up to 1.6\n * times the hip spread, settling at 5 degrees a second). The holder reads {@link spread} for its crosshair.\n *\n * EVERY SHOT is told as the event `weapon:Shot` (a {@link SandboxShot}), dispatched at the gun: it bubbles up to the\n * character holding it, whose `@eventListener('weapon:Shot')` applies the recoil, and then reaches anything listening\n * with `@onEvent('weapon:Shot')` anywhere (a hit marker, a sound, a score).\n */\nexport default class SandboxGunNode extends Node {\n    /** The weapon's name, on the HUD. */\n    @attribute('Weapon')\n    public displayName: string = 'Pistol'\n\n    /** Holding the trigger keeps firing (a rifle); a pistol or the shotgun fires once per pull. */\n    @attribute('Firing')\n    public auto: boolean = false\n\n    @attribute('Firing', { min: 30, max: 1500, step: 1 })\n    public roundsPerMinute: number = 380\n\n    /** Pellets a shot fires, each its own way inside the spread: 1, but for a shotgun. */\n    @attribute('Firing', { min: 1, max: 24, step: 1 })\n    public pellets: number = 1\n\n    /** How far a shot reaches, m. */\n    @attribute('Firing', { min: 5, max: 1000, step: 5 })\n    public range: number = 140\n\n    /**\n     * The push a shot gives a dynamic body, newton-seconds (shared by its pellets): far more than a real bullet's (a\n     * rifle's carries about 4), so a shot crate shoves. No body is sped up by more than `maxPushSpeed` by one hit, so a\n     * ball is not shot away.\n     */\n    @attribute('Firing', { min: 0, max: 500, step: 0.5 })\n    public impulse: number = 14\n\n    @attribute('Firing', { min: 0, max: 50, step: 0.25 })\n    public maxPushSpeed: number = 2.5\n\n    /** Damage a pellet deals at close range (nothing in the Sandbox takes it yet: kept for game modes). */\n    @attribute('Firing', { min: 0, max: 500, step: 1 })\n    public damage: number = 26\n\n    /**\n     * A pull that comes while the gun cannot fire yet (still coming up from the hip, or between two shots) fires as soon\n     * as it can, if that is within this many seconds.\n     */\n    @attribute('Firing', { min: 0, max: 1, step: 0.05 })\n    public pullBuffer: number = 0.35\n\n    /** Rounds a magazine holds, and the rounds carried besides it. */\n    @attribute('Ammunition', { min: 1, max: 200, step: 1 })\n    public magazine: number = 12\n\n    @attribute('Ammunition', { min: 0, max: 2000, step: 1 })\n    public reserveRounds: number = 84\n\n    /** Spread, degrees from the crosshair at most: from the hip, and aimed. */\n    @attribute('Spread', { min: 0, max: 20, step: 0.05 })\n    public hipSpread: number = 1.6\n\n    @attribute('Spread', { min: 0, max: 20, step: 0.05 })\n    public aimSpread: number = 0.25\n\n    /** The camera's kick per shot, degrees: up, and up to this either way; and how hard the camera shakes (0..1). */\n    @attribute('Recoil', { min: 0, max: 20, step: 0.05 })\n    public recoilPitch: number = 1.5\n\n    @attribute('Recoil', { min: 0, max: 10, step: 0.05 })\n    public recoilYaw: number = 0.45\n\n    @attribute('Recoil', { min: 0, max: 1, step: 0.01 })\n    public shake: number = 0.04\n\n    /** The weapon's own kick per shot, degrees up, carried on `weapon:Shot` for listeners (the Sandbox's body takes `fireTrigger`'s clip instead). */\n    @attribute('Recoil', { min: 0, max: 30, step: 0.5 })\n    public kick: number = 7\n\n    /** Seconds a reload and the weapon coming into the hands take where no clip says (third person). */\n    @attribute('Timing', { min: 0.1, max: 10, step: 0.05 })\n    public reloadSeconds: number = 2.2\n\n    @attribute('Timing', { min: 0.1, max: 5, step: 0.05 })\n    public equipSeconds: number = 1.2\n\n    /** First person, aimed: the field of view (degrees), the share of the walk it moves at, and whether its viewmodel has aim clips. */\n    @attribute('First Person', { min: 10, max: 120, step: 1 })\n    public aimFov: number = 62\n\n    @attribute('First Person', { min: 0.1, max: 1, step: 0.05 })\n    public aimMove: number = 0.7\n\n    @attribute('First Person')\n    public aimClips: boolean = true\n\n    /** First person, aimed without aim clips: how far the viewmodel comes in to the sights (m: left, up, forward). */\n    @attribute('First Person')\n    public aimOffset: number[] = [0, 0.012, 0]\n\n    /** Collision layers a shot passes through, by name. */\n    @attribute('Hits')\n    public passThroughLayers: LayerName[] = ['Stair Ramp']\n\n    /** Bullet holes this gun keeps; the oldest goes when there are more. */\n    @attribute('Hits', { min: 0, max: 500, step: 1 })\n    public maxHoles: number = 60\n\n    @attribute('Effects')\n    public flashTemplate: TemplateName = 'Muzzle Flash' as TemplateName\n\n    @attribute('Effects')\n    public impactTemplate: TemplateName = 'Bullet Impact' as TemplateName\n\n    @attribute('Effects')\n    public holeTemplate: TemplateName = 'Bullet Hole' as TemplateName\n\n    @attribute('Effects')\n    public tracerTemplate: TemplateName = 'Tracer' as TemplateName\n\n    /** The shot's cue in the holder's `Sounds` group (third person; in first person the fire clip plays it). */\n    @attribute('Effects')\n    public shotSound: string = 'ShotPistol'\n\n    /** The holder's body recoil, an animator trigger (the Recoil layer's kick of this weapon), raised on every shot. */\n    @attribute('Effects')\n    public fireTrigger: TriggerName = '' as TriggerName\n\n    /** Rounds in the magazine, and in the reserve. */\n    public ammo: number = 12\n    public reserve: number = 84\n    /** Shots fired, ever, and what the last one hit (null: nothing within `range`). */\n    public shots: number = 0\n    public lastHit: { point: number[], node: Node | null } | null = null\n    /** The last pull found the magazine empty. */\n    public dry: boolean = false\n\n    /** Seconds to the next shot the rate allows (below 0: the shot is late by that much, and the next comes as early). */\n    private _cooldown: number = 0\n    private _held: boolean = false\n    /** Seconds a pull that could not fire yet still waits to. */\n    private _queued: number = 0\n    private _bloom: number = 0\n    private _mask: number | null = null\n    private _holes: Node[] = []\n    private _missing: Set<string> = new Set()\n    private readonly _dir: number[] = [0, 0, 0]\n\n    onStart() {\n        this.ammo = this.magazine\n        this.reserve = this.reserveRounds\n    }\n\n    onUpdate(delta: number) {\n        this._cooldown -= delta\n        this._queued = Math.max(0, this._queued - delta)\n        this._bloom = Math.max(0, this._bloom - 5 * delta)\n    }\n\n    /**\n     * The spread now, degrees: `aim` 0 from the hip to 1 aimed, and whether the holder is moving, sprinting,\n     * crouching and on the ground.\n     */\n    public spread(aim: number, moving: boolean, sprinting = false, crouched = false, grounded = true): number {\n        const a = Math.max(0, Math.min(1, aim))\n        const base = this.hipSpread + (this.aimSpread - this.hipSpread) * a\n        return base * (moving ? (sprinting ? 2.2 : 1.5) : 1) * (crouched ? 0.7 : 1) * (grounded ? 1 : 2.5) + this._bloom * (1 - a * 0.6)\n    }\n\n    /** Whether a reload would put anything in the magazine. */\n    public get canReload(): boolean {\n        return this.ammo < this.magazine && this.reserve > 0\n    }\n\n    /** Fill the magazine from the reserve; returns the rounds moved. */\n    public reload(): number {\n        const take = Math.min(this.magazine - this.ammo, this.reserve)\n        this.ammo += take\n        this.reserve -= take\n        return take\n    }\n\n    /**\n     * The trigger, every frame: `held` whether it is pulled, `ready` whether the weapon is up to fire, `eye` and\n     * `look` the camera's position and the way the crosshair looks (unit), `spread` the cone (degrees), `shooter` the\n     * body the shots never meet, `view` where it is seen from. Fires when the trigger asks, the gun is ready and the\n     * magazine holds a round; returns the recoil of the shot, or null when it did not fire (`dry` says whether that\n     * was an empty magazine).\n     */\n    public pull(held: boolean, ready: boolean, eye: ArrayLike<number>, look: ArrayLike<number>, spread: number, shooter: unknown, view: SandboxShotView)\n        : SandboxShot['recoil'] {\n        // A pull (the trigger going down) waits `pullBuffer` for the gun to be able to fire; an automatic fires while held.\n        const pulled = held && !this._held\n        if (pulled) this._queued = this.pullBuffer\n        this._held = held\n        this.dry = false\n        const wants = this.auto ? held : this._queued > 0\n        if (!wants || !ready) { this._cooldown = Math.max(0, this._cooldown); return null }\n        if (this._cooldown > 0) return null\n        if (this.ammo <= 0) { this.dry = pulled || this.auto; this._queued = 0; return null }\n        // The rate kept on average, whatever the frame rate: a shot late by part of a frame brings the next one forward.\n        const interval = 60 / Math.max(1, this.roundsPerMinute)\n        this._cooldown = Math.max(this._cooldown, -interval) + interval\n        this._queued = 0\n        this.ammo--\n        const recoil = { pitch: this.recoilPitch, yaw: (Math.random() * 2 - 1) * this.recoilYaw, kick: this.kick, shake: this.shake }\n        this.fire(eye, look, spread, shooter, recoil, view)\n        this._bloom = Math.min(this.hipSpread * 1.6, this._bloom + this.hipSpread * 0.12)\n        return recoil\n    }\n\n    /**\n     * One shot from the camera at `eye` along `look`, `spread` degrees round it at most, passing `shooter`'s body:\n     * a raycast (or two) per pellet, the push, the effects, and the `weapon:Shot` event (with `recoil`, when a pull\n     * fired it). Spends no round. Returns what the first pellet hit, or null.\n     */\n    public fire(eye: ArrayLike<number>, look: ArrayLike<number>, spread: number, shooter?: unknown,\n        recoil: SandboxShot['recoil'] = null, view: SandboxShotView = { firstPerson: false }): { point: number[], node: Node | null } | null {\n        const hits = this._shoot(eye, look, spread, shooter, view)\n        this._told({ gun: this, hit: hits[0] ?? null, hits, recoil })\n        return hits[0] ?? null\n    }\n\n    /** Tell the shot: what this returns is the `weapon:Shot` event, dispatched here and bubbling to the holder. */\n    @eventDispatch('weapon:Shot')\n    private _told(shot: SandboxShot): SandboxShot {\n        return shot\n    }\n\n    /** The shot itself: its pellets' raycasts, the pushes and the effects. */\n    private _shoot(eye: ArrayLike<number>, look: ArrayLike<number>, spread: number, shooter: unknown, view: SandboxShotView) {\n        const physics = this.scene?.physics as any\n        this.shots++\n        const muzzleNode = this.getChildByName('Muzzle')[0] ?? this\n        muzzleNode.updateTransforms(muzzleNode.parent ? muzzleNode.parent.worldTransform : null)\n        const m = view.firstPerson && view.muzzle ? view.muzzle : muzzleNode.worldPosition\n        const muzzle = [m[0], m[1], m[2]]\n        if (!view.firstPerson) {\n            const f = muzzleNode.worldForward\n            this._spawn(this.flashTemplate, muzzle, eulerAlong([f[0], f[1], f[2]]))\n            this._playSound()\n        }\n        this.lastHit = null\n        const hits: ({ point: number[], node: Node | null } | null)[] = []\n        if (!physics) return hits\n        const options = { ignore: shooter ?? null, layerMask: this._layerMask(physics) }\n        const pellets = Math.max(1, Math.round(this.pellets))\n        const push = this.impulse / pellets\n        for (let k = 0; k < pellets; k++) {\n            const dir = MathUtils.randomInCone(this._dir, look, spread) as number[]\n            // What the crosshair looks at...\n            const far = [eye[0] + dir[0] * this.range, eye[1] + dir[1] * this.range, eye[2] + dir[2] * this.range]\n            const seen = physics.raycast([eye[0], eye[1], eye[2]], far, options)\n            let hit = seen, way = [dir[0], dir[1], dir[2]]\n            if (!view.firstPerson) {\n                // ...and, in third person, what the bullet meets on its way there from the muzzle (a little past it,\n                // so it meets the surface).\n                const target = seen ? seen.point : far\n                const toTarget = [target[0] - muzzle[0], target[1] - muzzle[1], target[2] - muzzle[2]]\n                const length = Math.hypot(toTarget[0], toTarget[1], toTarget[2])\n                if (length < 1e-3) { hits.push(null); continue }\n                way = [toTarget[0] / length, toTarget[1] / length, toTarget[2] / length]\n                const end = [muzzle[0] + way[0] * (length + 0.05), muzzle[1] + way[1] * (length + 0.05), muzzle[2] + way[2] * (length + 0.05)]\n                hit = physics.raycast(muzzle, end, options)\n                // One tracer a shot: the first pellet's.\n                if (k === 0) this._tracer(muzzle, hit ? hit.point : target)\n            } else if (k === 0) this._tracer(muzzle, seen ? seen.point : far)\n            const record = hit ? { point: [hit.point[0], hit.point[1], hit.point[2]], node: hit.node ?? null } : null\n            hits.push(record)\n            if (k === 0) this.lastHit = record\n            if (!hit) continue\n            this._push(hit, way, push)\n            this._impact(hit)\n        }\n        return hits\n    }\n\n    /** Every layer but `passThroughLayers`, looked up by name once. */\n    private _layerMask(physics: any): number {\n        if (this._mask === null) {\n            let mask = -1\n            for (const name of this.passThroughLayers ?? []) if (name) mask &= ~(physics.layer?.(name) ?? 0)\n            this._mask = mask\n        }\n        return this._mask\n    }\n\n    /**\n     * A dynamic body hit is pushed along the shot, at the point hit (measured from its centre). A character hit (its\n     * capsule, or a limb of a body already reacting) takes the shot with its whole body instead: its reactions, on\n     * the limb the shot meets (`physics.applyHit`), flinch, stagger or fall by how hard it lands.\n     */\n    private _push(hit: any, way: number[], impulse: number): void {\n        const physics = this.scene?.physics as any\n        if (impulse > 0 && physics?.reactionsFor?.(hit.body) && physics.applyHit(hit, way, impulse)) return\n        const body = hit.body\n        if (!body || !body.isDynamic || impulse <= 0) return\n        const origin = body.owner?.worldPosition ?? hit.point\n        const push = Math.min(impulse, this.maxPushSpeed * Math.max(0, body.mass ?? 0))\n        if (push <= 0) return\n        body.wakeUp?.()\n        body.impulse([way[0] * push, way[1] * push, way[2] * push],\n            [hit.point[0] - origin[0], hit.point[1] - origin[1], hit.point[2] - origin[2]])\n    }\n\n    /** Sparks and dust off the surface, and a hole in it: one that moves with what it is on. */\n    private _impact(hit: any): void {\n        const n = hit.normal\n        const at = [hit.point[0] + n[0] * 0.01, hit.point[1] + n[1] * 0.01, hit.point[2] + n[2] * 0.01]\n        const rotation = eulerOntoNormal(n)\n        this._spawn(this.impactTemplate, at, rotation)\n        const hole = this._spawn(this.holeTemplate, at, [rotation[0], rotation[1], Math.random() * 360])\n        if (!hole) return\n        // On a body that moves, the hole goes with it.\n        if (hit.node && hit.body?.isDynamic) hole.reparent(hit.node)\n        this._holes.push(hole)\n        while (this._holes.length > this.maxHoles) {\n            const old = this._holes.shift()!\n            if (old.scene) old.remove({ immediate: true })\n        }\n    }\n\n    /** A streak from the muzzle to where the shot ended (none for a shot too short to see one). */\n    private _tracer(from: number[], to: number[]): void {\n        const d = [to[0] - from[0], to[1] - from[1], to[2] - from[2]]\n        const length = Math.hypot(d[0], d[1], d[2])\n        if (length < 2) return\n        const node: any = this._spawn(this.tracerTemplate, from, eulerAlong(d))\n        if (node) node.tracerLength = length\n    }\n\n    /** The shot's cue, from the nearest `Sounds` group above the gun (the character's). */\n    private _playSound(): void {\n        if (!this.shotSound) return\n        for (let n: Node | null = this.parent; n; n = n.parent) {\n            const group = n.getChildByName('Sounds')[0]\n            if (!group) continue\n            const cue = group.getChildByName(this.shotSound)[0] as any\n            cue?.play?.()\n            return\n        }\n    }\n\n    /** Spawn an effect template, or nothing (and a warning, once) when the scene has none of that name. */\n    private _spawn(template: string, position: number[], rotation: number[]): Node | null {\n        if (!template || this._missing.has(template)) return null\n        const node = (this.scene as any)?.instantiate(template, { position, rotation }) ?? null\n        if (!node) {\n            this._missing.add(template)\n            Logger.warn(`SandboxGun: no \"${template}\" template, so that effect is skipped`, 'Script')\n        }\n        return node\n    }\n}\n\n/** Euler degrees [pitch, yaw, 0] that turn a node's +Z along `d`. */\nfunction eulerAlong(d: ArrayLike<number>): number[] {\n    const aim = MathUtils.aimFromDirection([d[0], d[1], d[2]] as any)\n    return [aim.pitch, aim.yaw, 0]\n}\n\n/** Euler degrees [pitch, yaw, 0] that turn a node's +Y onto `normal` (a decal projects down its -Y). */\nfunction eulerOntoNormal(normal: ArrayLike<number>): number[] {\n    const ny = Math.max(-1, Math.min(1, normal[1]))\n    return [Math.acos(ny) * 180 / Math.PI, Math.atan2(normal[0], normal[2]) * 180 / Math.PI, 0]\n}\n"
+    "019f9aedbd0eba202f55893bf2a6ff66": "import { Logger, MathUtils, Node } from 'cleo'\nimport type { LayerName, TemplateName, TriggerName } from 'cleo'\nimport { attribute, eventDispatch } from 'cleo/decorators'\n\n/** What one shot was, as the gun tells it (`weapon:Shot`). */\nexport interface SandboxShot {\n    gun: Node\n    /** What the first pellet hit (the only one, but for a shotgun), or null: nothing within `range`. */\n    hit: { point: number[], node: Node | null } | null\n    /** Every pellet's hit (a shotgun fires `pellets` of them); null where a pellet hit nothing. */\n    hits: ({ point: number[], node: Node | null } | null)[]\n    /** The kick a pull of the trigger gives (camera pitch up and yaw, degrees, the weapon's own, the camera's shake); null for a shot fired directly. */\n    recoil: { pitch: number, yaw: number, kick: number, shake: number } | null\n}\n\n/** Where a shot is seen from: the third person's weapon in the hands, or the first person's viewmodel. */\nexport interface SandboxShotView {\n    /** Fired in first person: the camera's ray alone, and no flash or sound of the gun's own (the viewmodel's clip has them). */\n    firstPerson: boolean\n    /** Where the tracer starts in first person: the viewmodel's muzzle where it is drawn. */\n    muzzle?: ArrayLike<number> | null\n}\n\n/**\n * A Sandbox gun: the weapon in the hands, in either view. Attach to a weapon's holder (the `Pistol Grip`, `Rifle Grip`\n * and `Shotgun Grip` nodes on the Mannequin's hand), whose child `Muzzle` is the end of its bore. Its numbers are the\n * weapon's (Firing Line's pistol, AK-47 and SAPS-12), set on each holder in the Player template. The character\n * holding it (SandboxPlayer) calls {@link pull} every frame with the trigger and where the crosshair looks; the gun\n * decides when a shot goes, spends a round from its magazine, and returns the recoil for the holder to apply. It\n * keeps its own magazine and reserve (`ammo`, `reserve`), so a weapon put away and taken out again is as it was left;\n * {@link reload} fills the magazine from the reserve. Out of the reserve, it is dry until the scene starts again.\n *\n * A SHOT is a raycast per pellet (a pistol and a rifle fire one; the shotgun `pellets`), each its own way inside the\n * spread's cone. In third person a pellet is two raycasts: from the camera through the crosshair, up to `range`\n * (what the player aims at), then from the muzzle to that point (what the bullet meets on its way: a corner the\n * camera sees past but the gun does not). In first person the camera's alone, as Firing Line fires. Neither meets the\n * shooter's own body, the trigger zones or the layers named in `passThroughLayers` (the stairs' ramps: there to be\n * walked on, not seen).\n *\n * A HIT on a dynamic body pushes it: the shot's `impulse` (shared by its pellets) along the shot at the point it hit\n * (so a crate hit high tips, a ball spins), no more than `maxPushSpeed` of speed at once. Every hit leaves sparks and\n * dust (`impactTemplate`) and a hole (`holeTemplate`), the hole moving with what it is on; the shot draws a tracer\n * (`tracerTemplate`). In third person the gun flashes at its muzzle (`flashTemplate`) and plays its shot (`shotSound`,\n * a cue in the character's `Sounds` group); in first person the viewmodel's fire clip does both. A template the scene\n * does not have is skipped, with a warning once.\n *\n * SPREAD is Firing Line's: a cone round the crosshair, from `hipSpread` to `aimSpread` as the weapon aims, half again\n * moving (2.2 times at a sprint), less crouched, much more in the air, and wider the longer it fires (bloom, up to 1.6\n * times the hip spread, settling at 5 degrees a second). The holder reads {@link spread} for its crosshair.\n *\n * EVERY SHOT is told as the event `weapon:Shot` (a {@link SandboxShot}), dispatched at the gun: it bubbles up to the\n * character holding it, whose `@eventListener('weapon:Shot')` applies the recoil, and then reaches anything listening\n * with `@onEvent('weapon:Shot')` anywhere (a hit marker, a sound, a score).\n */\nexport default class SandboxGunNode extends Node {\n    /** The weapon's name, on the HUD. */\n    @attribute('Weapon')\n    public displayName: string = 'Pistol'\n\n    /** Holding the trigger keeps firing (a rifle); a pistol or the shotgun fires once per pull. */\n    @attribute('Firing')\n    public auto: boolean = false\n\n    @attribute('Firing', { min: 30, max: 1500, step: 1 })\n    public roundsPerMinute: number = 380\n\n    /** Pellets a shot fires, each its own way inside the spread: 1, but for a shotgun. */\n    @attribute('Firing', { min: 1, max: 24, step: 1 })\n    public pellets: number = 1\n\n    /** How far a shot reaches, m. */\n    @attribute('Firing', { min: 5, max: 1000, step: 5 })\n    public range: number = 140\n\n    /**\n     * The push a shot gives a dynamic body, newton-seconds (shared by its pellets): far more than a real bullet's (a\n     * rifle's carries about 4), so a shot crate shoves. No body is sped up by more than `maxPushSpeed` by one hit, so a\n     * ball is not shot away.\n     */\n    @attribute('Firing', { min: 0, max: 500, step: 0.5 })\n    public impulse: number = 14\n\n    @attribute('Firing', { min: 0, max: 50, step: 0.25 })\n    public maxPushSpeed: number = 2.5\n\n    /** Damage a pellet deals at close range (nothing in the Sandbox takes it yet: kept for game modes). */\n    @attribute('Firing', { min: 0, max: 500, step: 1 })\n    public damage: number = 26\n\n    /**\n     * A pull that comes while the gun cannot fire yet (still coming up from the hip, or between two shots) fires as soon\n     * as it can, if that is within this many seconds.\n     */\n    @attribute('Firing', { min: 0, max: 1, step: 0.05 })\n    public pullBuffer: number = 0.35\n\n    /** Rounds a magazine holds, and the rounds carried besides it. */\n    @attribute('Ammunition', { min: 1, max: 200, step: 1 })\n    public magazine: number = 12\n\n    @attribute('Ammunition', { min: 0, max: 2000, step: 1 })\n    public reserveRounds: number = 84\n\n    /** Spread, degrees from the crosshair at most: from the hip, and aimed. */\n    @attribute('Spread', { min: 0, max: 20, step: 0.05 })\n    public hipSpread: number = 1.6\n\n    @attribute('Spread', { min: 0, max: 20, step: 0.05 })\n    public aimSpread: number = 0.25\n\n    /** The camera's kick per shot, degrees: up, and up to this either way; and how hard the camera shakes (0..1). */\n    @attribute('Recoil', { min: 0, max: 20, step: 0.05 })\n    public recoilPitch: number = 1.5\n\n    @attribute('Recoil', { min: 0, max: 10, step: 0.05 })\n    public recoilYaw: number = 0.45\n\n    @attribute('Recoil', { min: 0, max: 1, step: 0.01 })\n    public shake: number = 0.04\n\n    /** The weapon's own kick per shot, degrees up, carried on `weapon:Shot` for listeners (the Sandbox's body takes `fireTrigger`'s clip instead). */\n    @attribute('Recoil', { min: 0, max: 30, step: 0.5 })\n    public kick: number = 7\n\n    /** Seconds a reload and the weapon coming into the hands take where no clip says (third person). */\n    @attribute('Timing', { min: 0.1, max: 10, step: 0.05 })\n    public reloadSeconds: number = 2.2\n\n    @attribute('Timing', { min: 0.1, max: 5, step: 0.05 })\n    public equipSeconds: number = 1.2\n\n    /** First person, aimed: the field of view (degrees), the share of the walk it moves at, and whether its viewmodel has aim clips. */\n    @attribute('First Person', { min: 10, max: 120, step: 1 })\n    public aimFov: number = 62\n\n    @attribute('First Person', { min: 0.1, max: 1, step: 0.05 })\n    public aimMove: number = 0.7\n\n    @attribute('First Person')\n    public aimClips: boolean = true\n\n    /** First person, aimed without aim clips: how far the viewmodel comes in to the sights (m: left, up, forward). */\n    @attribute('First Person')\n    public aimOffset: number[] = [0, 0.012, 0]\n\n    /** Collision layers a shot passes through, by name. */\n    @attribute('Hits')\n    public passThroughLayers: LayerName[] = ['Stair Ramp']\n\n    /** Bullet holes this gun keeps; the oldest goes when there are more. */\n    @attribute('Hits', { min: 0, max: 500, step: 1 })\n    public maxHoles: number = 60\n\n    @attribute('Effects')\n    public flashTemplate: TemplateName = 'Muzzle Flash' as TemplateName\n\n    @attribute('Effects')\n    public impactTemplate: TemplateName = 'Bullet Impact' as TemplateName\n\n    @attribute('Effects')\n    public holeTemplate: TemplateName = 'Bullet Hole' as TemplateName\n\n    @attribute('Effects')\n    public tracerTemplate: TemplateName = 'Tracer' as TemplateName\n\n    /** The shot's cue in the holder's `Sounds` group (third person; in first person the fire clip plays it). */\n    @attribute('Effects')\n    public shotSound: string = 'ShotPistol'\n\n    /** The holder's body recoil, an animator trigger (the Recoil layer's kick of this weapon), raised on every shot. */\n    @attribute('Effects')\n    public fireTrigger: TriggerName = '' as TriggerName\n\n    /** Rounds in the magazine, and in the reserve. */\n    public ammo: number = 12\n    public reserve: number = 84\n    /** Shots fired, ever, and what the last one hit (null: nothing within `range`). */\n    public shots: number = 0\n    public lastHit: { point: number[], node: Node | null } | null = null\n    /** The last pull found the magazine empty. */\n    public dry: boolean = false\n\n    /** Seconds to the next shot the rate allows (below 0: the shot is late by that much, and the next comes as early). */\n    private _cooldown: number = 0\n    private _held: boolean = false\n    /** Seconds a pull that could not fire yet still waits to. */\n    private _queued: number = 0\n    private _bloom: number = 0\n    private _mask: number | null = null\n    private _holes: Node[] = []\n    private _missing: Set<string> = new Set()\n    private readonly _dir: number[] = [0, 0, 0]\n\n    onStart() {\n        this.ammo = this.magazine\n        this.reserve = this.reserveRounds\n    }\n\n    onUpdate(delta: number) {\n        this._cooldown -= delta\n        this._queued = Math.max(0, this._queued - delta)\n        this._bloom = Math.max(0, this._bloom - 5 * delta)\n    }\n\n    /**\n     * The spread now, degrees: `aim` 0 from the hip to 1 aimed, and whether the holder is moving, sprinting,\n     * crouching and on the ground.\n     */\n    public spread(aim: number, moving: boolean, sprinting = false, crouched = false, grounded = true): number {\n        const a = Math.max(0, Math.min(1, aim))\n        const base = this.hipSpread + (this.aimSpread - this.hipSpread) * a\n        return base * (moving ? (sprinting ? 2.2 : 1.5) : 1) * (crouched ? 0.7 : 1) * (grounded ? 1 : 2.5) + this._bloom * (1 - a * 0.6)\n    }\n\n    /** Whether a reload would put anything in the magazine. */\n    public get canReload(): boolean {\n        return this.ammo < this.magazine && this.reserve > 0\n    }\n\n    /** Fill the magazine from the reserve; returns the rounds moved. */\n    public reload(): number {\n        const take = Math.min(this.magazine - this.ammo, this.reserve)\n        this.ammo += take\n        this.reserve -= take\n        return take\n    }\n\n    /**\n     * The trigger, every frame: `held` whether it is pulled, `ready` whether the weapon is up to fire, `eye` and\n     * `look` the camera's position and the way the crosshair looks (unit), `spread` the cone (degrees), `shooter` the\n     * body the shots never meet, `view` where it is seen from. Fires when the trigger asks, the gun is ready and the\n     * magazine holds a round; returns the recoil of the shot, or null when it did not fire (`dry` says whether that\n     * was an empty magazine).\n     */\n    public pull(held: boolean, ready: boolean, eye: ArrayLike<number>, look: ArrayLike<number>, spread: number, shooter: unknown, view: SandboxShotView)\n        : SandboxShot['recoil'] {\n        // A pull (the trigger going down) waits `pullBuffer` for the gun to be able to fire; an automatic fires while held.\n        const pulled = held && !this._held\n        if (pulled) this._queued = this.pullBuffer\n        this._held = held\n        this.dry = false\n        const wants = this.auto ? held : this._queued > 0\n        if (!wants || !ready) { this._cooldown = Math.max(0, this._cooldown); return null }\n        if (this._cooldown > 0) return null\n        if (this.ammo <= 0) { this.dry = pulled || this.auto; this._queued = 0; return null }\n        // The rate kept on average, whatever the frame rate: a shot late by part of a frame brings the next one forward.\n        const interval = 60 / Math.max(1, this.roundsPerMinute)\n        this._cooldown = Math.max(this._cooldown, -interval) + interval\n        this._queued = 0\n        this.ammo--\n        const recoil = { pitch: this.recoilPitch, yaw: (Math.random() * 2 - 1) * this.recoilYaw, kick: this.kick, shake: this.shake }\n        this.fire(eye, look, spread, shooter, recoil, view)\n        this._bloom = Math.min(this.hipSpread * 1.6, this._bloom + this.hipSpread * 0.12)\n        return recoil\n    }\n\n    /**\n     * One shot from the camera at `eye` along `look`, `spread` degrees round it at most, passing `shooter`'s body:\n     * a raycast (or two) per pellet, the push, the effects, and the `weapon:Shot` event (with `recoil`, when a pull\n     * fired it). Spends no round. Returns what the first pellet hit, or null.\n     */\n    public fire(eye: ArrayLike<number>, look: ArrayLike<number>, spread: number, shooter?: unknown,\n        recoil: SandboxShot['recoil'] = null, view: SandboxShotView = { firstPerson: false }): { point: number[], node: Node | null } | null {\n        const hits = this._shoot(eye, look, spread, shooter, view)\n        this._told({ gun: this, hit: hits[0] ?? null, hits, recoil })\n        return hits[0] ?? null\n    }\n\n    /** Tell the shot: what this returns is the `weapon:Shot` event, dispatched here and bubbling to the holder. */\n    @eventDispatch('weapon:Shot')\n    private _told(shot: SandboxShot): SandboxShot {\n        return shot\n    }\n\n    /** The shot itself: its pellets' raycasts, the pushes and the effects. */\n    private _shoot(eye: ArrayLike<number>, look: ArrayLike<number>, spread: number, shooter: unknown, view: SandboxShotView) {\n        const physics = this.scene?.physics as any\n        this.shots++\n        const muzzleNode = this.getChildByName('Muzzle')[0] ?? this\n        muzzleNode.updateTransforms(muzzleNode.parent ? muzzleNode.parent.worldTransform : null)\n        const m = view.firstPerson && view.muzzle ? view.muzzle : muzzleNode.worldPosition\n        const muzzle = [m[0], m[1], m[2]]\n        if (!view.firstPerson) {\n            const f = muzzleNode.worldForward\n            this._spawn(this.flashTemplate, muzzle, eulerAlong([f[0], f[1], f[2]]))\n            this._playSound()\n        }\n        this.lastHit = null\n        const hits: ({ point: number[], node: Node | null } | null)[] = []\n        if (!physics) return hits\n        const options = { ignore: shooter ?? null, layerMask: this._layerMask(physics) }\n        const pellets = Math.max(1, Math.round(this.pellets))\n        const push = this.impulse / pellets\n        for (let k = 0; k < pellets; k++) {\n            const dir = MathUtils.randomInCone(this._dir, look, spread) as number[]\n            // What the crosshair looks at...\n            const far = [eye[0] + dir[0] * this.range, eye[1] + dir[1] * this.range, eye[2] + dir[2] * this.range]\n            const seen = physics.raycast([eye[0], eye[1], eye[2]], far, options)\n            let hit = seen, way = [dir[0], dir[1], dir[2]]\n            if (!view.firstPerson) {\n                // ...and, in third person, what the bullet meets on its way there from the muzzle (a little past it,\n                // so it meets the surface).\n                const target = seen ? seen.point : far\n                const toTarget = [target[0] - muzzle[0], target[1] - muzzle[1], target[2] - muzzle[2]]\n                const length = Math.hypot(toTarget[0], toTarget[1], toTarget[2])\n                if (length < 1e-3) { hits.push(null); continue }\n                way = [toTarget[0] / length, toTarget[1] / length, toTarget[2] / length]\n                const end = [muzzle[0] + way[0] * (length + 0.05), muzzle[1] + way[1] * (length + 0.05), muzzle[2] + way[2] * (length + 0.05)]\n                hit = physics.raycast(muzzle, end, options)\n                // One tracer a shot: the first pellet's.\n                if (k === 0) this._tracer(muzzle, hit ? hit.point : target)\n            } else if (k === 0) this._tracer(muzzle, seen ? seen.point : far)\n            const record = hit ? { point: [hit.point[0], hit.point[1], hit.point[2]], node: hit.node ?? null } : null\n            hits.push(record)\n            if (k === 0) this.lastHit = record\n            if (!hit) continue\n            this._push(hit, way, push)\n            this._impact(hit)\n        }\n        return hits\n    }\n\n    /** Every layer but `passThroughLayers`, looked up by name once. */\n    private _layerMask(physics: any): number {\n        if (this._mask === null) {\n            let mask = -1\n            for (const name of this.passThroughLayers ?? []) if (name) mask &= ~(physics.layer?.(name) ?? 0)\n            this._mask = mask\n        }\n        return this._mask\n    }\n\n    /**\n     * A dynamic body hit is pushed along the shot, at the point hit (measured from its centre). A character hit (its\n     * capsule, or a limb of a body already reacting) takes the shot with its whole body instead: its reactions, on\n     * the limb the shot meets (`physics.applyHit`), flinch, stumble, stagger or fall by how hard it lands. Not one\n     * that shots do not move (`reactsToShots` false: the player): neither its reactions nor its limbs are pushed.\n     */\n    private _push(hit: any, way: number[], impulse: number): void {\n        const physics = this.scene?.physics as any\n        if (this._unmoved(physics, hit)) return\n        if (impulse > 0 && physics?.reactionsFor?.(hit.body) && physics.applyHit(hit, way, impulse)) return\n        const body = hit.body\n        if (!body || !body.isDynamic || impulse <= 0) return\n        const origin = body.owner?.worldPosition ?? hit.point\n        const push = Math.min(impulse, this.maxPushSpeed * Math.max(0, body.mass ?? 0))\n        if (push <= 0) return\n        body.wakeUp?.()\n        body.impulse([way[0] * push, way[1] * push, way[2] * push],\n            [hit.point[0] - origin[0], hit.point[1] - origin[1], hit.point[2] - origin[2]])\n    }\n\n    /** Sparks and dust off the surface, and a hole in it: one that moves with what it is on. */\n    private _impact(hit: any): void {\n        const n = hit.normal\n        const at = [hit.point[0] + n[0] * 0.01, hit.point[1] + n[1] * 0.01, hit.point[2] + n[2] * 0.01]\n        const rotation = eulerOntoNormal(n)\n        this._spawn(this.impactTemplate, at, rotation)\n        const hole = this._spawn(this.holeTemplate, at, [rotation[0], rotation[1], Math.random() * 360])\n        if (!hole) return\n        // On a body that moves, the hole goes with it.\n        if (hit.node && hit.body?.isDynamic) hole.reparent(hit.node)\n        this._holes.push(hole)\n        while (this._holes.length > this.maxHoles) {\n            const old = this._holes.shift()!\n            if (old.scene) old.remove({ immediate: true })\n        }\n    }\n\n    /** A streak from the muzzle to where the shot ended (none for a shot too short to see one). */\n    private _tracer(from: number[], to: number[]): void {\n        const d = [to[0] - from[0], to[1] - from[1], to[2] - from[2]]\n        const length = Math.hypot(d[0], d[1], d[2])\n        if (length < 2) return\n        const node: any = this._spawn(this.tracerTemplate, from, eulerAlong(d))\n        if (node) node.tracerLength = length\n    }\n\n    /** The shot's cue, from the nearest `Sounds` group above the gun (the character's). */\n    private _playSound(): void {\n        if (!this.shotSound) return\n        for (let n: Node | null = this.parent; n; n = n.parent) {\n            const group = n.getChildByName('Sounds')[0]\n            if (!group) continue\n            const cue = group.getChildByName(this.shotSound)[0] as any\n            cue?.play?.()\n            return\n        }\n    }\n\n    /** Spawn an effect template, or nothing (and a warning, once) when the scene has none of that name. */\n    /** Whether `hit` struck a character that shots do not move (its capsule, or a limb of its reacting body). */\n    private _unmoved(physics: any, hit: any): boolean {\n        const reactions = physics?.reactionsFor?.(hit.body) ?? (hit.node ? physics?.reactionsFor?.(hit.node) : null)\n        let character: any = hit.node?.character ?? null\n        for (let n: Node | null = reactions?.node ?? null; n && !character; n = n.parent) if (n.nodeType === 'character') character = n\n        return !!character && character.reactsToShots === false\n    }\n\n    private _spawn(template: string, position: number[], rotation: number[]): Node | null {\n        if (!template || this._missing.has(template)) return null\n        const node = (this.scene as any)?.instantiate(template, { position, rotation }) ?? null\n        if (!node) {\n            this._missing.add(template)\n            Logger.warn(`SandboxGun: no \"${template}\" template, so that effect is skipped`, 'Script')\n        }\n        return node\n    }\n}\n\n/** Euler degrees [pitch, yaw, 0] that turn a node's +Z along `d`. */\nfunction eulerAlong(d: ArrayLike<number>): number[] {\n    const aim = MathUtils.aimFromDirection([d[0], d[1], d[2]] as any)\n    return [aim.pitch, aim.yaw, 0]\n}\n\n/** Euler degrees [pitch, yaw, 0] that turn a node's +Y onto `normal` (a decal projects down its -Y). */\nfunction eulerOntoNormal(normal: ArrayLike<number>): number[] {\n    const ny = Math.max(-1, Math.min(1, normal[1]))\n    return [Math.acos(ny) * 180 / Math.PI, Math.atan2(normal[0], normal[2]) * 180 / Math.PI, 0]\n}\n",
+    "ac8b780e382153d9f6ee8760692f6003": "import { Logger, MathUtils, Node } from 'cleo'\nimport type { LayerName, TemplateName, TriggerName } from 'cleo'\nimport { attribute, eventDispatch } from 'cleo/decorators'\n\n/** What one shot was, as the gun tells it (`weapon:Shot`). */\nexport interface SandboxShot {\n    gun: Node\n    /** What the first pellet hit (the only one, but for a shotgun), or null: nothing within `range`. */\n    hit: { point: number[], node: Node | null } | null\n    /** Every pellet's hit (a shotgun fires `pellets` of them); null where a pellet hit nothing. */\n    hits: ({ point: number[], node: Node | null } | null)[]\n    /** The kick a pull of the trigger gives (camera pitch up and yaw, degrees, the weapon's own, the camera's shake); null for a shot fired directly. */\n    recoil: { pitch: number, yaw: number, kick: number, shake: number } | null\n}\n\n/** Where a shot is seen from: the third person's weapon in the hands, or the first person's viewmodel. */\nexport interface SandboxShotView {\n    /** Fired in first person: the camera's ray alone, and no flash or sound of the gun's own (the viewmodel's clip has them). */\n    firstPerson: boolean\n    /** Where the tracer starts in first person: the viewmodel's muzzle where it is drawn. */\n    muzzle?: ArrayLike<number> | null\n}\n\n/**\n * A Sandbox gun: the weapon in the hands, in either view. Attach to a weapon's holder (the `Pistol Grip`, `Rifle Grip`\n * and `Shotgun Grip` nodes on the Mannequin's hand), whose child `Muzzle` is the end of its bore. Its numbers are the\n * weapon's (Firing Line's pistol, AK-47 and SAPS-12), set on each holder in the Player template. The character\n * holding it (SandboxPlayer) calls {@link pull} every frame with the trigger and where the crosshair looks; the gun\n * decides when a shot goes, spends a round from its magazine, and returns the recoil for the holder to apply. It\n * keeps its own magazine and reserve (`ammo`, `reserve`), so a weapon put away and taken out again is as it was left;\n * {@link reload} fills the magazine from the reserve. Out of the reserve, it is dry until the scene starts again.\n *\n * A SHOT is a raycast per pellet (a pistol and a rifle fire one; the shotgun `pellets`), each its own way inside the\n * spread's cone. In third person a pellet is two raycasts: from the camera through the crosshair, up to `range`\n * (what the player aims at), then from the muzzle to that point (what the bullet meets on its way: a corner the\n * camera sees past but the gun does not). In first person the camera's alone, as Firing Line fires. Neither meets the\n * shooter's own body, the trigger zones or the layers named in `passThroughLayers` (the stairs' ramps: there to be\n * walked on, not seen).\n *\n * A HIT on a dynamic body pushes it: the shot's `impulse` (shared by its pellets) along the shot at the point it hit\n * (so a crate hit high tips, a ball spins), no more than `maxPushSpeed` of speed at once. Every hit leaves sparks and\n * dust (`impactTemplate`) and a hole (`holeTemplate`), the hole moving with what it is on; the shot draws a tracer\n * (`tracerTemplate`). In third person the gun flashes at its muzzle (`flashTemplate`) and plays its shot (`shotSound`,\n * a cue in the character's `Sounds` group); in first person the viewmodel's fire clip does both. A template the scene\n * does not have is skipped, with a warning once.\n *\n * SPREAD is Firing Line's: a cone round the crosshair, from `hipSpread` to `aimSpread` as the weapon aims, half again\n * moving (2.2 times at a sprint), less crouched, much more in the air, and wider the longer it fires (bloom, up to 1.6\n * times the hip spread, settling at 5 degrees a second). The holder reads {@link spread} for its crosshair.\n *\n * EVERY SHOT is told as the event `weapon:Shot` (a {@link SandboxShot}), dispatched at the gun: it bubbles up to the\n * character holding it, whose `@eventListener('weapon:Shot')` applies the recoil, and then reaches anything listening\n * with `@onEvent('weapon:Shot')` anywhere (a hit marker, a sound, a score).\n */\nexport default class SandboxGunNode extends Node {\n    /** The weapon's name, on the HUD. */\n    @attribute('Weapon')\n    public displayName: string = 'Pistol'\n\n    /** Holding the trigger keeps firing (a rifle); a pistol or the shotgun fires once per pull. */\n    @attribute('Firing')\n    public auto: boolean = false\n\n    @attribute('Firing', { min: 30, max: 1500, step: 1 })\n    public roundsPerMinute: number = 380\n\n    /** Pellets a shot fires, each its own way inside the spread: 1, but for a shotgun. */\n    @attribute('Firing', { min: 1, max: 24, step: 1 })\n    public pellets: number = 1\n\n    /** How far a shot reaches, m. */\n    @attribute('Firing', { min: 5, max: 1000, step: 5 })\n    public range: number = 140\n\n    /**\n     * The push a shot gives a dynamic body, newton-seconds (shared by its pellets): far more than a real bullet's (a\n     * rifle's carries about 4), so a shot crate shoves. No body is sped up by more than `maxPushSpeed` by one hit, so a\n     * ball is not shot away.\n     */\n    @attribute('Firing', { min: 0, max: 500, step: 0.5 })\n    public impulse: number = 14\n\n    @attribute('Firing', { min: 0, max: 50, step: 0.25 })\n    public maxPushSpeed: number = 2.5\n\n    /** Damage a pellet deals at close range (nothing in the Sandbox takes it yet: kept for game modes). */\n    @attribute('Firing', { min: 0, max: 500, step: 1 })\n    public damage: number = 26\n\n    /**\n     * A pull that comes while the gun cannot fire yet (still coming up from the hip, or between two shots) fires as soon\n     * as it can, if that is within this many seconds.\n     */\n    @attribute('Firing', { min: 0, max: 1, step: 0.05 })\n    public pullBuffer: number = 0.35\n\n    /** Rounds a magazine holds, and the rounds carried besides it. */\n    @attribute('Ammunition', { min: 1, max: 200, step: 1 })\n    public magazine: number = 12\n\n    @attribute('Ammunition', { min: 0, max: 2000, step: 1 })\n    public reserveRounds: number = 84\n\n    /** Spread, degrees from the crosshair at most: from the hip, and aimed. */\n    @attribute('Spread', { min: 0, max: 20, step: 0.05 })\n    public hipSpread: number = 1.6\n\n    @attribute('Spread', { min: 0, max: 20, step: 0.05 })\n    public aimSpread: number = 0.25\n\n    /** The camera's kick per shot, degrees: up, and up to this either way; and how hard the camera shakes (0..1). */\n    @attribute('Recoil', { min: 0, max: 20, step: 0.05 })\n    public recoilPitch: number = 1.5\n\n    @attribute('Recoil', { min: 0, max: 10, step: 0.05 })\n    public recoilYaw: number = 0.45\n\n    @attribute('Recoil', { min: 0, max: 1, step: 0.01 })\n    public shake: number = 0.04\n\n    /** The weapon's own kick per shot, degrees up, carried on `weapon:Shot` for listeners (the Sandbox's body takes `fireTrigger`'s clip instead). */\n    @attribute('Recoil', { min: 0, max: 30, step: 0.5 })\n    public kick: number = 7\n\n    /** Seconds a reload and the weapon coming into the hands take where no clip says (third person). */\n    @attribute('Timing', { min: 0.1, max: 10, step: 0.05 })\n    public reloadSeconds: number = 2.2\n\n    @attribute('Timing', { min: 0.1, max: 5, step: 0.05 })\n    public equipSeconds: number = 1.2\n\n    /** First person, aimed: the field of view (degrees), the share of the walk it moves at, and whether its viewmodel has aim clips. */\n    @attribute('First Person', { min: 10, max: 120, step: 1 })\n    public aimFov: number = 62\n\n    @attribute('First Person', { min: 0.1, max: 1, step: 0.05 })\n    public aimMove: number = 0.7\n\n    @attribute('First Person')\n    public aimClips: boolean = true\n\n    /** First person, aimed without aim clips: how far the viewmodel comes in to the sights (m: left, up, forward). */\n    @attribute('First Person')\n    public aimOffset: number[] = [0, 0.012, 0]\n\n    /** Collision layers a shot passes through, by name. */\n    @attribute('Hits')\n    public passThroughLayers: LayerName[] = ['Stair Ramp']\n\n    /** Bullet holes this gun keeps; the oldest goes when there are more. */\n    @attribute('Hits', { min: 0, max: 500, step: 1 })\n    public maxHoles: number = 60\n\n    @attribute('Effects')\n    public flashTemplate: TemplateName = 'Muzzle Flash' as TemplateName\n\n    @attribute('Effects')\n    public impactTemplate: TemplateName = 'Bullet Impact' as TemplateName\n\n    @attribute('Effects')\n    public holeTemplate: TemplateName = 'Bullet Hole' as TemplateName\n\n    @attribute('Effects')\n    public tracerTemplate: TemplateName = 'Tracer' as TemplateName\n\n    /** The shot's cue in the holder's `Sounds` group (third person; in first person the fire clip plays it). */\n    @attribute('Effects')\n    public shotSound: string = 'ShotPistol'\n\n    /** The holder's body recoil, an animator trigger (the Recoil layer's kick of this weapon), raised on every shot. */\n    @attribute('Effects')\n    public fireTrigger: TriggerName = '' as TriggerName\n\n    /** Rounds in the magazine, and in the reserve. */\n    public ammo: number = 12\n    public reserve: number = 84\n    /** Shots fired, ever, and what the last one hit (null: nothing within `range`). */\n    public shots: number = 0\n    public lastHit: { point: number[], node: Node | null } | null = null\n    /** The last pull found the magazine empty. */\n    public dry: boolean = false\n\n    /** Seconds to the next shot the rate allows (below 0: the shot is late by that much, and the next comes as early). */\n    private _cooldown: number = 0\n    private _held: boolean = false\n    /** Seconds a pull that could not fire yet still waits to. */\n    private _queued: number = 0\n    private _bloom: number = 0\n    private _mask: number | null = null\n    private _holes: Node[] = []\n    private _missing: Set<string> = new Set()\n    private readonly _dir: number[] = [0, 0, 0]\n\n    onStart() {\n        this.ammo = this.magazine\n        this.reserve = this.reserveRounds\n    }\n\n    onUpdate(delta: number) {\n        this._cooldown -= delta\n        this._queued = Math.max(0, this._queued - delta)\n        this._bloom = Math.max(0, this._bloom - 5 * delta)\n    }\n\n    /**\n     * The spread now, degrees: `aim` 0 from the hip to 1 aimed, and whether the holder is moving, sprinting,\n     * crouching and on the ground.\n     */\n    public spread(aim: number, moving: boolean, sprinting = false, crouched = false, grounded = true): number {\n        const a = Math.max(0, Math.min(1, aim))\n        const base = this.hipSpread + (this.aimSpread - this.hipSpread) * a\n        return base * (moving ? (sprinting ? 2.2 : 1.5) : 1) * (crouched ? 0.7 : 1) * (grounded ? 1 : 2.5) + this._bloom * (1 - a * 0.6)\n    }\n\n    /** Whether a reload would put anything in the magazine. */\n    public get canReload(): boolean {\n        return this.ammo < this.magazine && this.reserve > 0\n    }\n\n    /** Fill the magazine from the reserve; returns the rounds moved. */\n    public reload(): number {\n        const take = Math.min(this.magazine - this.ammo, this.reserve)\n        this.ammo += take\n        this.reserve -= take\n        return take\n    }\n\n    /**\n     * The trigger, every frame: `held` whether it is pulled, `ready` whether the weapon is up to fire, `eye` and\n     * `look` the camera's position and the way the crosshair looks (unit), `spread` the cone (degrees), `shooter` the\n     * body the shots never meet, `view` where it is seen from. Fires when the trigger asks, the gun is ready and the\n     * magazine holds a round; returns the recoil of the shot, or null when it did not fire (`dry` says whether that\n     * was an empty magazine).\n     */\n    public pull(held: boolean, ready: boolean, eye: ArrayLike<number>, look: ArrayLike<number>, spread: number, shooter: unknown, view: SandboxShotView)\n        : SandboxShot['recoil'] {\n        // A pull (the trigger going down) waits `pullBuffer` for the gun to be able to fire; an automatic fires while held.\n        const pulled = held && !this._held\n        if (pulled) this._queued = this.pullBuffer\n        this._held = held\n        this.dry = false\n        const wants = this.auto ? held : this._queued > 0\n        if (!wants || !ready) { this._cooldown = Math.max(0, this._cooldown); return null }\n        if (this._cooldown > 0) return null\n        if (this.ammo <= 0) { this.dry = pulled || this.auto; this._queued = 0; return null }\n        // The rate kept on average, whatever the frame rate: a shot late by part of a frame brings the next one forward.\n        const interval = 60 / Math.max(1, this.roundsPerMinute)\n        this._cooldown = Math.max(this._cooldown, -interval) + interval\n        this._queued = 0\n        this.ammo--\n        const recoil = { pitch: this.recoilPitch, yaw: (Math.random() * 2 - 1) * this.recoilYaw, kick: this.kick, shake: this.shake }\n        this.fire(eye, look, spread, shooter, recoil, view)\n        this._bloom = Math.min(this.hipSpread * 1.6, this._bloom + this.hipSpread * 0.12)\n        return recoil\n    }\n\n    /**\n     * One shot from the camera at `eye` along `look`, `spread` degrees round it at most, passing `shooter`'s body:\n     * a raycast (or two) per pellet, the push, the effects, and the `weapon:Shot` event (with `recoil`, when a pull\n     * fired it). Spends no round. Returns what the first pellet hit, or null.\n     */\n    public fire(eye: ArrayLike<number>, look: ArrayLike<number>, spread: number, shooter?: unknown,\n        recoil: SandboxShot['recoil'] = null, view: SandboxShotView = { firstPerson: false }): { point: number[], node: Node | null } | null {\n        const hits = this._shoot(eye, look, spread, shooter, view)\n        this._told({ gun: this, hit: hits[0] ?? null, hits, recoil })\n        return hits[0] ?? null\n    }\n\n    /** Tell the shot: what this returns is the `weapon:Shot` event, dispatched here and bubbling to the holder. */\n    @eventDispatch('weapon:Shot')\n    private _told(shot: SandboxShot): SandboxShot {\n        return shot\n    }\n\n    /** The shot itself: its pellets' raycasts, the pushes and the effects. */\n    private _shoot(eye: ArrayLike<number>, look: ArrayLike<number>, spread: number, shooter: unknown, view: SandboxShotView) {\n        const physics = this.scene?.physics as any\n        this.shots++\n        const muzzleNode = this.getChildByName('Muzzle')[0] ?? this\n        muzzleNode.updateTransforms(muzzleNode.parent ? muzzleNode.parent.worldTransform : null)\n        const m = view.firstPerson && view.muzzle ? view.muzzle : muzzleNode.worldPosition\n        const muzzle = [m[0], m[1], m[2]]\n        if (!view.firstPerson) {\n            const f = muzzleNode.worldForward\n            this._spawn(this.flashTemplate, muzzle, eulerAlong([f[0], f[1], f[2]]))\n            this._playSound()\n        }\n        this.lastHit = null\n        const hits: ({ point: number[], node: Node | null } | null)[] = []\n        if (!physics) return hits\n        const options = { ignore: shooter ?? null, layerMask: this._layerMask(physics) }\n        const pellets = Math.max(1, Math.round(this.pellets))\n        const push = this.impulse / pellets\n        for (let k = 0; k < pellets; k++) {\n            const dir = MathUtils.randomInCone(this._dir, look, spread) as number[]\n            // What the crosshair looks at...\n            const far = [eye[0] + dir[0] * this.range, eye[1] + dir[1] * this.range, eye[2] + dir[2] * this.range]\n            const seen = physics.raycast([eye[0], eye[1], eye[2]], far, options)\n            let hit = seen, way = [dir[0], dir[1], dir[2]]\n            if (!view.firstPerson) {\n                // ...and, in third person, what the bullet meets on its way there from the muzzle (a little past it,\n                // so it meets the surface).\n                const target = seen ? seen.point : far\n                const toTarget = [target[0] - muzzle[0], target[1] - muzzle[1], target[2] - muzzle[2]]\n                const length = Math.hypot(toTarget[0], toTarget[1], toTarget[2])\n                if (length < 1e-3) { hits.push(null); continue }\n                way = [toTarget[0] / length, toTarget[1] / length, toTarget[2] / length]\n                const end = [muzzle[0] + way[0] * (length + 0.05), muzzle[1] + way[1] * (length + 0.05), muzzle[2] + way[2] * (length + 0.05)]\n                hit = physics.raycast(muzzle, end, options)\n                // One tracer a shot: the first pellet's.\n                if (k === 0) this._tracer(muzzle, hit ? hit.point : target)\n            } else if (k === 0) this._tracer(muzzle, seen ? seen.point : far)\n            const record = hit ? { point: [hit.point[0], hit.point[1], hit.point[2]], node: hit.node ?? null } : null\n            hits.push(record)\n            if (k === 0) this.lastHit = record\n            if (!hit) continue\n            this._push(hit, way, push)\n            this._impact(hit)\n        }\n        return hits\n    }\n\n    /** Every layer but `passThroughLayers`, looked up by name once. */\n    private _layerMask(physics: any): number {\n        if (this._mask === null) {\n            let mask = -1\n            for (const name of this.passThroughLayers ?? []) if (name) mask &= ~(physics.layer?.(name) ?? 0)\n            this._mask = mask\n        }\n        return this._mask\n    }\n\n    /**\n     * A dynamic body hit is pushed along the shot, at the point hit (measured from its centre). A character hit (its\n     * capsule, or a limb of a body already reacting) takes the shot with its whole body instead: its reactions, on\n     * the limb the shot meets (`physics.applyHit`), flinch, stumble, stagger or fall by how hard it lands. Not one\n     * that shots do not move (`reactsToShots` false: the player): neither its reactions nor its limbs are pushed.\n     */\n    private _push(hit: any, way: number[], impulse: number): void {\n        const physics = this.scene?.physics as any\n        if (this._unmoved(physics, hit)) return\n        if (impulse > 0 && physics?.reactionsFor?.(hit.body) && physics.applyHit(hit, way, impulse)) return\n        const body = hit.body\n        if (!body || !body.isDynamic || impulse <= 0) return\n        const origin = body.owner?.worldPosition ?? hit.point\n        const push = Math.min(impulse, this.maxPushSpeed * Math.max(0, body.mass ?? 0))\n        if (push <= 0) return\n        body.wakeUp?.()\n        body.impulse([way[0] * push, way[1] * push, way[2] * push],\n            [hit.point[0] - origin[0], hit.point[1] - origin[1], hit.point[2] - origin[2]])\n    }\n\n    /** Sparks and dust off the surface, and a hole in it: one that moves with what it is on. */\n    private _impact(hit: any): void {\n        const n = hit.normal\n        const at = [hit.point[0] + n[0] * 0.01, hit.point[1] + n[1] * 0.01, hit.point[2] + n[2] * 0.01]\n        const rotation = eulerOntoNormal(n)\n        this._spawn(this.impactTemplate, at, rotation)\n        const hole = this._spawn(this.holeTemplate, at, [rotation[0], rotation[1], Math.random() * 360])\n        if (!hole) return\n        // On a body that moves, the hole goes with it.\n        if (hit.node && hit.body?.isDynamic) hole.reparent(hit.node)\n        this._holes.push(hole)\n        while (this._holes.length > this.maxHoles) {\n            const old = this._holes.shift()!\n            if (old.scene) old.remove({ immediate: true })\n        }\n    }\n\n    /** A streak from the muzzle to where the shot ended (none for a shot too short to see one). */\n    private _tracer(from: number[], to: number[]): void {\n        const d = [to[0] - from[0], to[1] - from[1], to[2] - from[2]]\n        const length = Math.hypot(d[0], d[1], d[2])\n        if (length < 2) return\n        const node: any = this._spawn(this.tracerTemplate, from, eulerAlong(d))\n        if (node) node.tracerLength = length\n    }\n\n    /** The shot's cue, from the nearest `Sounds` group above the gun (the character's). */\n    private _playSound(): void {\n        if (!this.shotSound) return\n        for (let n: Node | null = this.parent; n; n = n.parent) {\n            const group = n.getChildByName('Sounds')[0]\n            if (!group) continue\n            const cue = group.getChildByName(this.shotSound)[0] as any\n            cue?.play?.()\n            return\n        }\n    }\n\n    /** Spawn an effect template, or nothing (and a warning, once) when the scene has none of that name. */\n    /** Whether `hit` struck a character that shots do not move (its capsule, or a limb of its reacting body). */\n    private _unmoved(physics: any, hit: any): boolean {\n        const reactions = physics?.reactionsFor?.(hit.body) ?? (hit.node ? physics?.reactionsFor?.(hit.node) : null)\n        let character: any = hit.node?.character ?? null\n        for (let n: Node | null = reactions?.node ?? null; n && !character; n = n.parent) if (n.nodeType === 'character') character = n\n        return !!character && character.reactsToShots === false\n    }\n\n    private _spawn(template: string, position: number[], rotation: number[]): Node | null {\n        if (!template || this._missing.has(template)) return null\n        const node = (this.scene as any)?.instantiate(template, { position, rotation }) ?? null\n        if (!node) {\n            this._missing.add(template)\n            Logger.warn(`SandboxGun: no \"${template}\" template, so that effect is skipped`, 'Script')\n        }\n        return node\n    }\n}\n\n/** Euler degrees [pitch, yaw, 0] that turn a node's +Z along `d`. */\nfunction eulerAlong(d: ArrayLike<number>): number[] {\n    const aim = MathUtils.aimFromDirection([d[0], d[1], d[2]] as any)\n    return [aim.pitch, aim.yaw, 0]\n}\n\n/** Euler degrees [pitch, yaw, 0] that turn a node's +Y onto `normal` (a decal projects down its -Y). */\nfunction eulerOntoNormal(normal: ArrayLike<number>): number[] {\n    const ny = Math.max(-1, Math.min(1, normal[1]))\n    return [Math.acos(ny) * 180 / Math.PI, Math.atan2(normal[0], normal[2]) * 180 / Math.PI, 0]\n}\n",
+    "197707b2c6dfce2ddd803c7c4f8e6c17": "import { Logger, MathUtils, Node } from 'cleo'\nimport type { LayerName, TemplateName, TriggerName } from 'cleo'\nimport { attribute, eventDispatch } from 'cleo/decorators'\n\n/** What one shot was, as the gun tells it (`weapon:Shot`). */\nexport interface SandboxShot {\n    gun: Node\n    /** What the first pellet hit (the only one, but for a shotgun), or null: nothing within `range`. */\n    hit: { point: number[], node: Node | null } | null\n    /** Every pellet's hit (a shotgun fires `pellets` of them); null where a pellet hit nothing. */\n    hits: ({ point: number[], node: Node | null } | null)[]\n    /** The kick a pull of the trigger gives (camera pitch up and yaw, degrees, the weapon's own, the camera's shake); null for a shot fired directly. */\n    recoil: { pitch: number, yaw: number, kick: number, shake: number } | null\n}\n\n/** Where a shot is seen from: the third person's weapon in the hands, or the first person's viewmodel. */\nexport interface SandboxShotView {\n    /** Fired in first person: the camera's ray alone, and no flash or sound of the gun's own (the viewmodel's clip has them). */\n    firstPerson: boolean\n    /** Where the tracer starts in first person: the viewmodel's muzzle where it is drawn. */\n    muzzle?: ArrayLike<number> | null\n}\n\n/**\n * A Sandbox gun: the weapon in the hands, in either view. Attach to a weapon's holder (the `Pistol Grip`, `Rifle Grip`\n * and `Shotgun Grip` nodes on the Mannequin's hand), whose child `Muzzle` is the end of its bore. Its numbers are the\n * weapon's (Firing Line's pistol, AK-47 and SAPS-12), set on each holder in the Player template. The character\n * holding it (SandboxPlayer) calls {@link pull} every frame with the trigger and where the crosshair looks; the gun\n * decides when a shot goes, spends a round from its magazine, and returns the recoil for the holder to apply. It\n * keeps its own magazine and reserve (`ammo`, `reserve`), so a weapon put away and taken out again is as it was left;\n * {@link reload} fills the magazine from the reserve. Out of the reserve, it is dry until the scene starts again.\n *\n * A SHOT is a raycast per pellet (a pistol and a rifle fire one; the shotgun `pellets`), each its own way inside the\n * spread's cone. In third person a pellet is two raycasts: from the camera through the crosshair, up to `range`\n * (what the player aims at), then from the muzzle to that point (what the bullet meets on its way: a corner the\n * camera sees past but the gun does not). In first person the camera's alone, as Firing Line fires. Neither meets the\n * shooter's own body, the trigger zones or the layers named in `passThroughLayers` (the stairs' ramps: there to be\n * walked on, not seen).\n *\n * A HIT on a dynamic body pushes it: the shot's `impulse` (shared by its pellets) along the shot at the point it hit\n * (so a crate hit high tips, a ball spins), no more than `maxPushSpeed` of speed at once. Every hit leaves sparks and\n * dust (`impactTemplate`) and a hole (`holeTemplate`), the hole moving with what it is on; the shot draws a tracer\n * (`tracerTemplate`). In third person the gun flashes at its muzzle (`flashTemplate`) and plays its shot (`shotSound`,\n * a cue in the character's `Sounds` group); in first person the viewmodel's fire clip does both. A template the scene\n * does not have is skipped, with a warning once.\n *\n * SPREAD is Firing Line's: a cone round the crosshair, from `hipSpread` to `aimSpread` as the weapon aims, half again\n * moving (2.2 times at a sprint), less crouched, much more in the air, and wider the longer it fires (bloom, up to 1.6\n * times the hip spread, settling at 5 degrees a second). The holder reads {@link spread} for its crosshair.\n *\n * EVERY SHOT is told as the event `weapon:Shot` (a {@link SandboxShot}), dispatched at the gun: it bubbles up to the\n * character holding it, whose `@eventListener('weapon:Shot')` applies the recoil, and then reaches anything listening\n * with `@onEvent('weapon:Shot')` anywhere (a hit marker, a sound, a score).\n */\nexport default class SandboxGunNode extends Node {\n    /** The weapon's name, on the HUD. */\n    @attribute('Weapon')\n    public displayName: string = 'Pistol'\n\n    /** Holding the trigger keeps firing (a rifle); a pistol or the shotgun fires once per pull. */\n    @attribute('Firing')\n    public auto: boolean = false\n\n    @attribute('Firing', { min: 30, max: 1500, step: 1 })\n    public roundsPerMinute: number = 380\n\n    /** Pellets a shot fires, each its own way inside the spread: 1, but for a shotgun. */\n    @attribute('Firing', { min: 1, max: 24, step: 1 })\n    public pellets: number = 1\n\n    /** How far a shot reaches, m. */\n    @attribute('Firing', { min: 5, max: 1000, step: 5 })\n    public range: number = 140\n\n    /**\n     * The push a shot gives a dynamic body, newton-seconds (shared by its pellets): far more than a real bullet's (a\n     * rifle's carries about 4), so a shot crate shoves. No body is sped up by more than `maxPushSpeed` by one hit, so a\n     * ball is not shot away.\n     */\n    @attribute('Firing', { min: 0, max: 500, step: 0.5 })\n    public impulse: number = 14\n\n    @attribute('Firing', { min: 0, max: 50, step: 0.25 })\n    public maxPushSpeed: number = 2.5\n\n    /** Damage a pellet deals at close range (nothing in the Sandbox takes it yet: kept for game modes). */\n    @attribute('Firing', { min: 0, max: 500, step: 1 })\n    public damage: number = 26\n\n    /**\n     * A pull that comes while the gun cannot fire yet (still coming up from the hip, or between two shots) fires as soon\n     * as it can, if that is within this many seconds.\n     */\n    @attribute('Firing', { min: 0, max: 1, step: 0.05 })\n    public pullBuffer: number = 0.35\n\n    /** Rounds a magazine holds, and the rounds carried besides it. */\n    @attribute('Ammunition', { min: 1, max: 200, step: 1 })\n    public magazine: number = 12\n\n    @attribute('Ammunition', { min: 0, max: 2000, step: 1 })\n    public reserveRounds: number = 84\n\n    /** Spread, degrees from the crosshair at most: from the hip, and aimed. */\n    @attribute('Spread', { min: 0, max: 20, step: 0.05 })\n    public hipSpread: number = 1.6\n\n    @attribute('Spread', { min: 0, max: 20, step: 0.05 })\n    public aimSpread: number = 0.25\n\n    /** The camera's kick per shot, degrees: up, and up to this either way; and how hard the camera shakes (0..1). */\n    @attribute('Recoil', { min: 0, max: 20, step: 0.05 })\n    public recoilPitch: number = 1.5\n\n    @attribute('Recoil', { min: 0, max: 10, step: 0.05 })\n    public recoilYaw: number = 0.45\n\n    @attribute('Recoil', { min: 0, max: 1, step: 0.01 })\n    public shake: number = 0.04\n\n    /** The weapon's own kick per shot, degrees up, carried on `weapon:Shot` for listeners (the Sandbox's body takes `fireTrigger`'s clip instead). */\n    @attribute('Recoil', { min: 0, max: 30, step: 0.5 })\n    public kick: number = 7\n\n    /** Seconds a reload and the weapon coming into the hands take where no clip says (third person). */\n    @attribute('Timing', { min: 0.1, max: 10, step: 0.05 })\n    public reloadSeconds: number = 2.2\n\n    @attribute('Timing', { min: 0.1, max: 5, step: 0.05 })\n    public equipSeconds: number = 1.2\n\n    /** First person, aimed: the field of view (degrees), the share of the walk it moves at, and whether its viewmodel has aim clips. */\n    @attribute('First Person', { min: 10, max: 120, step: 1 })\n    public aimFov: number = 62\n\n    @attribute('First Person', { min: 0.1, max: 1, step: 0.05 })\n    public aimMove: number = 0.7\n\n    @attribute('First Person')\n    public aimClips: boolean = true\n\n    /** First person, aimed without aim clips: how far the viewmodel comes in to the sights (m: left, up, forward). */\n    @attribute('First Person')\n    public aimOffset: number[] = [0, 0.012, 0]\n\n    /** Collision layers a shot passes through, by name. */\n    @attribute('Hits')\n    public passThroughLayers: LayerName[] = ['Stair Ramp']\n\n    /** Bullet holes this gun keeps; the oldest goes when there are more. */\n    @attribute('Hits', { min: 0, max: 500, step: 1 })\n    public maxHoles: number = 60\n\n    @attribute('Effects')\n    public flashTemplate: TemplateName = 'Muzzle Flash' as TemplateName\n\n    @attribute('Effects')\n    public impactTemplate: TemplateName = 'Bullet Impact' as TemplateName\n\n    @attribute('Effects')\n    public holeTemplate: TemplateName = 'Bullet Hole' as TemplateName\n\n    @attribute('Effects')\n    public tracerTemplate: TemplateName = 'Tracer' as TemplateName\n\n    /** The shot's cue in the holder's `Sounds` group (third person; in first person the fire clip plays it). */\n    @attribute('Effects')\n    public shotSound: string = 'ShotPistol'\n\n    /** The holder's body recoil, an animator trigger (the Recoil layer's kick of this weapon), raised on every shot. */\n    @attribute('Effects')\n    public fireTrigger: TriggerName = '' as TriggerName\n\n    /** Rounds in the magazine, and in the reserve. */\n    public ammo: number = 12\n    public reserve: number = 84\n    /** Shots fired, ever, and what the last one hit (null: nothing within `range`). */\n    public shots: number = 0\n    public lastHit: { point: number[], node: Node | null } | null = null\n    /** The last pull found the magazine empty. */\n    public dry: boolean = false\n\n    /** Seconds to the next shot the rate allows (below 0: the shot is late by that much, and the next comes as early). */\n    private _cooldown: number = 0\n    private _held: boolean = false\n    /** Seconds a pull that could not fire yet still waits to. */\n    private _queued: number = 0\n    private _bloom: number = 0\n    private _mask: number | null = null\n    private _holes: Node[] = []\n    private _missing: Set<string> = new Set()\n    private readonly _dir: number[] = [0, 0, 0]\n\n    onStart() {\n        this.ammo = this.magazine\n        this.reserve = this.reserveRounds\n    }\n\n    onUpdate(delta: number) {\n        this._cooldown -= delta\n        this._queued = Math.max(0, this._queued - delta)\n        this._bloom = Math.max(0, this._bloom - 5 * delta)\n    }\n\n    /**\n     * The spread now, degrees: `aim` 0 from the hip to 1 aimed, and whether the holder is moving, sprinting,\n     * crouching and on the ground.\n     */\n    public spread(aim: number, moving: boolean, sprinting = false, crouched = false, grounded = true): number {\n        const a = Math.max(0, Math.min(1, aim))\n        const base = this.hipSpread + (this.aimSpread - this.hipSpread) * a\n        return base * (moving ? (sprinting ? 2.2 : 1.5) : 1) * (crouched ? 0.7 : 1) * (grounded ? 1 : 2.5) + this._bloom * (1 - a * 0.6)\n    }\n\n    /** Whether a reload would put anything in the magazine. */\n    public get canReload(): boolean {\n        return this.ammo < this.magazine && this.reserve > 0\n    }\n\n    /** Fill the magazine from the reserve; returns the rounds moved. */\n    public reload(): number {\n        const take = Math.min(this.magazine - this.ammo, this.reserve)\n        this.ammo += take\n        this.reserve -= take\n        return take\n    }\n\n    /**\n     * The trigger, every frame: `held` whether it is pulled, `ready` whether the weapon is up to fire, `eye` and\n     * `look` the camera's position and the way the crosshair looks (unit), `spread` the cone (degrees), `shooter` the\n     * body the shots never meet, `view` where it is seen from. Fires when the trigger asks, the gun is ready and the\n     * magazine holds a round; returns the recoil of the shot, or null when it did not fire (`dry` says whether that\n     * was an empty magazine).\n     */\n    public pull(held: boolean, ready: boolean, eye: ArrayLike<number>, look: ArrayLike<number>, spread: number, shooter: unknown, view: SandboxShotView)\n        : SandboxShot['recoil'] {\n        // A pull (the trigger going down) waits `pullBuffer` for the gun to be able to fire; an automatic fires while held.\n        const pulled = held && !this._held\n        if (pulled) this._queued = this.pullBuffer\n        this._held = held\n        this.dry = false\n        const wants = this.auto ? held : this._queued > 0\n        if (!wants || !ready) { this._cooldown = Math.max(0, this._cooldown); return null }\n        if (this._cooldown > 0) return null\n        if (this.ammo <= 0) { this.dry = pulled || this.auto; this._queued = 0; return null }\n        // The rate kept on average, whatever the frame rate: a shot late by part of a frame brings the next one forward.\n        const interval = 60 / Math.max(1, this.roundsPerMinute)\n        this._cooldown = Math.max(this._cooldown, -interval) + interval\n        this._queued = 0\n        this.ammo--\n        const recoil = { pitch: this.recoilPitch, yaw: (Math.random() * 2 - 1) * this.recoilYaw, kick: this.kick, shake: this.shake }\n        this.fire(eye, look, spread, shooter, recoil, view)\n        this._bloom = Math.min(this.hipSpread * 1.6, this._bloom + this.hipSpread * 0.12)\n        return recoil\n    }\n\n    /**\n     * One shot from the camera at `eye` along `look`, `spread` degrees round it at most, passing `shooter`'s body:\n     * a raycast (or two) per pellet, the push, the effects, and the `weapon:Shot` event (with `recoil`, when a pull\n     * fired it). Spends no round. Returns what the first pellet hit, or null.\n     */\n    public fire(eye: ArrayLike<number>, look: ArrayLike<number>, spread: number, shooter?: unknown,\n        recoil: SandboxShot['recoil'] = null, view: SandboxShotView = { firstPerson: false }): { point: number[], node: Node | null } | null {\n        const hits = this._shoot(eye, look, spread, shooter, view)\n        this._told({ gun: this, hit: hits[0] ?? null, hits, recoil })\n        return hits[0] ?? null\n    }\n\n    /** Tell the shot: what this returns is the `weapon:Shot` event, dispatched here and bubbling to the holder. */\n    @eventDispatch('weapon:Shot')\n    private _told(shot: SandboxShot): SandboxShot {\n        return shot\n    }\n\n    /** The shot itself: its pellets' raycasts, the pushes and the effects. */\n    private _shoot(eye: ArrayLike<number>, look: ArrayLike<number>, spread: number, shooter: unknown, view: SandboxShotView) {\n        const physics = this.scene?.physics as any\n        this.shots++\n        const muzzleNode = this.getChildByName('Muzzle')[0] ?? this\n        muzzleNode.updateTransforms(muzzleNode.parent ? muzzleNode.parent.worldTransform : null)\n        const m = view.firstPerson && view.muzzle ? view.muzzle : muzzleNode.worldPosition\n        const muzzle = [m[0], m[1], m[2]]\n        if (!view.firstPerson) {\n            const f = muzzleNode.worldForward\n            this._spawn(this.flashTemplate, muzzle, eulerAlong([f[0], f[1], f[2]]))\n            this._playSound()\n        }\n        this.lastHit = null\n        const hits: ({ point: number[], node: Node | null } | null)[] = []\n        if (!physics) return hits\n        const options = { ignore: shooter ?? null, layerMask: this._layerMask(physics) }\n        const pellets = Math.max(1, Math.round(this.pellets))\n        const push = this.impulse / pellets\n        for (let k = 0; k < pellets; k++) {\n            const dir = MathUtils.randomInCone(this._dir, look, spread) as number[]\n            // What the crosshair looks at...\n            const far = [eye[0] + dir[0] * this.range, eye[1] + dir[1] * this.range, eye[2] + dir[2] * this.range]\n            const seen = physics.raycast([eye[0], eye[1], eye[2]], far, options)\n            let hit = seen, way = [dir[0], dir[1], dir[2]]\n            if (!view.firstPerson) {\n                // ...and, in third person, what the bullet meets on its way there from the muzzle (a little past it,\n                // so it meets the surface).\n                const target = seen ? seen.point : far\n                const toTarget = [target[0] - muzzle[0], target[1] - muzzle[1], target[2] - muzzle[2]]\n                const length = Math.hypot(toTarget[0], toTarget[1], toTarget[2])\n                if (length < 1e-3) { hits.push(null); continue }\n                way = [toTarget[0] / length, toTarget[1] / length, toTarget[2] / length]\n                const end = [muzzle[0] + way[0] * (length + 0.05), muzzle[1] + way[1] * (length + 0.05), muzzle[2] + way[2] * (length + 0.05)]\n                hit = physics.raycast(muzzle, end, options)\n                // One tracer a shot: the first pellet's.\n                if (k === 0) this._tracer(muzzle, hit ? hit.point : target)\n            } else if (k === 0) this._tracer(muzzle, seen ? seen.point : far)\n            const record = hit ? { point: [hit.point[0], hit.point[1], hit.point[2]], node: hit.node ?? null } : null\n            hits.push(record)\n            if (k === 0) this.lastHit = record\n            if (!hit) continue\n            this._push(hit, way, push)\n            this._impact(hit)\n        }\n        return hits\n    }\n\n    /** Every layer but `passThroughLayers`, looked up by name once. */\n    private _layerMask(physics: any): number {\n        if (this._mask === null) {\n            let mask = -1\n            for (const name of this.passThroughLayers ?? []) if (name) mask &= ~(physics.layer?.(name) ?? 0)\n            this._mask = mask\n        }\n        return this._mask\n    }\n\n    /**\n     * A dynamic body hit is pushed along the shot, at the point hit (measured from its centre). A character hit (its\n     * capsule, or a limb of a body already reacting) takes the shot with its whole body instead: its reactions, on\n     * the limb the shot meets (`physics.applyHit`), flinch, stumble, stagger or fall by how hard it lands. Not one\n     * that shots do not move (`reactsToShots` false: the player): neither its reactions nor its limbs are pushed.\n     */\n    private _push(hit: any, way: number[], impulse: number): void {\n        const physics = this.scene?.physics as any\n        if (this._unmoved(physics, hit)) return\n        if (impulse > 0 && physics?.reactionsFor?.(hit.body) && physics.applyHit(hit, way, impulse)) return\n        const body = hit.body\n        if (!body || !body.isDynamic || impulse <= 0) return\n        const origin = body.owner?.worldPosition ?? hit.point\n        const push = Math.min(impulse, this.maxPushSpeed * Math.max(0, body.mass ?? 0))\n        if (push <= 0) return\n        body.wakeUp?.()\n        body.impulse([way[0] * push, way[1] * push, way[2] * push],\n            [hit.point[0] - origin[0], hit.point[1] - origin[1], hit.point[2] - origin[2]])\n    }\n\n    /** Sparks and dust off the surface, and a hole in it: one that moves with what it is on. */\n    private _impact(hit: any): void {\n        const n = hit.normal\n        const at = [hit.point[0] + n[0] * 0.01, hit.point[1] + n[1] * 0.01, hit.point[2] + n[2] * 0.01]\n        const rotation = eulerOntoNormal(n)\n        this._spawn(this.impactTemplate, at, rotation)\n        const hole = this._spawn(this.holeTemplate, at, [rotation[0], rotation[1], Math.random() * 360])\n        if (!hole) return\n        // On a body that moves, the hole goes with it.\n        if (hit.node && hit.body?.isDynamic) hole.reparent(hit.node)\n        this._holes.push(hole)\n        while (this._holes.length > this.maxHoles) {\n            const old = this._holes.shift()!\n            if (old.scene) old.remove({ immediate: true })\n        }\n    }\n\n    /** A streak from the muzzle to where the shot ended (none for a shot too short to see one). */\n    private _tracer(from: number[], to: number[]): void {\n        const d = [to[0] - from[0], to[1] - from[1], to[2] - from[2]]\n        const length = Math.hypot(d[0], d[1], d[2])\n        if (length < 2) return\n        const node: any = this._spawn(this.tracerTemplate, from, eulerAlong(d))\n        if (node) node.tracerLength = length\n    }\n\n    /** The shot's cue, from the nearest `Sounds` group above the gun (the character's). */\n    private _playSound(): void {\n        if (!this.shotSound) return\n        for (let n: Node | null = this.parent; n; n = n.parent) {\n            const group = n.getChildByName('Sounds')[0]\n            if (!group) continue\n            const cue = group.getChildByName(this.shotSound)[0] as any\n            cue?.play?.()\n            return\n        }\n    }\n\n    /** Spawn an effect template, or nothing (and a warning, once) when the scene has none of that name. */\n    /** Whether `hit` struck a character that shots do not move (its capsule, or a limb of its reacting body). */\n    private _unmoved(physics: any, hit: any): boolean {\n        const reactions = physics?.reactionsFor?.(hit.body) ?? (hit.node ? physics?.reactionsFor?.(hit.node) : null)\n        let character: any = hit.node?.character ?? null\n        for (let n: Node | null = reactions?.node ?? null; n && !character; n = n.parent) if (n.nodeType === 'character') character = n\n        return !!character && character.reactsToShots === false\n    }\n\n    private _spawn(template: string, position: number[], rotation: number[]): Node | null {\n        if (!template || this._missing.has(template)) return null\n        const node = (this.scene as any)?.instantiate(template, { position, rotation }) ?? null\n        if (!node) {\n            this._missing.add(template)\n            Logger.warn(`SandboxGun: no \"${template}\" template, so that effect is skipped`, 'Script')\n        }\n        return node\n    }\n}\n\n/** Euler degrees [pitch, yaw, 0] that turn a node's +Z along `d`. */\nfunction eulerAlong(d: ArrayLike<number>): number[] {\n    const aim = MathUtils.aimFromDirection([d[0], d[1], d[2]] as any)\n    return [aim.pitch, aim.yaw, 0]\n}\n\n/** Euler degrees [pitch, yaw, 0] that turn a node's +Y onto `normal` (a decal projects down its -Y). */\nfunction eulerOntoNormal(normal: ArrayLike<number>): number[] {\n    const ny = Math.max(-1, Math.min(1, normal[1]))\n    return [Math.acos(ny) * 180 / Math.PI, Math.atan2(normal[0], normal[2]) * 180 / Math.PI, 0]\n}\n"
+  },
+  "variant": {
+    "baseTemplateId": "83897d967bcb6fdd8909fc97ce183124",
+    "diff": {
+      "version": 2,
+      "nodes": {
+        "": {
+          "merge": {
+            "name": "Player"
+          }
+        },
+        "Character": {
+          "merge": {
+            "variables": {
+              "__scriptId": {
+                "value": "a3f1e498984fb88f51b1b4df74f690be"
+              }
+            }
+          },
+          "unset": [
+            [
+              "scriptVars",
+              "walkDeflection"
+            ],
+            [
+              "scriptVars",
+              "directionEase"
+            ],
+            [
+              "scriptVars",
+              "runTurnSpeed"
+            ],
+            [
+              "scriptVars",
+              "runTurnAngle"
+            ],
+            [
+              "scriptVars",
+              "runTurnRelease"
+            ],
+            [
+              "scriptVars",
+              "runTurnSeconds"
+            ],
+            [
+              "scriptVars",
+              "jumpTurnSpeed"
+            ],
+            [
+              "scriptVars",
+              "leanAcceleration"
+            ],
+            [
+              "scriptVars",
+              "leanSpeed"
+            ],
+            [
+              "scriptVars",
+              "leanForwardAcceleration"
+            ],
+            [
+              "scriptVars",
+              "leanForwardSpeed"
+            ],
+            [
+              "scriptVars",
+              "lookAroundAngle"
+            ],
+            [
+              "scriptVars",
+              "turnDelay"
+            ],
+            [
+              "scriptVars",
+              "farTurnShare"
+            ],
+            [
+              "scriptVars",
+              "lookSpeed"
+            ],
+            [
+              "scriptVars",
+              "lookPitchRest"
+            ],
+            [
+              "scriptVars",
+              "runFootWeight"
+            ],
+            [
+              "scriptVars",
+              "stairsLayer"
+            ],
+            [
+              "scriptVars",
+              "stairGrade"
+            ],
+            [
+              "scriptVars",
+              "stairGrace"
+            ],
+            [
+              "scriptVars",
+              "stairBrake"
+            ],
+            [
+              "scriptVars",
+              "enterTrigger"
+            ],
+            [
+              "scriptVars",
+              "exitTrigger"
+            ],
+            [
+              "scriptVars",
+              "equipSeconds"
+            ],
+            [
+              "scriptVars",
+              "aimSeconds"
+            ],
+            [
+              "scriptVars",
+              "aimTurnThreshold"
+            ],
+            [
+              "scriptVars",
+              "fireAimHold"
+            ],
+            [
+              "scriptVars",
+              "fireAimReady"
+            ],
+            [
+              "scriptVars",
+              "alignSeconds"
+            ],
+            [
+              "scriptVars",
+              "alignMaxSeconds"
+            ],
+            [
+              "scriptVars",
+              "settleSeconds"
+            ]
+          ]
+        }
+      },
+      "added": [
+        {
+          "parent": "Character",
+          "index": 0,
+          "node": {
+            "name": "Camera Rig",
+            "type": "cameraRig",
+            "position": [0, 1.5, 0],
+            "rotation": [12, 0, 0],
+            "scale": [1, 1, 1],
+            "children": [
+              {
+                "name": "Camera",
+                "type": "camera",
+                "position": [-0.5, 0.10000000149011612, -1.899999976158142],
+                "rotation": [0, 0, 0],
+                "scale": [1, 1, 1],
+                "children": [
+                  {
+                    "name": "Viewmodels",
+                    "type": "node",
+                    "position": [0, 0, 0],
+                    "rotation": [0, 0, 0],
+                    "scale": [1, 1, 1],
+                    "children": [
+                      {
+                        "name": "Pistol Viewmodel",
+                        "type": "model",
+                        "position": [0, -1.6009999513626099, -0.02199999988079071],
+                        "rotation": [0, 0, 0],
+                        "scale": [1, 1, 1],
+                        "children": [
+                          {
+                            "name": "Muzzle",
+                            "type": "node",
+                            "position": [-0.08799999952316284, 1.4850000143051147, 0.6460000276565552],
+                            "rotation": [0, 0, 0],
+                            "scale": [1, 1, 1],
+                            "children": [],
+                            "variables": {},
+                            "spawnOnStart": true
+                          }
+                        ],
+                        "variables": {
+                          "__modelId": {
+                            "type": "string",
+                            "value": "ce8c73093dfe61ca79f6c08b65e3f23a",
+                            "access": "public"
+                          },
+                          "__materialId": {
+                            "type": "string",
+                            "value": "3c9ebb84b31ae857e661c45292798cc4",
+                            "access": "public"
+                          },
+                          "__materialIds": {
+                            "type": "string",
+                            "value": "[\"3c9ebb84b31ae857e661c45292798cc4\",\"b6f53e48187b425c8feb2e305d0c4e5e\",\"3a9e798f88941a388a8ac34d0946325b\"]",
+                            "access": "public"
+                          },
+                          "__modelBaseTRS": {
+                            "type": "string",
+                            "value": "[0,-1.6009999513626099,-0.02199999988079071,0,0,0,1,1,1]",
+                            "access": "public"
+                          }
+                        },
+                        "spawnOnStart": true,
+                        "motionBlur": "none",
+                        "viewmodel": true,
+                        "model": {
+                          "geometry": {
+                            "$geo": {
+                              "positions": {
+                                "h": "5a51fb74adeac7471f1832af3ddb2a534d2894068c15cbba4fa91d1498d6849b",
+                                "l": 211932
+                              },
+                              "normals": {
+                                "h": "577e72dca1d5cfb3a123fd47655e72b09eb62105a2df67661bd72d6b1bc3f65c",
+                                "l": 211932
+                              },
+                              "tangents": {
+                                "h": "b0dfd45181b1a3c0deb6a49801c26d0fcd9026e5c163bd4ef349676da40566ef",
+                                "l": 211932
+                              },
+                              "bitangents": {
+                                "h": "37b3b74bd2605e4018fb20a4fe93c2765a875f0502576892f81ff65e30a4d119",
+                                "l": 211932
+                              },
+                              "texCoords": {
+                                "h": "a32ac961cb37f6b3a4f778aca53632161179e27d89107fb634a599bc70f7c57c",
+                                "l": 141288
+                              },
+                              "indices": {
+                                "h": "f95d1a14454cb173daa175f4578bc2e9804bd1bdf98c036b187e880d5f42cf68",
+                                "l": 158904,
+                                "bits": 16
+                              },
+                              "typed": true
+                            }
+                          },
+                          "material": {
+                            "type": "pbr",
+                            "baseColor": [1, 1, 1],
+                            "metallic": 1,
+                            "roughness": 1,
+                            "opacity": 1,
+                            "emissiveFactor": [0, 0, 0],
+                            "alphaCutoff": 0,
+                            "displacementScale": 0.05,
+                            "textures": {
+                              "baseColorTexture": "880ad90c3a8471539dc565c21a347e21",
+                              "metallicMap": "aa64235601ef8da0e0e3dae6ffe374ac",
+                              "roughnessMap": "aa64235601ef8da0e0e3dae6ffe374ac",
+                              "normalMap": "5073b8b9c1e71bc77274e26734456daf",
+                              "occlusionMap": "aa64235601ef8da0e0e3dae6ffe374ac"
+                            },
+                            "config": {
+                              "side": "double",
+                              "wireframe": false,
+                              "transparent": false,
+                              "castShadow": true,
+                              "probeable": true
+                            }
+                          },
+                          "skin": {
+                            "name": "Armature",
+                            "joints": [
+                              {
+                                "nodeIndex": 7,
+                                "inverseBindMatrix": {
+                                  "$f32": {
+                                    "n": [-0.9999998807907104, 4.117382275126147e-7, 7.235672683236771e-8, 0, 7.235641419356398e-8, -7.085779998305952e-7, 1, 0, 4.1173828435603355e-7, 1, 8.087085916486103e-7, 0, -2.819596159743358e-14, -5.4659839321402615e-8, -7.864392870260417e-8, 1]
+                                  },
+                                  "t": 1
+                                },
+                                "parentIndex": 37
+                              },
+                              {
+                                "nodeIndex": 8,
+                                "inverseBindMatrix": {
+                                  "$f32": {
+                                    "n": [1, 4.1173782960868266e-7, 0.0000022244064439291833, 0, 0.0000022244066713028587, -8.087094442998932e-7, -1, 0, -4.117359253541508e-7, 1, -8.087102969511761e-7, 0, -1.5243054485736957e-13, -5.465983221597526e-8, 7.864392870260417e-8, 1]
+                                  },
+                                  "t": 1
+                                },
+                                "parentIndex": 7
+                              },
+                              {
+                                "nodeIndex": 9,
+                                "inverseBindMatrix": {
+                                  "$f32": {
+                                    "n": [1, 4.1173782960868266e-7, 0.0000022244064439291833, 0, 0.0000022244066713028587, -8.087094442998932e-7, -1, 0, -4.117359253541508e-7, 1, -8.087102969511761e-7, 0, -7.77831417053676e-8, -5.3200484018134375e-8, 0.033866431564092636, 1]
+                                  },
+                                  "t": 1
+                                },
+                                "parentIndex": 7
+                              },
+                              {
+                                "nodeIndex": 10,
+                                "inverseBindMatrix": {
+                                  "$f32": {
+                                    "n": [1, 4.1173782960868266e-7, 0.0000022244064439291833, 0, 0.0000022244066713028587, -8.087094442998932e-7, -1, 0, -4.117359253541508e-7, 1, -8.087102969511761e-7, 0, -7.77831417053676e-8, -5.3200484018134375e-8, 0.033866431564092636, 1]
+                                  },
+                                  "t": 1
+                                },
+                                "parentIndex": 9
+                              },
+                              {
+                                "nodeIndex": 11,
+                                "inverseBindMatrix": {
+                                  "$f32": {
+                                    "n": [1, 4.1173782960868266e-7, 0.0000022244064439291833, 0, 0.0000022244066713028587, -8.087094442998932e-7, -1, 0, -4.117359253541508e-7, 1, -8.087102969511761e-7, 0, -1.7602836521746212e-8, 0.09265462309122086, 0.007664227392524481, 1]
+                                  },
+                                  "t": 1
+                                },
+                                "parentIndex": 7
+                              },
+                              {
+                                "nodeIndex": 12,
+                                "inverseBindMatrix": {
+                                  "$f32": {
+                                    "n": [1, 4.1173782960868266e-7, 0.0000022244064439291833, 0, 0.0000022244066713028587, -8.087094442998932e-7, -1, 0, -4.117359253541508e-7, 1, -8.087102969511761e-7, 0, -1.7602836521746212e-8, 0.09265462309122086, 0.007664227392524481, 1]
+                                  },
+                                  "t": 1
+                                },
+                                "parentIndex": 11
+                              },
+                              {
+                                "nodeIndex": 13,
+                                "inverseBindMatrix": {
+                                  "$f32": {
+                                    "n": [1, 4.1173782960868266e-7, 0.0000022244064439291833, 0, 0.0000022244066713028587, -8.087094442998932e-7, -1, 0, -4.117359253541508e-7, 1, -8.087102969511761e-7, 0, 1.1447281167420442e-7, 0.07815144956111908, -0.04984089732170105, 1]
+                                  },
+                                  "t": 1
+                                },
+                                "parentIndex": 7
+                              },
+                              {
+                                "nodeIndex": 14,
+                                "inverseBindMatrix": {
+                                  "$f32": {
+                                    "n": [1, 4.1173782960868266e-7, 0.0000022244064439291833, 0, 0.0000022244066713028587, -8.087094442998932e-7, -1, 0, -4.117359253541508e-7, 1, -8.087102969511761e-7, 0, 1.1447281167420442e-7, 0.07815145701169968, -0.04984089732170105, 1]
+                                  },
+                                  "t": 1
+                                },
+                                "parentIndex": 13
+                              },
+                              {
+                                "nodeIndex": 15,
+                                "inverseBindMatrix": {
+                                  "$f32": {
+                                    "n": [1, 4.1173782960868266e-7, 0.0000022244064439291833, 0, 0.0000022244066713028587, -8.087094442998932e-7, -1, 0, -4.117359253541508e-7, 1, -8.087102969511761e-7, 0, -4.0438099091488766e-8, 0.06509188562631607, 0.017606589943170547, 1]
+                                  },
+                                  "t": 1
+                                },
+                                "parentIndex": 14
+                              },
+                              {
+                                "nodeIndex": 17,
+                                "inverseBindMatrix": {
+                                  "$f32": {
+                                    "n": [1, 4.1173782960868266e-7, 0.0000022244064439291833, 0, 0.0000022244066713028587, -8.087094442998932e-7, -1, 0, -4.117359253541508e-7, 1, -8.087102969511761e-7, 0, 1.3916465313457138e-8, 0.006553804501891136, -0.0060591502115130424, 1]
+                                  },
+                                  "t": 1
+                                },
+                                "parentIndex": 7
+                              },
+                              {
+                                "nodeIndex": 18,
+                                "inverseBindMatrix": {
+                                  "$f32": {
+                                    "n": [1, 4.1173782960868266e-7, 0.0000022244064439291833, 0, 0.0000022244066713028587, -8.087094442998932e-7, -1, 0, -4.117359253541508e-7, 1, -8.087102969511761e-7, 0, 1.3916465313457138e-8, 0.0065538049675524235, -0.0060591502115130424, 1]
+                                  },
+                                  "t": 1
+                                },
+                                "parentIndex": 17
+                              },
+                              {
+                                "nodeIndex": 25,
+                                "inverseBindMatrix": {
+                                  "$f32": {
+                                    "n": [1, 0, 0, 0, 0, -1.3435887069590535e-7, 1, 0, 0, -1, -1.3435887069590535e-7, 0, 0, 0, 0, 1]
+                                  },
+                                  "t": 1
+                                },
+                                "parentIndex": 24
+                              },
+                              {
+                                "nodeIndex": 29,
+                                "inverseBindMatrix": {
+                                  "$f32": {
+                                    "n": [1, 0, 0, 0, 0, -1.3435887069590535e-7, 1, 0, 0, -1, -1.3435887069590535e-7, 0, 0, 0, 0, 1]
+                                  },
+                                  "t": 1
+                                },
+                                "parentIndex": 25
+                              },
+                              {
+                                "nodeIndex": 30,
+                                "inverseBindMatrix": {
+                                  "$f32": {
+                                    "n": [1, 0, 0, 0, 0, 0.9683388471603394, -0.24963954091072083, 0, 0, 0.24963954091072083, 0.9683388471603394, 0, 0, -0.8663467168807983, 0.27456846833229065, 1]
+                                  },
+                                  "t": 1
+                                },
+                                "parentIndex": 29
+                              },
+                              {
+                                "nodeIndex": 37,
+                                "inverseBindMatrix": {
+                                  "$f32": {
+                                    "n": [1, 0, 0, 0, 0, 3.422854177870249e-8, 1, 0, 0, -1, 3.422854177870249e-8, 0, 0, 5.4659892612107797e-8, -7.864388607004003e-8, 1]
+                                  },
+                                  "t": 1
+                                },
+                                "parentIndex": 30
+                              },
+                              {
+                                "nodeIndex": 39,
+                                "inverseBindMatrix": {
+                                  "$f32": {
+                                    "n": [1, 0, 0, 0, 0, -1.3435887069590535e-7, 1, 0, 0, -1, -1.3435887069590535e-7, 0, 0, -0.032528042793273926, -0.9736846685409546, 1]
+                                  },
+                                  "t": 1
+                                },
+                                "parentIndex": 25
+                              },
+                              {
+                                "nodeIndex": 40,
+                                "inverseBindMatrix": {
+                                  "$f32": {
+                                    "n": [1, 0, 0, 0, 0, -1.3435887069590535e-7, 1, 0, 0, -1, -1.3435887069590535e-7, 0, 0, -0.03252803534269333, -0.9736846685409546, 1]
+                                  },
+                                  "t": 1
+                                },
+                                "parentIndex": 39
+                              },
+                              {
+                                "nodeIndex": 63,
+                                "inverseBindMatrix": {
+                                  "$f32": {
+                                    "n": [1, 0, 0, 0, 0, -1.3435887069590535e-7, 1, 0, 0, -1, -1.3435887069590535e-7, 0, 0, -0.0003594009322114289, -1.1617542505264282, 1]
+                                  },
+                                  "t": 1
+                                },
+                                "parentIndex": 40
+                              },
+                              {
+                                "nodeIndex": 64,
+                                "inverseBindMatrix": {
+                                  "$f32": {
+                                    "n": [1, 0, 0, 0, 0, 0.9994938373565674, 0.03181258961558342, 0, 0, -0.03181258961558342, 0.9994938373565674, 0, 0, -1.1611775159835815, -0.0365990474820137, 1]
+                                  },
+                                  "t": 1
+                                },
+                                "parentIndex": 63
+                              },
+                              {
+                                "nodeIndex": 65,
+                                "inverseBindMatrix": {
+                                  "$f32": {
+                                    "n": [1, 0, 0, 0, 0, 3.422854533141617e-8, 1.0000001192092896, 0, 0, -1.0000001192092896, 3.422854533141617e-8, 0, 0, -0.005301694851368666, -1.3170262575149536, 1]
+                                  },
+                                  "t": 1
+                                },
+                                "parentIndex": 64
+                              },
+                              {
+                                "nodeIndex": 66,
+                                "inverseBindMatrix": {
+                                  "$f32": {
+                                    "n": [1, 0, 0, 0, 0, 0.999592125415802, 0.028559530153870583, 0, 0, -0.028559530153870583, 0.999592125415802, 0, 0, -1.3166403770446777, -0.032314151525497437, 1]
+                                  },
+                                  "t": 1
+                                },
+                                "parentIndex": 65
+                              },
+                              {
+                                "nodeIndex": 67,
+                                "inverseBindMatrix": {
+                                  "$f32": {
+                                    "n": [1, 0, 0, 0, 0, 0.999592125415802, 0.02855951339006424, 0, 0, -0.02855951339006424, 0.999592125415802, 0, 0, -1.3166403770446777, -0.032314129173755646, 1]
+                                  },
+                                  "t": 1
+                                },
+                                "parentIndex": 66
+                              },
+                              {
+                                "nodeIndex": 68,
+                                "inverseBindMatrix": {
+                                  "$f32": {
+                                    "n": [1, 0, 0, 0, 0, 0.999592125415802, 0.028559541329741478, 0, 0, -0.028559541329741478, 0.999592125415802, 0, 0, -1.3166403770446777, -0.03231416642665863, 1]
+                                  },
+                                  "t": 1
+                                },
+                                "parentIndex": 67
+                              },
+                              {
+                                "nodeIndex": 69,
+                                "inverseBindMatrix": {
+                                  "$f32": {
+                                    "n": [0.5070949792861938, 0.8618900179862976, 0.0005288486718200147, 0, -0.00007409617683151737, -0.0005699705216102302, 0.9999997615814209, 0, 0.8618901371955872, -0.5070949196815491, -0.0002251533151138574, 0, -0.06120492145419121, 0.017816299572587013, -1.442280650138855, 1]
+                                  },
+                                  "t": 1
+                                },
+                                "parentIndex": 68
+                              },
+                              {
+                                "nodeIndex": 70,
+                                "inverseBindMatrix": {
+                                  "$f32": {
+                                    "n": [0.5070949792861938, 0.8618900179862976, 0.0005288486718200147, 0, -0.00007409617683151737, -0.0005699705216102302, 0.9999997615814209, 0, 0.8618901371955872, -0.5070949196815491, -0.0002251533151138574, 0, -0.0612049326300621, 0.01781631074845791, -1.4422805309295654, 1]
+                                  },
+                                  "t": 1
+                                },
+                                "parentIndex": 69
+                              },
+                              {
+                                "nodeIndex": 71,
+                                "inverseBindMatrix": {
+                                  "$f32": {
+                                    "n": [-0.6921871900558472, 0.680149257183075, 0.24139970541000366, 0, -0.6873782873153687, -0.7232276797294617, 0.06672877073287964, 0, 0.21997249126434326, -0.11974411457777023, 0.9681288003921509, 0, 1.1054835319519043, 0.9075469374656677, -0.114148810505867, 1]
+                                  },
+                                  "t": 1
+                                },
+                                "parentIndex": 69
+                              },
+                              {
+                                "nodeIndex": 72,
+                                "inverseBindMatrix": {
+                                  "$f32": {
+                                    "n": [-0.6921872496604919, 0.6801491975784302, 0.24139973521232605, 0, -0.6873782873153687, -0.7232276797294617, 0.0667286291718483, 0, 0.2199724167585373, -0.11974424123764038, 0.9681288003921509, 0, 1.1054836511611938, 0.7631593346595764, -0.11414863169193268, 1]
+                                  },
+                                  "t": 1
+                                },
+                                "parentIndex": 71
+                              },
+                              {
+                                "nodeIndex": 73,
+                                "inverseBindMatrix": {
+                                  "$f32": {
+                                    "n": [-0.6921870708465576, 0.6364222764968872, -0.3403579890727997, 0, -0.6873785257339478, -0.43760257959365845, 0.5796676278114319, 0, 0.21997188031673431, 0.6351932883262634, 0.7403659820556641, 0, 1.1054840087890625, 0.33221235871315, -0.5343621373176575, 1]
+                                  },
+                                  "t": 1
+                                },
+                                "parentIndex": 72
+                              },
+                              {
+                                "nodeIndex": 74,
+                                "inverseBindMatrix": {
+                                  "$f32": {
+                                    "n": [-0.6921871304512024, 0.636422336101532, -0.3403579294681549, 0, -0.687378466129303, -0.43760257959365845, 0.5796677470207214, 0, 0.2199719250202179, 0.6351932883262634, 0.7403659820556641, 0, 1.1054840087890625, 0.21412500739097595, -0.5343621969223022, 1]
+                                  },
+                                  "t": 1
+                                },
+                                "parentIndex": 73
+                              },
+                              {
+                                "nodeIndex": 75,
+                                "inverseBindMatrix": {
+                                  "$f32": {
+                                    "n": [-0.7057108283042908, 0.6449204683303833, -0.29334214329719543, 0, -0.6773099303245544, -0.49260860681533813, 0.5464320778846741, 0, 0.20790237188339233, 0.5843065977096558, 0.784450352191925, 0, 1.1024569272994995, 0.15740147233009338, -0.5259987115859985, 1]
+                                  },
+                                  "t": 1
+                                },
+                                "parentIndex": 74
+                              },
+                              {
+                                "nodeIndex": 76,
+                                "inverseBindMatrix": {
+                                  "$f32": {
+                                    "n": [0.47746777534484863, 0.5310128331184387, -0.7000356316566467, 0, -0.4783278703689575, -0.5112243890762329, -0.7140392065048218, 0, -0.73703932762146, 0.6757772564888, 0.009905096143484116, 0, 0.3572756350040436, 0.19003747403621674, 1.1618539094924927, 1]
+                                  },
+                                  "t": 1
+                                },
+                                "parentIndex": 75
+                              },
+                              {
+                                "nodeIndex": 77,
+                                "inverseBindMatrix": {
+                                  "$f32": {
+                                    "n": [0.6777442097663879, 0.28828972578048706, -0.6764257550239563, 0, -0.2524908483028412, -0.7727512717247009, -0.5823261737823486, 0, -0.69058758020401, 0.5654594898223877, -0.4509371221065521, 0, -0.008106645196676254, 0.5514082312583923, 1.0861871242523193, 1]
+                                  },
+                                  "t": 1
+                                },
+                                "parentIndex": 76
+                              },
+                              {
+                                "nodeIndex": 78,
+                                "inverseBindMatrix": {
+                                  "$f32": {
+                                    "n": [0.6802951097488403, 0.1703464239835739, -0.7128678560256958, 0, -0.2648816406726837, -0.849738359451294, -0.4558314383029938, 0, -0.6834005117416382, 0.4989255368709564, -0.5329512357711792, 0, 0.0016815599519759417, 0.6727957129478455, 0.9941163659095764, 1]
+                                  },
+                                  "t": 1
+                                },
+                                "parentIndex": 77
+                              },
+                              {
+                                "nodeIndex": 79,
+                                "inverseBindMatrix": {
+                                  "$f32": {
+                                    "n": [0.6774765253067017, 0.0209838654845953, -0.7352449893951416, 0, -0.23559966683387756, -0.9407376050949097, -0.24393709003925323, 0, -0.6967914700508118, 0.33848512172698975, -0.6323837637901306, 0, -0.023242129012942314, 0.8613432049751282, 0.8154692649841309, 1]
+                                  },
+                                  "t": 1
+                                },
+                                "parentIndex": 78
+                              },
+                              {
+                                "nodeIndex": 80,
+                                "inverseBindMatrix": {
+                                  "$f32": {
+                                    "n": [0.6696135401725769, -0.03108300268650055, 0.7420589923858643, 0, 0.6025893092155457, -0.5613268613815308, -0.5672725439071655, 0, 0.4341702163219452, 0.8270102143287659, -0.35714179277420044, 0, -1.0589841604232788, 0.5124684572219849, 0.27096256613731384, 1]
+                                  },
+                                  "t": 1
+                                },
+                                "parentIndex": 76
+                              },
+                              {
+                                "nodeIndex": 81,
+                                "inverseBindMatrix": {
+                                  "$f32": {
+                                    "n": [0.6707800030708313, 0.1331373155117035, 0.7296085953712463, 0, 0.5967782139778137, -0.6809881329536438, -0.4243945777416229, 0, 0.44035208225250244, 0.7200899124145508, -0.536246657371521, 0, -1.0545686483383179, 0.5200535655021667, 0.15866561233997345, 1]
+                                  },
+                                  "t": 1
+                                },
+                                "parentIndex": 80
+                              },
+                              {
+                                "nodeIndex": 82,
+                                "inverseBindMatrix": {
+                                  "$f32": {
+                                    "n": [0.6683390140533447, 0.1588691622018814, 0.7266935110092163, 0, 0.6081656813621521, -0.6792252659797668, -0.41083747148513794, 0, 0.4283192455768585, 0.7165287733078003, -0.5505715608596802, 0, -1.0627219676971436, 0.47956594824790955, 0.1489635556936264, 1]
+                                  },
+                                  "t": 1
+                                },
+                                "parentIndex": 81
+                              },
+                              {
+                                "nodeIndex": 83,
+                                "inverseBindMatrix": {
+                                  "$f32": {
+                                    "n": [0.4774675667285919, 0.5310128331184387, -0.7000356912612915, 0, -0.4783281683921814, -0.5112242698669434, -0.7140390872955322, 0, -0.7370392680168152, 0.6757773160934448, 0.00990546215325594, 0, 0.357276052236557, 0.19003726541996002, 1.1618537902832031, 1]
+                                  },
+                                  "t": 1
+                                },
+                                "parentIndex": 76
+                              },
+                              {
+                                "nodeIndex": 84,
+                                "inverseBindMatrix": {
+                                  "$f32": {
+                                    "n": [0.3574669361114502, 0.6066166758537292, -0.7100940346717834, 0, -0.3950026333332062, -0.5907747745513916, -0.7035325169563293, 0, -0.8462802767753601, 0.5319786071777344, 0.02843281254172325, 0, 0.3278706967830658, 0.2442823201417923, 1.1652785539627075, 1]
+                                  },
+                                  "t": 1
+                                },
+                                "parentIndex": 75
+                              },
+                              {
+                                "nodeIndex": 85,
+                                "inverseBindMatrix": {
+                                  "$f32": {
+                                    "n": [0.43873804807662964, 0.3373427391052246, -0.8328918814659119, 0, -0.263459712266922, -0.8378432989120483, -0.47812947630882263, 0, -0.8591262698173523, 0.42920705676078796, -0.27871760725975037, 0, 0.1427285075187683, 0.6144673228263855, 1.0454961061477661, 1]
+                                  },
+                                  "t": 1
+                                },
+                                "parentIndex": 84
+                              },
+                              {
+                                "nodeIndex": 86,
+                                "inverseBindMatrix": {
+                                  "$f32": {
+                                    "n": [0.4396723508834839, 0.12746906280517578, -0.8890668749809265, 0, -0.2701573371887207, -0.9252676963806152, -0.26626089215278625, 0, -0.8565648198127747, 0.3572554588317871, -0.3723779320716858, 0, 0.1485174298286438, 0.8001374006271362, 0.8809094429016113, 1]
+                                  },
+                                  "t": 1
+                                },
+                                "parentIndex": 85
+                              },
+                              {
+                                "nodeIndex": 87,
+                                "inverseBindMatrix": {
+                                  "$f32": {
+                                    "n": [0.43849867582321167, 0.025613129138946533, -0.8983668088912964, 0, -0.2536754310131073, -0.9554211497306824, -0.15106043219566345, 0, -0.8621877431869507, 0.29413339495658875, -0.41245347261428833, 0, 0.13396701216697693, 0.8754593729972839, 0.7800275087356567, 1]
+                                  },
+                                  "t": 1
+                                },
+                                "parentIndex": 86
+                              },
+                              {
+                                "nodeIndex": 88,
+                                "inverseBindMatrix": {
+                                  "$f32": {
+                                    "n": [0.35746678709983826, 0.606616735458374, -0.7100940942764282, 0, -0.3950030207633972, -0.590774655342102, -0.7035324573516846, 0, -0.8462801575660706, 0.5319787859916687, 0.028433090075850487, 0, 0.3278712034225464, 0.24428226053714752, 1.165278673171997, 1]
+                                  },
+                                  "t": 1
+                                },
+                                "parentIndex": 84
+                              },
+                              {
+                                "nodeIndex": 89,
+                                "inverseBindMatrix": {
+                                  "$f32": {
+                                    "n": [0.24258503317832947, 0.6481525897979736, -0.7218384146690369, 0, -0.3394138514995575, -0.6403353810310364, -0.689034640789032, 0, -0.9088183045387268, 0.4121514558792114, 0.06465622037649155, 0, 0.3196154236793518, 0.2894817292690277, 1.158579707145691, 1]
+                                  },
+                                  "t": 1
+                                },
+                                "parentIndex": 75
+                              },
+                              {
+                                "nodeIndex": 90,
+                                "inverseBindMatrix": {
+                                  "$f32": {
+                                    "n": [0.5367292165756226, 0.1874152570962906, -0.8226768970489502, 0, -0.1446811705827713, -0.9401352405548096, -0.30856621265411377, 0, -0.8312575221061707, 0.2846423387527466, -0.47748255729675293, 0, -0.07466764003038406, 0.8395965695381165, 0.8862197995185852, 1]
+                                  },
+                                  "t": 1
+                                },
+                                "parentIndex": 89
+                              },
+                              {
+                                "nodeIndex": 91,
+                                "inverseBindMatrix": {
+                                  "$f32": {
+                                    "n": [0.536296010017395, 0.06282318383455276, -0.8416886329650879, 0, -0.1377430558204651, -0.9773421883583069, -0.1607135683298111, 0, -0.8327144980430603, 0.20212680101394653, -0.5154911875724792, 0, -0.08124092221260071, 0.925244927406311, 0.7531296014785767, 1]
+                                  },
+                                  "t": 1
+                                },
+                                "parentIndex": 90
+                              },
+                              {
+                                "nodeIndex": 92,
+                                "inverseBindMatrix": {
+                                  "$f32": {
+                                    "n": [0.5341193675994873, -0.21756282448768616, -0.8169350624084473, 0, -0.15656541287899017, -0.9750592708587646, 0.15730999410152435, 0, -0.8307850360870361, 0.04388148710131645, -0.5548608303070068, 0, -0.06159511208534241, 1.0906267166137695, 0.42960476875305176, 1]
+                                  },
+                                  "t": 1
+                                },
+                                "parentIndex": 91
+                              },
+                              {
+                                "nodeIndex": 93,
+                                "inverseBindMatrix": {
+                                  "$f32": {
+                                    "n": [0.24258501827716827, 0.6481525897979736, -0.7218384146690369, 0, -0.3394137918949127, -0.6403353214263916, -0.6890347599983215, 0, -0.9088183045387268, 0.41215142607688904, 0.06465622782707214, 0, 0.3196153938770294, 0.2894816994667053, 1.1585798263549805, 1]
+                                  },
+                                  "t": 1
+                                },
+                                "parentIndex": 89
+                              },
+                              {
+                                "nodeIndex": 94,
+                                "inverseBindMatrix": {
+                                  "$f32": {
+                                    "n": [0.1677647829055786, 0.6725305914878845, -0.7208034992218018, 0, -0.25175929069519043, -0.6776938438415527, -0.6909042000770569, 0, -0.9531381726264954, 0.29737839102745056, 0.05562256649136543, 0, 0.25269949436187744, 0.33358675241470337, 1.1562796831130981, 1]
+                                  },
+                                  "t": 1
+                                },
+                                "parentIndex": 75
+                              },
+                              {
+                                "nodeIndex": 95,
+                                "inverseBindMatrix": {
+                                  "$f32": {
+                                    "n": [0.49724024534225464, 0.15681703388690948, -0.853323221206665, 0, -0.07539308816194534, -0.9719997644424438, -0.22255881130695343, 0, -0.8643309473991394, 0.17499986290931702, -0.47149449586868286, 0, -0.14191870391368866, 0.8920431137084961, 0.8016095161437988, 1]
+                                  },
+                                  "t": 1
+                                },
+                                "parentIndex": 94
+                              },
+                              {
+                                "nodeIndex": 96,
+                                "inverseBindMatrix": {
+                                  "$f32": {
+                                    "n": [0.49657732248306274, 0.08131396770477295, -0.8641753196716309, 0, -0.06712228059768677, -0.9890236854553223, -0.13163167238235474, 0, -0.8653932809829712, 0.12337072193622589, -0.48566874861717224, 0, -0.1497555524110794, 0.9362522959709167, 0.7179160118103027, 1]
+                                  },
+                                  "t": 1
+                                },
+                                "parentIndex": 95
+                              },
+                              {
+                                "nodeIndex": 97,
+                                "inverseBindMatrix": {
+                                  "$f32": {
+                                    "n": [0.4962707459926605, -0.08015746623277664, -0.8644594550132751, 0, -0.08792465925216675, -0.995249330997467, 0.04180905222892761, 0, -0.8637040257453918, 0.05525869503617287, -0.5009608864784241, 0, -0.12914295494556427, 1.029500961303711, 0.5479480028152466, 1]
+                                  },
+                                  "t": 1
+                                },
+                                "parentIndex": 96
+                              },
+                              {
+                                "nodeIndex": 98,
+                                "inverseBindMatrix": {
+                                  "$f32": {
+                                    "n": [0.16776473820209503, 0.6725305914878845, -0.7208034992218018, 0, -0.25175923109054565, -0.6776938438415527, -0.6909042000770569, 0, -0.9531381726264954, 0.2973783314228058, 0.055622540414333344, 0, 0.25269943475723267, 0.333586722612381, 1.1562798023223877, 1]
+                                  },
+                                  "t": 1
+                                },
+                                "parentIndex": 94
+                              },
+                              {
+                                "nodeIndex": 99,
+                                "inverseBindMatrix": {
+                                  "$f32": {
+                                    "n": [0.5070949792861938, -0.8618900179862976, -0.0005288486718200147, 0, 0.00007409617683151737, -0.0005699705216102302, 0.9999997615814209, 0, -0.8618901371955872, -0.5070949196815491, -0.0002251533151138574, 0, 0.06120492145419121, 0.017816299572587013, -1.442280650138855, 1]
+                                  },
+                                  "t": 1
+                                },
+                                "parentIndex": 68
+                              },
+                              {
+                                "nodeIndex": 100,
+                                "inverseBindMatrix": {
+                                  "$f32": {
+                                    "n": [0.5070949792861938, -0.8618900179862976, -0.0005288486718200147, 0, 0.00007409617683151737, -0.0005699705216102302, 0.9999997615814209, 0, -0.8618901371955872, -0.5070949196815491, -0.0002251533151138574, 0, 0.0612049326300621, 0.01781631074845791, -1.4422805309295654, 1]
+                                  },
+                                  "t": 1
+                                },
+                                "parentIndex": 99
+                              },
+                              {
+                                "nodeIndex": 101,
+                                "inverseBindMatrix": {
+                                  "$f32": {
+                                    "n": [-0.6921871900558472, -0.680149257183075, -0.24139970541000366, 0, 0.6873782873153687, -0.7232276797294617, 0.06672877073287964, 0, -0.21997249126434326, -0.11974411457777023, 0.9681288003921509, 0, -1.1054835319519043, 0.9075469374656677, -0.114148810505867, 1]
+                                  },
+                                  "t": 1
+                                },
+                                "parentIndex": 99
+                              },
+                              {
+                                "nodeIndex": 102,
+                                "inverseBindMatrix": {
+                                  "$f32": {
+                                    "n": [-0.6921872496604919, -0.6801491975784302, -0.24139973521232605, 0, 0.6873782873153687, -0.7232276797294617, 0.0667286291718483, 0, -0.2199724167585373, -0.11974424123764038, 0.9681288003921509, 0, -1.1054836511611938, 0.7631593346595764, -0.11414863169193268, 1]
+                                  },
+                                  "t": 1
+                                },
+                                "parentIndex": 101
+                              },
+                              {
+                                "nodeIndex": 103,
+                                "inverseBindMatrix": {
+                                  "$f32": {
+                                    "n": [-0.6921870708465576, -0.6364222764968872, 0.3403579890727997, 0, 0.6873785257339478, -0.43760257959365845, 0.5796676278114319, 0, -0.21997188031673431, 0.6351932883262634, 0.7403659820556641, 0, -1.1054840087890625, 0.33221235871315, -0.5343621373176575, 1]
+                                  },
+                                  "t": 1
+                                },
+                                "parentIndex": 102
+                              },
+                              {
+                                "nodeIndex": 104,
+                                "inverseBindMatrix": {
+                                  "$f32": {
+                                    "n": [-0.6921871304512024, -0.636422336101532, 0.3403579294681549, 0, 0.687378466129303, -0.43760257959365845, 0.5796677470207214, 0, -0.2199719250202179, 0.6351932883262634, 0.7403659820556641, 0, -1.1054840087890625, 0.21412500739097595, -0.5343621969223022, 1]
+                                  },
+                                  "t": 1
+                                },
+                                "parentIndex": 103
+                              },
+                              {
+                                "nodeIndex": 105,
+                                "inverseBindMatrix": {
+                                  "$f32": {
+                                    "n": [-0.7057108283042908, -0.6449204683303833, 0.29334214329719543, 0, 0.6773099303245544, -0.49260860681533813, 0.5464320778846741, 0, -0.20790237188339233, 0.5843065977096558, 0.784450352191925, 0, -1.1024569272994995, 0.15740147233009338, -0.5259987115859985, 1]
+                                  },
+                                  "t": 1
+                                },
+                                "parentIndex": 104
+                              },
+                              {
+                                "nodeIndex": 106,
+                                "inverseBindMatrix": {
+                                  "$f32": {
+                                    "n": [0.47746777534484863, -0.5310128331184387, 0.7000356316566467, 0, 0.4783278703689575, -0.5112243890762329, -0.7140392065048218, 0, 0.73703932762146, 0.6757772564888, 0.009905096143484116, 0, -0.3572756350040436, 0.19003747403621674, 1.1618539094924927, 1]
+                                  },
+                                  "t": 1
+                                },
+                                "parentIndex": 105
+                              },
+                              {
+                                "nodeIndex": 107,
+                                "inverseBindMatrix": {
+                                  "$f32": {
+                                    "n": [0.6777442097663879, -0.28828972578048706, 0.6764257550239563, 0, 0.2524908483028412, -0.7727512717247009, -0.5823261737823486, 0, 0.69058758020401, 0.5654594898223877, -0.4509371221065521, 0, 0.008106645196676254, 0.5514082312583923, 1.0861871242523193, 1]
+                                  },
+                                  "t": 1
+                                },
+                                "parentIndex": 106
+                              },
+                              {
+                                "nodeIndex": 108,
+                                "inverseBindMatrix": {
+                                  "$f32": {
+                                    "n": [0.6802949905395508, -0.1703464686870575, 0.7128680944442749, 0, 0.26488175988197327, -0.849738359451294, -0.4558314085006714, 0, 0.6834006309509277, 0.4989255964756012, -0.5329510569572449, 0, -0.0016818288713693619, 0.6727957129478455, 0.9941164255142212, 1]
+                                  },
+                                  "t": 1
+                                },
+                                "parentIndex": 107
+                              },
+                              {
+                                "nodeIndex": 109,
+                                "inverseBindMatrix": {
+                                  "$f32": {
+                                    "n": [0.6774765253067017, -0.020983843132853508, 0.7352449893951416, 0, 0.23559963703155518, -0.9407376646995544, -0.24393706023693085, 0, 0.6967914700508118, 0.33848509192466736, -0.6323838233947754, 0, 0.02324211783707142, 0.861343264579773, 0.8154690861701965, 1]
+                                  },
+                                  "t": 1
+                                },
+                                "parentIndex": 108
+                              },
+                              {
+                                "nodeIndex": 110,
+                                "inverseBindMatrix": {
+                                  "$f32": {
+                                    "n": [0.6696135401725769, 0.03108300268650055, -0.7420589923858643, 0, -0.6025893092155457, -0.5613268613815308, -0.5672725439071655, 0, -0.4341702163219452, 0.8270102143287659, -0.35714179277420044, 0, 1.0589841604232788, 0.5124684572219849, 0.27096256613731384, 1]
+                                  },
+                                  "t": 1
+                                },
+                                "parentIndex": 106
+                              },
+                              {
+                                "nodeIndex": 111,
+                                "inverseBindMatrix": {
+                                  "$f32": {
+                                    "n": [0.6707800030708313, -0.1331373155117035, -0.7296085953712463, 0, -0.5967782139778137, -0.6809881329536438, -0.4243945777416229, 0, -0.44035208225250244, 0.7200899124145508, -0.536246657371521, 0, 1.0545686483383179, 0.5200535655021667, 0.15866561233997345, 1]
+                                  },
+                                  "t": 1
+                                },
+                                "parentIndex": 110
+                              },
+                              {
+                                "nodeIndex": 112,
+                                "inverseBindMatrix": {
+                                  "$f32": {
+                                    "n": [0.6683390140533447, -0.1588691622018814, -0.7266935110092163, 0, -0.6081656813621521, -0.6792252659797668, -0.41083747148513794, 0, -0.4283192455768585, 0.7165287733078003, -0.5505715608596802, 0, 1.0627219676971436, 0.47956594824790955, 0.1489635556936264, 1]
+                                  },
+                                  "t": 1
+                                },
+                                "parentIndex": 111
+                              },
+                              {
+                                "nodeIndex": 113,
+                                "inverseBindMatrix": {
+                                  "$f32": {
+                                    "n": [0.4774675667285919, -0.5310128331184387, 0.7000356912612915, 0, 0.4783281683921814, -0.5112242698669434, -0.7140390872955322, 0, 0.7370392680168152, 0.6757773160934448, 0.00990546215325594, 0, -0.357276052236557, 0.19003726541996002, 1.1618537902832031, 1]
+                                  },
+                                  "t": 1
+                                },
+                                "parentIndex": 106
+                              },
+                              {
+                                "nodeIndex": 114,
+                                "inverseBindMatrix": {
+                                  "$f32": {
+                                    "n": [0.3574669361114502, -0.6066166758537292, 0.7100940346717834, 0, 0.3950026333332062, -0.5907747745513916, -0.7035325169563293, 0, 0.8462802767753601, 0.5319786071777344, 0.02843281254172325, 0, -0.3278706967830658, 0.2442823201417923, 1.1652785539627075, 1]
+                                  },
+                                  "t": 1
+                                },
+                                "parentIndex": 105
+                              },
+                              {
+                                "nodeIndex": 115,
+                                "inverseBindMatrix": {
+                                  "$f32": {
+                                    "n": [0.43873804807662964, -0.3373427391052246, 0.8328918814659119, 0, 0.263459712266922, -0.8378432989120483, -0.47812947630882263, 0, 0.8591262698173523, 0.42920705676078796, -0.27871760725975037, 0, -0.1427285075187683, 0.6144673228263855, 1.0454961061477661, 1]
+                                  },
+                                  "t": 1
+                                },
+                                "parentIndex": 114
+                              },
+                              {
+                                "nodeIndex": 116,
+                                "inverseBindMatrix": {
+                                  "$f32": {
+                                    "n": [0.4396725296974182, -0.12746906280517578, 0.889066755771637, 0, 0.2701573073863983, -0.9252675771713257, -0.26626092195510864, 0, 0.8565647006034851, 0.3572554886341095, -0.37237805128097534, 0, -0.14851725101470947, 0.8001373410224915, 0.8809094429016113, 1]
+                                  },
+                                  "t": 1
+                                },
+                                "parentIndex": 115
+                              },
+                              {
+                                "nodeIndex": 117,
+                                "inverseBindMatrix": {
+                                  "$f32": {
+                                    "n": [0.438498854637146, -0.025613099336624146, 0.8983666896820068, 0, 0.2536753714084625, -0.9554210305213928, -0.15106043219566345, 0, 0.8621876239776611, 0.29413333535194397, -0.4124535918235779, 0, -0.133966863155365, 0.8754592537879944, 0.7800275087356567, 1]
+                                  },
+                                  "t": 1
+                                },
+                                "parentIndex": 116
+                              },
+                              {
+                                "nodeIndex": 118,
+                                "inverseBindMatrix": {
+                                  "$f32": {
+                                    "n": [0.35746678709983826, -0.606616735458374, 0.7100940942764282, 0, 0.3950030207633972, -0.590774655342102, -0.7035324573516846, 0, 0.8462801575660706, 0.5319787859916687, 0.028433090075850487, 0, -0.3278712034225464, 0.24428226053714752, 1.165278673171997, 1]
+                                  },
+                                  "t": 1
+                                },
+                                "parentIndex": 114
+                              },
+                              {
+                                "nodeIndex": 119,
+                                "inverseBindMatrix": {
+                                  "$f32": {
+                                    "n": [0.24258503317832947, -0.6481525897979736, 0.7218384146690369, 0, 0.3394138514995575, -0.6403353810310364, -0.689034640789032, 0, 0.9088183045387268, 0.4121514558792114, 0.06465622037649155, 0, -0.3196154236793518, 0.2894817292690277, 1.158579707145691, 1]
+                                  },
+                                  "t": 1
+                                },
+                                "parentIndex": 105
+                              },
+                              {
+                                "nodeIndex": 120,
+                                "inverseBindMatrix": {
+                                  "$f32": {
+                                    "n": [0.5367292165756226, -0.1874152570962906, 0.8226768970489502, 0, 0.1446811705827713, -0.9401352405548096, -0.30856621265411377, 0, 0.8312575221061707, 0.2846423387527466, -0.47748255729675293, 0, 0.07466764003038406, 0.8395965695381165, 0.8862197995185852, 1]
+                                  },
+                                  "t": 1
+                                },
+                                "parentIndex": 119
+                              },
+                              {
+                                "nodeIndex": 121,
+                                "inverseBindMatrix": {
+                                  "$f32": {
+                                    "n": [0.536296010017395, -0.06282318383455276, 0.8416886329650879, 0, 0.1377430558204651, -0.9773421883583069, -0.1607135683298111, 0, 0.8327144980430603, 0.20212680101394653, -0.5154911875724792, 0, 0.08124092221260071, 0.925244927406311, 0.7531296014785767, 1]
+                                  },
+                                  "t": 1
+                                },
+                                "parentIndex": 120
+                              },
+                              {
+                                "nodeIndex": 122,
+                                "inverseBindMatrix": {
+                                  "$f32": {
+                                    "n": [0.5341193675994873, 0.21756282448768616, 0.8169350624084473, 0, 0.15656541287899017, -0.9750592708587646, 0.15730999410152435, 0, 0.8307850360870361, 0.04388148710131645, -0.5548608303070068, 0, 0.06159511208534241, 1.0906267166137695, 0.42960476875305176, 1]
+                                  },
+                                  "t": 1
+                                },
+                                "parentIndex": 121
+                              },
+                              {
+                                "nodeIndex": 123,
+                                "inverseBindMatrix": {
+                                  "$f32": {
+                                    "n": [0.24258501827716827, -0.6481525897979736, 0.7218384146690369, 0, 0.3394137918949127, -0.6403353214263916, -0.6890347599983215, 0, 0.9088183045387268, 0.41215142607688904, 0.06465622782707214, 0, -0.3196153938770294, 0.2894816994667053, 1.1585798263549805, 1]
+                                  },
+                                  "t": 1
+                                },
+                                "parentIndex": 119
+                              },
+                              {
+                                "nodeIndex": 124,
+                                "inverseBindMatrix": {
+                                  "$f32": {
+                                    "n": [0.1677647829055786, -0.6725305914878845, 0.7208034992218018, 0, 0.25175929069519043, -0.6776938438415527, -0.6909042000770569, 0, 0.9531381726264954, 0.29737839102745056, 0.05562256649136543, 0, -0.25269949436187744, 0.33358675241470337, 1.1562796831130981, 1]
+                                  },
+                                  "t": 1
+                                },
+                                "parentIndex": 105
+                              },
+                              {
+                                "nodeIndex": 125,
+                                "inverseBindMatrix": {
+                                  "$f32": {
+                                    "n": [0.49724024534225464, -0.15681703388690948, 0.853323221206665, 0, 0.07539308816194534, -0.9719997644424438, -0.22255881130695343, 0, 0.8643309473991394, 0.17499986290931702, -0.47149449586868286, 0, 0.14191870391368866, 0.8920431137084961, 0.8016095161437988, 1]
+                                  },
+                                  "t": 1
+                                },
+                                "parentIndex": 124
+                              },
+                              {
+                                "nodeIndex": 126,
+                                "inverseBindMatrix": {
+                                  "$f32": {
+                                    "n": [0.49657732248306274, -0.08131396770477295, 0.8641753196716309, 0, 0.06712228059768677, -0.9890236854553223, -0.13163167238235474, 0, 0.8653932809829712, 0.12337072193622589, -0.48566874861717224, 0, 0.1497555524110794, 0.9362522959709167, 0.7179160118103027, 1]
+                                  },
+                                  "t": 1
+                                },
+                                "parentIndex": 125
+                              },
+                              {
+                                "nodeIndex": 127,
+                                "inverseBindMatrix": {
+                                  "$f32": {
+                                    "n": [0.4962707459926605, 0.08015746623277664, 0.8644594550132751, 0, 0.08792465925216675, -0.995249330997467, 0.04180905222892761, 0, 0.8637040257453918, 0.05525869503617287, -0.5009608864784241, 0, 0.12914295494556427, 1.029500961303711, 0.5479480028152466, 1]
+                                  },
+                                  "t": 1
+                                },
+                                "parentIndex": 126
+                              },
+                              {
+                                "nodeIndex": 128,
+                                "inverseBindMatrix": {
+                                  "$f32": {
+                                    "n": [0.16776473820209503, -0.6725305914878845, 0.7208034992218018, 0, 0.25175923109054565, -0.6776938438415527, -0.6909042000770569, 0, 0.9531381726264954, 0.2973783314228058, 0.055622540414333344, 0, -0.25269943475723267, 0.333586722612381, 1.1562798023223877, 1]
+                                  },
+                                  "t": 1
+                                },
+                                "parentIndex": 124
+                              },
+                              {
+                                "nodeIndex": 129,
+                                "inverseBindMatrix": {
+                                  "$f32": {
+                                    "n": [-1, -1.7744125396443322e-12, 1.510573781615676e-7, 0, 1.510573781615676e-7, -7.085780566740141e-7, 1, 0, -1.6725470834699774e-12, 1, 6.401211862794298e-7, 0, 0.10638986527919769, 0.04358144477009773, -1.3115450143814087, 1]
+                                  },
+                                  "t": 1
+                                },
+                                "parentIndex": 68
+                              },
+                              {
+                                "nodeIndex": 130,
+                                "inverseBindMatrix": {
+                                  "$f32": {
+                                    "n": [-0.9999998807907104, -1.770385379094852e-12, 1.510573639507129e-7, 0, 1.510573639507129e-7, -5.399906513048336e-7, 1, 0, -1.6812530100746015e-12, 1, 6.40121129436011e-7, 0, 0.1063898503780365, 0.04358125105500221, -1.3115448951721191, 1]
+                                  },
+                                  "t": 1
+                                },
+                                "parentIndex": 129
+                              },
+                              {
+                                "nodeIndex": 131,
+                                "inverseBindMatrix": {
+                                  "$f32": {
+                                    "n": [-1, -1.7744125396443322e-12, 1.510573781615676e-7, 0, 1.510573781615676e-7, -7.085780566740141e-7, 1, 0, -1.6725470834699774e-12, 1, 6.401211862794298e-7, 0, -0.10639026015996933, 0.04358144477009773, -1.3115448951721191, 1]
+                                  },
+                                  "t": 1
+                                },
+                                "parentIndex": 68
+                              },
+                              {
+                                "nodeIndex": 132,
+                                "inverseBindMatrix": {
+                                  "$f32": {
+                                    "n": [-0.9999998807907104, -1.770385379094852e-12, 1.510573639507129e-7, 0, 1.510573639507129e-7, -5.399906513048336e-7, 1, 0, -1.6812530100746015e-12, 1, 6.40121129436011e-7, 0, -0.10639024525880814, 0.04358125105500221, -1.3115448951721191, 1]
+                                  },
+                                  "t": 1
+                                },
+                                "parentIndex": 131
+                              }
+                            ],
+                            "nodeParents": [
+                              [1, 0],
+                              [2, 1],
+                              [3, 2],
+                              [4, 3],
+                              [21, 3],
+                              [22, 3],
+                              [23, 3],
+                              [5, 4],
+                              [6, 5],
+                              [20, 5],
+                              [19, 5],
+                              [7, 37],
+                              [8, 7],
+                              [9, 7],
+                              [11, 7],
+                              [13, 7],
+                              [17, 7],
+                              [10, 9],
+                              [12, 11],
+                              [14, 13],
+                              [16, 13],
+                              [15, 14],
+                              [18, 17],
+                              [24, 23],
+                              [25, 24],
+                              [27, 24],
+                              [28, 24],
+                              [26, 24],
+                              [29, 25],
+                              [39, 25],
+                              [133, 25],
+                              [30, 29],
+                              [38, 29],
+                              [31, 30],
+                              [37, 30],
+                              [32, 31],
+                              [33, 32],
+                              [34, 33],
+                              [35, 34],
+                              [36, 35],
+                              [40, 39],
+                              [41, 40],
+                              [63, 40],
+                              [42, 41],
+                              [43, 42],
+                              [44, 43],
+                              [45, 44],
+                              [46, 45],
+                              [47, 46],
+                              [49, 46],
+                              [51, 46],
+                              [57, 46],
+                              [48, 47],
+                              [50, 49],
+                              [52, 51],
+                              [53, 52],
+                              [54, 53],
+                              [55, 54],
+                              [56, 55],
+                              [58, 57],
+                              [59, 58],
+                              [60, 59],
+                              [61, 60],
+                              [62, 61],
+                              [64, 63],
+                              [65, 64],
+                              [66, 65],
+                              [67, 66],
+                              [68, 67],
+                              [69, 68],
+                              [99, 68],
+                              [129, 68],
+                              [131, 68],
+                              [70, 69],
+                              [71, 69],
+                              [72, 71],
+                              [73, 72],
+                              [74, 73],
+                              [75, 74],
+                              [76, 75],
+                              [84, 75],
+                              [89, 75],
+                              [94, 75],
+                              [77, 76],
+                              [80, 76],
+                              [83, 76],
+                              [78, 77],
+                              [79, 78],
+                              [81, 80],
+                              [82, 81],
+                              [85, 84],
+                              [88, 84],
+                              [86, 85],
+                              [87, 86],
+                              [90, 89],
+                              [93, 89],
+                              [91, 90],
+                              [92, 91],
+                              [95, 94],
+                              [98, 94],
+                              [96, 95],
+                              [97, 96],
+                              [100, 99],
+                              [101, 99],
+                              [102, 101],
+                              [103, 102],
+                              [104, 103],
+                              [105, 104],
+                              [106, 105],
+                              [114, 105],
+                              [119, 105],
+                              [124, 105],
+                              [107, 106],
+                              [110, 106],
+                              [113, 106],
+                              [108, 107],
+                              [109, 108],
+                              [111, 110],
+                              [112, 111],
+                              [115, 114],
+                              [118, 114],
+                              [116, 115],
+                              [117, 116],
+                              [120, 119],
+                              [123, 119],
+                              [121, 120],
+                              [122, 121],
+                              [125, 124],
+                              [128, 124],
+                              [126, 125],
+                              [127, 126],
+                              [130, 129],
+                              [132, 131]
+                            ],
+                            "nodeTransforms": [
+                              [
+                                0,
+                                {
+                                  "$f32": {
+                                    "n": [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1]
+                                  },
+                                  "t": 1
+                                }
+                              ],
+                              [
+                                1,
+                                {
+                                  "$f32": {
+                                    "n": [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1]
+                                  },
+                                  "t": 1
+                                }
+                              ],
+                              [
+                                2,
+                                {
+                                  "$f32": {
+                                    "n": [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1]
+                                  },
+                                  "t": 1
+                                }
+                              ],
+                              [
+                                3,
+                                {
+                                  "$f32": {
+                                    "n": [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1]
+                                  },
+                                  "t": 1
+                                }
+                              ],
+                              [
+                                4,
+                                {
+                                  "$f32": {
+                                    "n": [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1]
+                                  },
+                                  "t": 1
+                                }
+                              ],
+                              [
+                                5,
+                                {
+                                  "$f32": {
+                                    "n": [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1]
+                                  },
+                                  "t": 1
+                                }
+                              ],
+                              [
+                                6,
+                                {
+                                  "$f32": {
+                                    "n": [1, 0, 0, 0, 0, 3.7140330277907196e-7, -0.9999999403953552, 0, 0, 0.9999999403953552, 3.7140330277907196e-7, 0, 0, 7.640026211674922e-8, 1.6964266017882416e-23, 1]
+                                  },
+                                  "t": 1
+                                }
+                              ],
+                              [
+                                7,
+                                {
+                                  "$f32": {
+                                    "n": [-1.0000001192092896, -4.117383411994524e-7, 7.235641419356398e-8, 0, 4.1173828435603355e-7, -1, -7.744800996078993e-7, 0, 7.2356712621513e-8, -6.743493941030465e-7, 1, 0, 0, -8.608481605031364e-16, 1.8709284914776667e-15, 1]
+                                  },
+                                  "t": 1
+                                }
+                              ],
+                              [
+                                8,
+                                {
+                                  "$f32": {
+                                    "n": [-0.9999998807907104, 6.123059958368371e-13, 0.000002296763113918132, 0, 5.590018465478908e-13, 1, -7.660158857052124e-13, 0, -0.0000022967628865444567, -1.0013143736387065e-7, -1, 0, -1.3317577569844985e-22, 1.1180913254304385e-15, 1.5713635370990403e-15, 1]
+                                  },
+                                  "t": 1
+                                }
+                              ],
+                              [
+                                9,
+                                {
+                                  "$f32": {
+                                    "n": [-0.9999998807907104, 6.123059958368371e-13, 0.000002296763113918132, 0, 5.590018465478908e-13, 1, -7.660158857052124e-13, 0, -0.0000022967628865444567, -1.0013143736387065e-7, -1, 0, 6.0974513741048064e-15, 1.9317381028116642e-9, 0.03386635333299637, 1]
+                                  },
+                                  "t": 1
+                                }
+                              ],
+                              [
+                                10,
+                                {
+                                  "$f32": {
+                                    "n": [1, -8.330989164587882e-15, 1.0560150166425905e-13, 0, -8.330862109645794e-15, 1, 6.3773267299871515e-15, 0, 1.0560142712535969e-13, 6.377579569321907e-15, 1, 0, -2.2998613172860345e-15, -1.3654100170729989e-15, -5.971612093702561e-14, 1]
+                                  },
+                                  "t": 1
+                                }
+                              ],
+                              [
+                                11,
+                                {
+                                  "$f32": {
+                                    "n": [-0.9999998807907104, 6.123059958368371e-13, 0.000002296763113918132, 0, 5.590018465478908e-13, 1, -7.660158857052124e-13, 0, -0.0000022967628865444567, -1.0013143736387065e-7, -1, 0, -9.923395435316442e-16, -0.09265467524528503, 0.007664148695766926, 1]
+                                  },
+                                  "t": 1
+                                }
+                              ],
+                              [
+                                12,
+                                {
+                                  "$f32": {
+                                    "n": [1, -8.330989164587882e-15, 1.0560150166425905e-13, 0, -8.330862109645794e-15, 1, 6.3773267299871515e-15, 0, 1.0560142712535969e-13, 6.377579569321907e-15, 1, 0, -3.3745792618611326e-17, 1.2523714287837606e-9, -4.0809154666643366e-11, 1]
+                                  },
+                                  "t": 1
+                                }
+                              ],
+                              [
+                                13,
+                                {
+                                  "$f32": {
+                                    "n": [-0.9999998807907104, 6.123059958368371e-13, 0.000002296763113918132, 0, 5.590018465478908e-13, 1, -7.660158857052124e-13, 0, -0.0000022967628865444567, -1.0013143736387065e-7, -1, 0, 8.244096501452036e-16, -0.07815150916576385, -0.04984097555279732, 1]
+                                  },
+                                  "t": 1
+                                }
+                              ],
+                              [
+                                14,
+                                {
+                                  "$f32": {
+                                    "n": [1, -8.330989164587882e-15, 1.0560150166425905e-13, 0, -8.330862109645794e-15, 1, 6.3773267299871515e-15, 0, 1.0560142712535969e-13, 6.377579569321907e-15, 1, 0, 5.880822697844519e-15, -4.3967451901494314e-9, -1.280965333805284e-10, 1]
+                                  },
+                                  "t": 1
+                                }
+                              ],
+                              [
+                                15,
+                                {
+                                  "$f32": {
+                                    "n": [1, -8.330989164587882e-15, 1.0560150166425905e-13, 0, -8.330862109645794e-15, 1, 6.3773267299871515e-15, 0, 1.0560142712535969e-13, 6.377579569321907e-15, 1, 0, 1.549109072129795e-7, 0.01305957231670618, -0.0674474835395813, 1]
+                                  },
+                                  "t": 1
+                                }
+                              ],
+                              [
+                                16,
+                                {
+                                  "$f32": {
+                                    "n": [1, -8.330989164587882e-15, 1.0560150166425905e-13, 0, -8.330862109645794e-15, 1, 6.3773267299871515e-15, 0, 1.0560142712535969e-13, 6.377579569321907e-15, 1, 0, 1.549109072129795e-7, 0.013059564866125584, -0.0674474835395813, 1]
+                                  },
+                                  "t": 1
+                                }
+                              ],
+                              [
+                                17,
+                                {
+                                  "$f32": {
+                                    "n": [-0.9999998807907104, 6.123059958368371e-13, 0.000002296763113918132, 0, 5.590018465478908e-13, 1, -7.660158857052124e-13, 0, -0.0000022967628865444567, -1.0013143736387065e-7, -1, 0, -1.731304374545656e-16, -0.006553859915584326, -0.0060592289082705975, 1]
+                                  },
+                                  "t": 1
+                                }
+                              ],
+                              [
+                                18,
+                                {
+                                  "$f32": {
+                                    "n": [1, -8.330989164587882e-15, 1.0560150166425905e-13, 0, -8.330862109645794e-15, 1, 6.3773267299871515e-15, 0, 1.0560142712535969e-13, 6.377579569321907e-15, 1, 0, 6.552831109625295e-16, -6.878488889583423e-10, 1.7785256600788557e-10, 1]
+                                  },
+                                  "t": 1
+                                }
+                              ],
+                              [
+                                19,
+                                {
+                                  "$f32": {
+                                    "n": [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1]
+                                  },
+                                  "t": 1
+                                }
+                              ],
+                              [
+                                20,
+                                {
+                                  "$f32": {
+                                    "n": [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1]
+                                  },
+                                  "t": 1
+                                }
+                              ],
+                              [
+                                21,
+                                {
+                                  "$f32": {
+                                    "n": [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1]
+                                  },
+                                  "t": 1
+                                }
+                              ],
+                              [
+                                22,
+                                {
+                                  "$f32": {
+                                    "n": [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1]
+                                  },
+                                  "t": 1
+                                }
+                              ],
+                              [
+                                23,
+                                {
+                                  "$f32": {
+                                    "n": [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1]
+                                  },
+                                  "t": 1
+                                }
+                              ],
+                              [
+                                24,
+                                {
+                                  "$f32": {
+                                    "n": [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1]
+                                  },
+                                  "t": 1
+                                }
+                              ],
+                              [
+                                25,
+                                {
+                                  "$f32": {
+                                    "n": [1, 0, 0, 0, 0, -1.3435885648505064e-7, -0.9999999403953552, 0, 0, 0.9999999403953552, -1.3435885648505064e-7, 0, 0, 0, 0, 1]
+                                  },
+                                  "t": 1
+                                }
+                              ],
+                              [
+                                26,
+                                {
+                                  "$f32": {
+                                    "n": [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1]
+                                  },
+                                  "t": 1
+                                }
+                              ],
+                              [
+                                27,
+                                {
+                                  "$f32": {
+                                    "n": [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1]
+                                  },
+                                  "t": 1
+                                }
+                              ],
+                              [
+                                28,
+                                {
+                                  "$f32": {
+                                    "n": [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1]
+                                  },
+                                  "t": 1
+                                }
+                              ],
+                              [
+                                29,
+                                {
+                                  "$f32": {
+                                    "n": [1, 0, 0, 0, 0, 0.9999999403953552, 6.202441954949924e-15, 0, 0, -6.202441954949924e-15, 0.9999999403953552, 0, 0, 0, 0, 1]
+                                  },
+                                  "t": 1
+                                }
+                              ],
+                              [
+                                30,
+                                {
+                                  "$f32": {
+                                    "n": [1, 0, 0, 0, 0, -0.24963967502117157, 0.9683387875556946, 0, 0, -0.9683387875556946, -0.24963967502117157, 0, 0, 0.04960080608725548, 0.9074603319168091, 1]
+                                  },
+                                  "t": 1
+                                }
+                              ],
+                              [
+                                31,
+                                {
+                                  "$f32": {
+                                    "n": [1, 0, 0, 0, 0, 0.9916855692863464, -0.12868468463420868, 0, 0, 0.12868468463420868, 0.9916855692863464, 0, 0, 0.13677915930747986, -1.841003083313808e-8, 1]
+                                  },
+                                  "t": 1
+                                }
+                              ],
+                              [
+                                32,
+                                {
+                                  "$f32": {
+                                    "n": [1, 0, 0, 0, 0, 0.9879985451698303, -0.15446272492408752, 0, 0, 0.15446272492408752, 0.9879985451698303, 0, 0, 0.12277687340974808, 6.987054046447838e-9, 1]
+                                  },
+                                  "t": 1
+                                }
+                              ],
+                              [
+                                33,
+                                {
+                                  "$f32": {
+                                    "n": [1, 0, 0, 0, 0, 0.999994695186615, 0.003254292067140341, 0, 0, -0.003254292067140341, 0.999994695186615, 0, 0, 0.15535065531730652, -1.0025140717573322e-9, 1]
+                                  },
+                                  "t": 1
+                                }
+                              ],
+                              [
+                                34,
+                                {
+                                  "$f32": {
+                                    "n": [1, 0, 0, 0, 0, 0.9186036586761475, 0.39517998695373535, 0, 0, -0.39517998695373535, 0.9186036586761475, 0, 0, 0.17304424941539764, -2.9106050902782954e-10, 1]
+                                  },
+                                  "t": 1
+                                }
+                              ],
+                              [
+                                35,
+                                {
+                                  "$f32": {
+                                    "n": [1, 0, 0, 0, 0, 0.9820041656494141, -0.18885961174964905, 0, 0, 0.18885961174964905, 0.9820041656494141, 0, 0, 0.05945202335715294, 5.995808294301241e-8, 1]
+                                  },
+                                  "t": 1
+                                }
+                              ],
+                              [
+                                36,
+                                {
+                                  "$f32": {
+                                    "n": [1, 0, 0, 0, 0, 0.9824360609054565, -0.1865992248058319, 0, 0, 0.1865992248058319, 0.9824360609054565, 0, 0, 0.05634118616580963, 1.0580478715382924e-8, 1]
+                                  },
+                                  "t": 1
+                                }
+                              ],
+                              [
+                                37,
+                                {
+                                  "$f32": {
+                                    "n": [1, 0, 0, 0, 0, -0.24963951110839844, -0.9683388471603394, 0, 0, 0.9683388471603394, -0.24963951110839844, 0, 0, -0.8663465976715088, 0.27456849813461304, 1]
+                                  },
+                                  "t": 1
+                                }
+                              ],
+                              [
+                                38,
+                                {
+                                  "$f32": {
+                                    "n": [1, 0, 0, 0, 0, 0.9999999403953552, 6.202441954949924e-15, 0, 0, -6.202441954949924e-15, 0.9999999403953552, 0, 0, 0, 0, 1]
+                                  },
+                                  "t": 1
+                                }
+                              ],
+                              [
+                                39,
+                                {
+                                  "$f32": {
+                                    "n": [1, 0, 0, 0, 0, 0.9999999403953552, 6.202441954949924e-15, 0, 0, -6.202441954949924e-15, 0.9999999403953552, 0, 0, 0.032528042793273926, 0.9736846089363098, 1]
+                                  },
+                                  "t": 1
+                                }
+                              ],
+                              [
+                                40,
+                                {
+                                  "$f32": {
+                                    "n": [1, 0, 0, 0, 0, 0.9999999403953552, 6.202441954949924e-15, 0, 0, -6.202441954949924e-15, 0.9999999403953552, 0, 0, -7.888584896420525e-9, -5.5234195883713255e-8, 1]
+                                  },
+                                  "t": 1
+                                }
+                              ],
+                              [
+                                41,
+                                {
+                                  "$f32": {
+                                    "n": [1, 0, 0, 0, 0, 0.9999999403953552, 6.202441954949924e-15, 0, 0, -6.202441954949924e-15, 0.9999999403953552, 0, 0, -0.03216863423585892, 0.18806946277618408, 1]
+                                  },
+                                  "t": 1
+                                }
+                              ],
+                              [
+                                42,
+                                {
+                                  "$f32": {
+                                    "n": [1, 0, 0, 0, 0, -0.122953861951828, 0.9924123883247375, 0, 0, -0.9924123883247375, -0.122953861951828, 0, 0, -1.4327214969966917e-8, -1.1916097975017692e-7, 1]
+                                  },
+                                  "t": 1
+                                }
+                              ],
+                              [
+                                43,
+                                {
+                                  "$f32": {
+                                    "n": [1, 0, 0, 0, 0, -0.122953861951828, -0.9924123883247375, 0, 0, 0.9924123883247375, -0.122953861951828, 0, 0, -0.12277687340974808, -8.908273230190389e-9, 1]
+                                  },
+                                  "t": 1
+                                }
+                              ],
+                              [
+                                44,
+                                {
+                                  "$f32": {
+                                    "n": [1, 0, 0, 0, 0, -0.24963967502117157, 0.9683387875556946, 0, 0, -0.9683387875556946, -0.24963967502117157, 0, 0, -1.1198451943528198e-8, -1.1713271419466764e-7, 1]
+                                  },
+                                  "t": 1
+                                }
+                              ],
+                              [
+                                45,
+                                {
+                                  "$f32": {
+                                    "n": [1, 0, 0, 0, 0, 1, -2.1689089635401615e-7, 0, 0, 2.1689089635401615e-7, 1, 0, 0, -0.1367790251970291, -6.206976266298625e-9, 1]
+                                  },
+                                  "t": 1
+                                }
+                              ],
+                              [
+                                46,
+                                {
+                                  "$f32": {
+                                    "n": [1, 0, 0, 0, 0, 0.9999999403953552, 1.0100561098624894e-7, 0, 0, -1.0100561098624894e-7, 0.9999999403953552, 0, 0, 5.314052131666358e-8, 1.736199095603297e-8, 1]
+                                  },
+                                  "t": 1
+                                }
+                              ],
+                              [
+                                47,
+                                {
+                                  "$f32": {
+                                    "n": [-0.42177215218544006, -0.05253243446350098, 0.9051787853240967, 0, 0.536321759223938, 0.7904899716377258, 0.2957780063152313, 0, -0.7310726046562195, 0.6102180480957031, -0.30523234605789185, 0, 0, 4.5431768569415e-8, 1.006418237636808e-8, 1]
+                                  },
+                                  "t": 1
+                                }
+                              ],
+                              [
+                                48,
+                                {
+                                  "$f32": {
+                                    "n": [1, 1.0152743357139116e-7, 7.355767905892208e-8, 0, -1.0334950673041021e-7, 1, -1.1903776453436876e-7, 0, -8.734045309211069e-8, 9.787603971744829e-8, 1, 0, 2.5831601746517663e-8, -5.226669586022581e-8, -4.3676212868604125e-8, 1]
+                                  },
+                                  "t": 1
+                                }
+                              ],
+                              [
+                                49,
+                                {
+                                  "$f32": {
+                                    "n": [-0.42177215218544006, 0.05253243446350098, -0.9051787853240967, 0, -0.536321759223938, 0.7904899716377258, 0.2957780063152313, 0, 0.7310726046562195, 0.6102180480957031, -0.30523234605789185, 0, 0, 4.5431768569415e-8, 1.006418237636808e-8, 1]
+                                  },
+                                  "t": 1
+                                }
+                              ],
+                              [
+                                50,
+                                {
+                                  "$f32": {
+                                    "n": [1, -1.0152743357139116e-7, -7.355767905892208e-8, 0, 1.0334950673041021e-7, 1, -1.1903776453436876e-7, 0, 8.734045309211069e-8, 9.787603971744829e-8, 1, 0, -2.5831601746517663e-8, -5.226669586022581e-8, -4.3676212868604125e-8, 1]
+                                  },
+                                  "t": 1
+                                }
+                              ],
+                              [
+                                51,
+                                {
+                                  "$f32": {
+                                    "n": [1, 0, 0, 0, 0, -0.9464234113693237, 0.32292866706848145, 0, 0, -0.32292866706848145, -0.9464234113693237, 0, 0.08805932849645615, 0.06363501399755478, 0.023310812190175056, 1]
+                                  },
+                                  "t": 1
+                                }
+                              ],
+                              [
+                                52,
+                                {
+                                  "$f32": {
+                                    "n": [1, 0, 0, 0, 0, 1, 9.112331333938073e-9, 0, 0, -9.112331333938073e-9, 1, 0, 0, 0.24098128080368042, -9.91718707155087e-9, 1]
+                                  },
+                                  "t": 1
+                                }
+                              ],
+                              [
+                                53,
+                                {
+                                  "$f32": {
+                                    "n": [1, -0.00003838164047920145, 0.00021669249690603465, 0, -1.4000404134628663e-11, 0.9846729636192322, 0.17441017925739288, 0, -0.00022006544168107212, -0.17441017925739288, 0.9846729636192322, 0, -1.4901161193847656e-8, 0.2409813106060028, -3.827612005125047e-9, 1]
+                                  },
+                                  "t": 1
+                                }
+                              ],
+                              [
+                                54,
+                                {
+                                  "$f32": {
+                                    "n": [1, 1.3502084866834352e-11, 2.6470578506909703e-10, 0, -1.2646831498708266e-11, 1, -3.707125273422207e-8, 0, -2.6138538555819935e-10, 3.860660413579353e-8, 1, 0, -6.022753407108894e-9, 0.20407061278820038, 4.3078131284346455e-8, 1]
+                                  },
+                                  "t": 1
+                                }
+                              ],
+                              [
+                                55,
+                                {
+                                  "$f32": {
+                                    "n": [0.9999998807907104, 0.00021878379629924893, -0.00011172204540343955, 0, -0.00019720927230082452, 0.4437754452228546, -0.896138072013855, 0, -0.00014648096112068743, 0.896138072013855, 0.443775475025177, 0, 1.4451660979020176e-9, 0.20407065749168396, 5.0904233717119496e-8, 1]
+                                  },
+                                  "t": 1
+                                }
+                              ],
+                              [
+                                56,
+                                {
+                                  "$f32": {
+                                    "n": [-0.9999999403953552, -4.637155726072706e-8, 0.00024405318254139274, 0, -0.00012938736472278833, 0.8479979038238525, -0.5299992561340332, 0, -0.00020693207625299692, -0.5299992561340332, -0.8479979634284973, 0, 1.1058136628605553e-8, 0.11613546311855316, -7.569008886321171e-8, 1]
+                                  },
+                                  "t": 1
+                                }
+                              ],
+                              [
+                                57,
+                                {
+                                  "$f32": {
+                                    "n": [1, 0, 0, 0, 0, -0.9464234113693237, 0.32292866706848145, 0, 0, -0.32292866706848145, -0.9464234113693237, 0, -0.08805932849645615, 0.06363501399755478, 0.023310812190175056, 1]
+                                  },
+                                  "t": 1
+                                }
+                              ],
+                              [
+                                58,
+                                {
+                                  "$f32": {
+                                    "n": [1, 0, 0, 0, 0, 1, 9.112331333938073e-9, 0, 0, -9.112331333938073e-9, 1, 0, 0, 0.24098128080368042, -9.91718707155087e-9, 1]
+                                  },
+                                  "t": 1
+                                }
+                              ],
+                              [
+                                59,
+                                {
+                                  "$f32": {
+                                    "n": [1, -0.00003838164047920145, 0.00021669249690603465, 0, -1.4000404134628663e-11, 0.9846729636192322, 0.17441017925739288, 0, -0.00022006544168107212, -0.17441017925739288, 0.9846729636192322, 0, 1.4901161193847656e-8, 0.2409813106060028, -3.827612005125047e-9, 1]
+                                  },
+                                  "t": 1
+                                }
+                              ],
+                              [
+                                60,
+                                {
+                                  "$f32": {
+                                    "n": [1, 1.3502084866834352e-11, 2.6470578506909703e-10, 0, -1.2646831498708266e-11, 1, -3.707125273422207e-8, 0, -2.6138538555819935e-10, 3.860660413579353e-8, 1, 0, 1.19252794306135e-8, 0.20407064259052277, 4.447903734217107e-8, 1]
+                                  },
+                                  "t": 1
+                                }
+                              ],
+                              [
+                                61,
+                                {
+                                  "$f32": {
+                                    "n": [0.9999998807907104, 0.00021878379629924893, -0.00011172204540343955, 0, -0.00019720927230082452, 0.4437754452228546, -0.896138072013855, 0, -0.00014648096112068743, 0.896138072013855, 0.443775475025177, 0, 4.491433003295242e-9, 0.20407070219516754, 4.96037415587125e-8, 1]
+                                  },
+                                  "t": 1
+                                }
+                              ],
+                              [
+                                62,
+                                {
+                                  "$f32": {
+                                    "n": [-0.9999999403953552, -4.637155726072706e-8, 0.00024405318254139274, 0, -0.00012938736472278833, 0.8479979038238525, -0.5299992561340332, 0, -0.00020693207625299692, -0.5299992561340332, -0.8479979634284973, 0, 3.6191249996875285e-9, 0.11613546311855316, -8.748450142093134e-8, 1]
+                                  },
+                                  "t": 1
+                                }
+                              ],
+                              [
+                                63,
+                                {
+                                  "$f32": {
+                                    "n": [1, 0, 0, 0, 0, 0.9999999403953552, 6.202441954949924e-15, 0, 0, -6.202441954949924e-15, 0.9999999403953552, 0, 0, -0.03216863423585892, 0.18806946277618408, 1]
+                                  },
+                                  "t": 1
+                                }
+                              ],
+                              [
+                                64,
+                                {
+                                  "$f32": {
+                                    "n": [1, 0, 0, 0, 0, 0.031812455505132675, 0.9994938373565674, 0, 0, -0.9994938373565674, 0.031812455505132675, 0, 0, -1.4327214969966917e-8, -1.1916097975017692e-7, 1]
+                                  },
+                                  "t": 1
+                                }
+                              ],
+                              [
+                                65,
+                                {
+                                  "$f32": {
+                                    "n": [1, 0, 0, 0, 0, 0.031812623143196106, -0.9994937777519226, 0, 0, 0.9994937777519226, 0.031812623143196106, 0, 0, 0.15535065531730652, -1.6163050897688436e-9, 1]
+                                  },
+                                  "t": 1
+                                }
+                              ],
+                              [
+                                66,
+                                {
+                                  "$f32": {
+                                    "n": [1, 0, 0, 0, 0, 0.028559565544128418, 0.9995921850204468, 0, 0, -0.9995921850204468, 0.028559565544128418, 0, 0, 1.0321637766708136e-8, 3.761099165444648e-8, 1]
+                                  },
+                                  "t": 1
+                                }
+                              ],
+                              [
+                                67,
+                                {
+                                  "$f32": {
+                                    "n": [1, 0, 0, 0, 0, 1, 1.6916573031267035e-8, 0, 0, -1.6916573031267035e-8, 1, 0, 0, -7.377503941086161e-9, 9.978017301293107e-10, 1]
+                                  },
+                                  "t": 1
+                                }
+                              ],
+                              [
+                                68,
+                                {
+                                  "$f32": {
+                                    "n": [1, 0, 0, 0, 0, 1, -2.776867624731949e-8, 0, 0, 2.776867624731949e-8, 1, 0, 0, -7.453080819175284e-9, 8.05701061423747e-10, 1]
+                                  },
+                                  "t": 1
+                                }
+                              ],
+                              [
+                                69,
+                                {
+                                  "$f32": {
+                                    "n": [0.5070949792861938, -0.02468927763402462, 0.8615365624427795, 0, 0.8618900179862976, 0.013912648893892765, -0.5069044232368469, 0, 0.0005288257962092757, 0.9995984435081482, 0.028334463015198708, 0, 0.016443733125925064, 0.1233021691441536, 0.07031352072954178, 1]
+                                  },
+                                  "t": 1
+                                }
+                              ],
+                              [
+                                70,
+                                {
+                                  "$f32": {
+                                    "n": [1, 2.94269808520653e-9, 1.46096294784126e-11, 0, -1.8216825381500712e-8, 1, 2.4491610128851704e-11, 0, -9.040788950809286e-12, -1.2994660035514638e-11, 1, 0, 9.20913034718751e-9, -1.2040410446445549e-8, -1.2152062822679e-7, 1]
+                                  },
+                                  "t": 1
+                                }
+                              ],
+                              [
+                                71,
+                                {
+                                  "$f32": {
+                                    "n": [-0.16136161983013153, -0.7077444195747375, -0.6877937912940979, 0, 0.24174760282039642, 0.6473477482795715, -0.7228409051895142, 0, 0.9568283557891846, -0.2829112410545349, 0.06663845479488373, 0, 0.007001222111284733, 0.18042366206645966, -0.018317224457859993, 1]
+                                  },
+                                  "t": 1
+                                }
+                              ],
+                              [
+                                72,
+                                {
+                                  "$f32": {
+                                    "n": [1, 9.747717077956963e-10, -7.831916803979766e-8, 0, 9.55794554613476e-10, 1, -1.235232502949657e-7, 0, 8.653074701214791e-8, 1.3055041847565008e-7, 1, 0, -3.966206207905998e-8, 0.1443876028060913, -3.5231448869410542e-9, 1]
+                                  },
+                                  "t": 1
+                                }
+                              ],
+                              [
+                                73,
+                                {
+                                  "$f32": {
+                                    "n": [1, 3.3290086776105454e-7, -5.120586479279154e-7, 0, 1.2128938919886423e-7, 0.6732878088951111, 0.7393805384635925, 0, 6.137843229225837e-7, -0.7393805384635925, 0.6732876896858215, 0, -6.895648851923397e-8, 0.14438748359680176, 2.7596639640137255e-8, 1]
+                                  },
+                                  "t": 1
+                                }
+                              ],
+                              [
+                                74,
+                                {
+                                  "$f32": {
+                                    "n": [0.9999999403953552, 2.3097802781535393e-8, 1.0051928001075794e-7, 0, 3.9936491447178923e-8, 0.9999999403953552, 1.925601722518877e-8, 0, -8.530054884658966e-8, 1.4040576701290775e-8, 0.9999999403953552, 0, 2.6595401436679822e-8, 0.11808734387159348, -8.568538589770469e-8, 1]
+                                  },
+                                  "t": 1
+                                }
+                              ],
+                              [
+                                75,
+                                {
+                                  "$f32": {
+                                    "n": [0.9997850060462952, -0.020679417997598648, 0.001503472332842648, 0, 0.020733898505568504, 0.9971563220024109, -0.07245240360498428, 0, -8.918188996176468e-7, 0.07246798276901245, 0.9973707795143127, 0, 1.2486987088777823e-7, 0.11808735877275467, 1.0915090342678013e-7, 1]
+                                  },
+                                  "t": 1
+                                }
+                              ],
+                              [
+                                76,
+                                {
+                                  "$f32": {
+                                    "n": [-0.1662101447582245, 0.1129002571105957, -0.9796059131622314, 0, 0.11201155185699463, 0.9891557693481445, 0.09499585628509521, 0, 0.9797078967094421, -0.09393782913684845, -0.17705398797988892, 0, 0.002275933977216482, 0.03823033347725868, 0.011648683808743954, 1]
+                                  },
+                                  "t": 1
+                                }
+                              ],
+                              [
+                                77,
+                                {
+                                  "$f32": {
+                                    "n": [0.9533646106719971, 0.02228694036602974, -0.3009970188140869, 0, 0.09051164239645004, 0.9302595853805542, 0.35556256771087646, 0, 0.28792980313301086, -0.3662245273590088, 0.8848593831062317, 0, 0.0023497308138757944, 0.07505372911691666, 0.00223089219070971, 1]
+                                  },
+                                  "t": 1
+                                }
+                              ],
+                              [
+                                78,
+                                {
+                                  "$f32": {
+                                    "n": [0.9998942017555237, 0.014374434016644955, 0.0022490564733743668, 0, -0.014549287967383862, 0.9878678321838379, 0.1546141654253006, 0, 7.248833640005614e-7, -0.15463049709796906, 0.9879723787307739, 0, -4.9110877142766185e-8, 0.040471505373716354, 1.3178552649151243e-7, 1]
+                                  },
+                                  "t": 1
+                                }
+                              ],
+                              [
+                                79,
+                                {
+                                  "$f32": {
+                                    "n": [0.9994776248931885, -0.032043296843767166, -0.004201540257781744, 0, 0.03213845193386078, 0.9718344807624817, 0.23346303403377533, 0, -0.003397624706849456, -0.23347613215446472, 0.9723566770553589, 0, -3.0245733029232724e-8, 0.02536056749522686, -6.580938816114212e-8, 1]
+                                  },
+                                  "t": 1
+                                }
+                              ],
+                              [
+                                80,
+                                {
+                                  "$f32": {
+                                    "n": [-0.28851693868637085, 0.34091734886169434, -0.8947252631187439, 0, -0.355881929397583, 0.8293332457542419, 0.4307602643966675, 0, 0.888879120349884, 0.4426981210708618, -0.11795037984848022, 0, -0.00673393439501524, 0.006101782433688641, 0.025563079863786697, 1]
+                                  },
+                                  "t": 1
+                                }
+                              ],
+                              [
+                                81,
+                                {
+                                  "$f32": {
+                                    "n": [0.9999632835388184, 0.008338140323758125, 0.001954227453097701, 0, -0.008564081974327564, 0.9736404418945312, 0.22792744636535645, 0, -0.000002229977781098569, -0.22793583571910858, 0.9736761450767517, 0, -7.754866970799412e-8, 0.05108201131224632, 4.120732910450897e-8, 1]
+                                  },
+                                  "t": 1
+                                }
+                              ],
+                              [
+                                82,
+                                {
+                                  "$f32": {
+                                    "n": [0.9998598098754883, -0.01674441434442997, -0.00016107379633467644, 0, 0.016744334250688553, 0.9996610879898071, 0.01993565261363983, 0, -0.00017271422257181257, -0.019935576245188713, 0.9998012781143188, 0, 1.855640796577518e-8, 0.025825170800089836, 1.5774956452219158e-8, 1]
+                                  },
+                                  "t": 1
+                                }
+                              ],
+                              [
+                                83,
+                                {
+                                  "$f32": {
+                                    "n": [1, 7.117597533579101e-8, 3.7474876535270596e-7, 0, -8.478215107743381e-8, 1, -1.3306086543707352e-7, 0, -3.566195516668813e-7, 1.0254029092493511e-7, 1, 0, 1.6936940738787598e-9, 5.778674250223048e-8, -5.4972339569303585e-8, 1]
+                                  },
+                                  "t": 1
+                                }
+                              ],
+                              [
+                                84,
+                                {
+                                  "$f32": {
+                                    "n": [-0.16067269444465637, -0.06936769932508469, -0.9845671057701111, 0, 0.08264124393463135, 0.9930790066719055, -0.08345373719930649, 0, 0.9835419058799744, -0.094774529337883, -0.15382817387580872, 0, -0.011151311919093132, 0.04799219220876694, -0.003549057524651289, 1]
+                                  },
+                                  "t": 1
+                                }
+                              ],
+                              [
+                                85,
+                                {
+                                  "$f32": {
+                                    "n": [0.9879631996154785, -0.03524559363722801, -0.1506202518939972, 0, 0.08830969035625458, 0.9279431700706482, 0.362108439207077, 0, 0.12700417637825012, -0.37105098366737366, 0.9198862910270691, 0, -0.00018561806064099073, 0.06705447286367416, 0.0025349545758217573, 1]
+                                  },
+                                  "t": 1
+                                }
+                              ],
+                              [
+                                86,
+                                {
+                                  "$f32": {
+                                    "n": [0.9999738335609436, 0.007026134990155697, 0.0017102959100157022, 0, -0.0072312988340854645, 0.9715665578842163, 0.23665638267993927, 0, 0.0000011756783351302147, -0.2366625964641571, 0.9715919494628906, 0, -4.160010291798244e-8, 0.04451536387205124, -3.807178927672794e-8, 1]
+                                  },
+                                  "t": 1
+                                }
+                              ],
+                              [
+                                87,
+                                {
+                                  "$f32": {
+                                    "n": [0.9998477101325989, -0.01740858145058155, -0.0012511119712144136, 0, 0.0174311101436615, 0.9923658967018127, 0.12209071218967438, 0, -0.0008838060894049704, -0.12209390103816986, 0.9925181865692139, 0, -1.1465107974117927e-8, 0.028930166736245155, 9.428464409211301e-8, 1]
+                                  },
+                                  "t": 1
+                                }
+                              ],
+                              [
+                                88,
+                                {
+                                  "$f32": {
+                                    "n": [1, 1.9562520492399926e-7, 2.6908293193628197e-7, 0, -1.8386276678938884e-7, 0.9999999403953552, -9.185595217786613e-8, 0, -3.7392629792520893e-7, 1.2038782415402238e-7, 1, 0, -2.2933384968837345e-8, -1.3206523874487175e-7, -1.304640591115458e-7, 1]
+                                  },
+                                  "t": 1
+                                }
+                              ],
+                              [
+                                89,
+                                {
+                                  "$f32": {
+                                    "n": [-0.1302519589662552, -0.20738233625888824, -0.9695498943328857, 0, 0.061984483152627945, 0.9742644429206848, -0.2167178839445114, 0, 0.9895414710044861, -0.08832491189241409, -0.11404547840356827, 0, -0.02031862363219261, 0.04398375749588013, -0.0212489552795887, 1]
+                                  },
+                                  "t": 1
+                                }
+                              ],
+                              [
+                                90,
+                                {
+                                  "$f32": {
+                                    "n": [0.9347713589668274, 0.09792288392782211, -0.34148740768432617, 0, 0.10587086528539658, 0.8407912850379944, 0.5309061408042908, 0, 0.3391074538230896, -0.5324294567108154, 0.7755804061889648, 0, 2.9213570229558172e-8, 0.06271740049123764, -2.1507053915570395e-8, 1]
+                                  },
+                                  "t": 1
+                                }
+                              ],
+                              [
+                                91,
+                                {
+                                  "$f32": {
+                                    "n": [0.99997478723526, -0.00701866066083312, -0.0010887542739510536, 0, 0.007102619390934706, 0.9881419539451599, 0.15337960422039032, 0, -6.350033459057158e-7, -0.15338344871997833, 0.9881668090820312, 0, 4.631827010825873e-8, 0.04027066379785538, -3.246602275908117e-8, 1]
+                                  },
+                                  "t": 1
+                                }
+                              ],
+                              [
+                                92,
+                                {
+                                  "$f32": {
+                                    "n": [0.9998186230659485, 0.018649153411388397, 0.003862436395138502, 0, -0.018911151215434074, 0.9481684565544128, 0.31720495223999023, 0, 0.002253349404782057, -0.31722044944763184, 0.9483490586280823, 0, -2.317852221267458e-8, 0.02857520990073681, 2.2839827806819812e-8, 1]
+                                  },
+                                  "t": 1
+                                }
+                              ],
+                              [
+                                93,
+                                {
+                                  "$f32": {
+                                    "n": [1, -2.5458190222593657e-8, -2.2690626266808067e-8, 0, 4.254182428553577e-8, 1, -6.629527860013695e-8, 0, 2.321189640497323e-8, 3.770973222572138e-8, 0.9999999403953552, 0, -2.0496070618492013e-8, -1.529566695523954e-8, 6.396331908575803e-9, 1]
+                                  },
+                                  "t": 1
+                                }
+                              ],
+                              [
+                                94,
+                                {
+                                  "$f32": {
+                                    "n": [-0.1460341364145279, -0.3247111141681671, -0.9344713091850281, 0, 0.0462222658097744, 0.9413264989852905, -0.33431658148765564, 0, 0.9881990551948547, -0.09201493859291077, -0.1224568784236908, 0, -0.018693959340453148, 0.031836751848459244, -0.03674028813838959, 1]
+                                  },
+                                  "t": 1
+                                }
+                              ],
+                              [
+                                95,
+                                {
+                                  "$f32": {
+                                    "n": [0.9262271523475647, 0.12846937775611877, -0.3543994426727295, 0, 0.10421928018331528, 0.8162236213684082, 0.5682583451271057, 0, 0.36227303743362427, -0.5632715225219727, 0.7426194548606873, 0, 0.0007788416696712375, 0.07523609697818756, 0.0037819971330463886, 1]
+                                  },
+                                  "t": 1
+                                }
+                              ],
+                              [
+                                96,
+                                {
+                                  "$f32": {
+                                    "n": [0.9999650120735168, -0.008329076692461967, -0.0007741621229797602, 0, 0.008364987559616566, 0.9956719279289246, 0.09256020933389664, 0, -1.269594918085204e-7, -0.09256342798471451, 0.9957067966461182, 0, -3.683230076489963e-8, 0.02504839561879635, 4.440543222017368e-8, 1]
+                                  },
+                                  "t": 1
+                                }
+                              ],
+                              [
+                                97,
+                                {
+                                  "$f32": {
+                                    "n": [0.999782145023346, 0.0207575224339962, 0.0021828184835612774, 0, -0.020821478217840195, 0.9846245646476746, 0.17343901097774506, 0, 0.0014509562170132995, -0.1734466850757599, 0.9848421812057495, 0, -4.6463739522550895e-8, 0.02030080370604992, -3.518723801221313e-8, 1]
+                                  },
+                                  "t": 1
+                                }
+                              ],
+                              [
+                                98,
+                                {
+                                  "$f32": {
+                                    "n": [1, -5.153817994596466e-8, -2.1882433642872456e-8, 0, 7.932705869961865e-8, 1, 2.1163423014058935e-8, 0, 7.819272340725547e-9, 1.089542056575965e-8, 1, 0, 1.7093698900794152e-8, 4.0749362995029514e-8, -1.4747685384008946e-7, 1]
+                                  },
+                                  "t": 1
+                                }
+                              ],
+                              [
+                                99,
+                                {
+                                  "$f32": {
+                                    "n": [0.5070949792861938, 0.02468927763402462, -0.8615365624427795, 0, -0.8618900179862976, 0.013912648893892765, -0.5069044232368469, 0, -0.0005288257962092757, 0.9995984435081482, 0.028334463015198708, 0, -0.016443733125925064, 0.1233021691441536, 0.07031352072954178, 1]
+                                  },
+                                  "t": 1
+                                }
+                              ],
+                              [
+                                100,
+                                {
+                                  "$f32": {
+                                    "n": [1, -2.94269808520653e-9, -1.46096294784126e-11, 0, 1.8216825381500712e-8, 1, 2.4491610128851704e-11, 0, 9.040788950809286e-12, -1.2994660035514638e-11, 1, 0, -9.20913034718751e-9, -1.2040410446445549e-8, -1.2152062822679e-7, 1]
+                                  },
+                                  "t": 1
+                                }
+                              ],
+                              [
+                                101,
+                                {
+                                  "$f32": {
+                                    "n": [-0.16136161983013153, 0.7077444195747375, 0.6877937912940979, 0, -0.24174760282039642, 0.6473477482795715, -0.7228409051895142, 0, -0.9568283557891846, -0.2829112410545349, 0.06663845479488373, 0, -0.007001222111284733, 0.18042366206645966, -0.018317224457859993, 1]
+                                  },
+                                  "t": 1
+                                }
+                              ],
+                              [
+                                102,
+                                {
+                                  "$f32": {
+                                    "n": [1, -9.747717077956963e-10, 7.831916803979766e-8, 0, -9.55794554613476e-10, 1, -1.235232502949657e-7, 0, -8.653074701214791e-8, 1.3055041847565008e-7, 1, 0, 3.966206207905998e-8, 0.1443876028060913, -3.5231448869410542e-9, 1]
+                                  },
+                                  "t": 1
+                                }
+                              ],
+                              [
+                                103,
+                                {
+                                  "$f32": {
+                                    "n": [1, -3.3290086776105454e-7, 5.120586479279154e-7, 0, -1.2128938919886423e-7, 0.6732878088951111, 0.7393805384635925, 0, -6.137843229225837e-7, -0.7393805384635925, 0.6732876896858215, 0, 6.895648851923397e-8, 0.14438748359680176, 2.7596639640137255e-8, 1]
+                                  },
+                                  "t": 1
+                                }
+                              ],
+                              [
+                                104,
+                                {
+                                  "$f32": {
+                                    "n": [0.9999999403953552, -2.3097802781535393e-8, -1.0051928001075794e-7, 0, -3.9936491447178923e-8, 0.9999999403953552, 1.925601722518877e-8, 0, 8.530054884658966e-8, 1.4040576701290775e-8, 0.9999999403953552, 0, -2.6595401436679822e-8, 0.11808734387159348, -8.568538589770469e-8, 1]
+                                  },
+                                  "t": 1
+                                }
+                              ],
+                              [
+                                105,
+                                {
+                                  "$f32": {
+                                    "n": [0.9997850060462952, 0.020679417997598648, -0.001503472332842648, 0, -0.020733898505568504, 0.9971563220024109, -0.07245240360498428, 0, 8.918188996176468e-7, 0.07246798276901245, 0.9973707795143127, 0, -1.2486987088777823e-7, 0.11808735877275467, 1.0915090342678013e-7, 1]
+                                  },
+                                  "t": 1
+                                }
+                              ],
+                              [
+                                106,
+                                {
+                                  "$f32": {
+                                    "n": [-0.1662101447582245, -0.1129002571105957, 0.9796059131622314, 0, -0.11201155185699463, 0.9891557693481445, 0.09499585628509521, 0, -0.9797078967094421, -0.09393782913684845, -0.17705398797988892, 0, -0.002275933977216482, 0.03823033347725868, 0.011648683808743954, 1]
+                                  },
+                                  "t": 1
+                                }
+                              ],
+                              [
+                                107,
+                                {
+                                  "$f32": {
+                                    "n": [0.9533646106719971, -0.02228694036602974, 0.3009970188140869, 0, -0.09051164239645004, 0.9302595853805542, 0.35556256771087646, 0, -0.28792980313301086, -0.3662245273590088, 0.8848593831062317, 0, -0.0023497308138757944, 0.07505372911691666, 0.00223089219070971, 1]
+                                  },
+                                  "t": 1
+                                }
+                              ],
+                              [
+                                108,
+                                {
+                                  "$f32": {
+                                    "n": [0.9998941421508789, -0.01437440700829029, -0.002249300479888916, 0, 0.014549302868545055, 0.9878677725791931, 0.1546141356229782, 0, -4.643914053303888e-7, -0.15463043749332428, 0.9879723191261292, 0, 4.9110877142766185e-8, 0.040471505373716354, 1.3178552649151243e-7, 1]
+                                  },
+                                  "t": 1
+                                }
+                              ],
+                              [
+                                109,
+                                {
+                                  "$f32": {
+                                    "n": [0.9994776844978333, 0.03204333037137985, 0.00420184712857008, 0, -0.03213855251669884, 0.9718344807624817, 0.2334631085395813, 0, 0.00339744845405221, -0.23347625136375427, 0.9723566770553589, 0, 7.147754388370231e-9, 0.025360548868775368, 4.3187270648559206e-8, 1]
+                                  },
+                                  "t": 1
+                                }
+                              ],
+                              [
+                                110,
+                                {
+                                  "$f32": {
+                                    "n": [-0.28851693868637085, -0.34091734886169434, 0.8947252631187439, 0, 0.355881929397583, 0.8293332457542419, 0.4307602643966675, 0, -0.888879120349884, 0.4426981210708618, -0.11795037984848022, 0, 0.00673393439501524, 0.006101782433688641, 0.025563079863786697, 1]
+                                  },
+                                  "t": 1
+                                }
+                              ],
+                              [
+                                111,
+                                {
+                                  "$f32": {
+                                    "n": [0.9999632835388184, -0.008338140323758125, -0.001954227453097701, 0, 0.008564081974327564, 0.9736404418945312, 0.22792744636535645, 0, 0.000002229977781098569, -0.22793583571910858, 0.9736761450767517, 0, 7.754866970799412e-8, 0.05108201131224632, 4.120732910450897e-8, 1]
+                                  },
+                                  "t": 1
+                                }
+                              ],
+                              [
+                                112,
+                                {
+                                  "$f32": {
+                                    "n": [0.9998598098754883, 0.01674441434442997, 0.00016107379633467644, 0, -0.016744334250688553, 0.9996610879898071, 0.01993565261363983, 0, 0.00017271422257181257, -0.019935576245188713, 0.9998012781143188, 0, -1.855640796577518e-8, 0.025825170800089836, 1.5774956452219158e-8, 1]
+                                  },
+                                  "t": 1
+                                }
+                              ],
+                              [
+                                113,
+                                {
+                                  "$f32": {
+                                    "n": [1, -7.117597533579101e-8, -3.7474876535270596e-7, 0, 8.478215107743381e-8, 1, -1.3306086543707352e-7, 0, 3.566195516668813e-7, 1.0254029092493511e-7, 1, 0, -1.6936940738787598e-9, 5.778674250223048e-8, -5.4972339569303585e-8, 1]
+                                  },
+                                  "t": 1
+                                }
+                              ],
+                              [
+                                114,
+                                {
+                                  "$f32": {
+                                    "n": [-0.16067269444465637, 0.06936769932508469, 0.9845671057701111, 0, -0.08264124393463135, 0.9930790066719055, -0.08345373719930649, 0, -0.9835419058799744, -0.094774529337883, -0.15382817387580872, 0, 0.011151311919093132, 0.04799219220876694, -0.003549057524651289, 1]
+                                  },
+                                  "t": 1
+                                }
+                              ],
+                              [
+                                115,
+                                {
+                                  "$f32": {
+                                    "n": [0.9879631996154785, 0.03524559363722801, 0.1506202518939972, 0, -0.08830969035625458, 0.9279431700706482, 0.362108439207077, 0, -0.12700417637825012, -0.37105098366737366, 0.9198862910270691, 0, 0.00018561806064099073, 0.06705447286367416, 0.0025349545758217573, 1]
+                                  },
+                                  "t": 1
+                                }
+                              ],
+                              [
+                                116,
+                                {
+                                  "$f32": {
+                                    "n": [0.9999738335609436, -0.007026201114058495, -0.0017101800767704844, 0, 0.007231302093714476, 0.9715666174888611, 0.23665638267993927, 0, -0.000001379008040203189, -0.23666256666183472, 0.9715920090675354, 0, 4.160010291798244e-8, 0.04451536387205124, -3.807178927672794e-8, 1]
+                                  },
+                                  "t": 1
+                                }
+                              ],
+                              [
+                                117,
+                                {
+                                  "$f32": {
+                                    "n": [0.9998477101325989, 0.017408624291419983, 0.0012511119712144136, 0, -0.017431147396564484, 0.9923658967018127, 0.12209074944257736, 0, 0.0008838336216285825, -0.12209397554397583, 0.9925181865692139, 0, 5.3460322391174486e-8, 0.028930259868502617, 4.207942083667149e-8, 1]
+                                  },
+                                  "t": 1
+                                }
+                              ],
+                              [
+                                118,
+                                {
+                                  "$f32": {
+                                    "n": [1, -1.9562520492399926e-7, -2.6908293193628197e-7, 0, 1.8386276678938884e-7, 0.9999999403953552, -9.185595217786613e-8, 0, 3.7392629792520893e-7, 1.2038782415402238e-7, 1, 0, 2.2933384968837345e-8, -1.3206523874487175e-7, -1.304640591115458e-7, 1]
+                                  },
+                                  "t": 1
+                                }
+                              ],
+                              [
+                                119,
+                                {
+                                  "$f32": {
+                                    "n": [-0.1302519589662552, 0.20738233625888824, 0.9695498943328857, 0, -0.061984483152627945, 0.9742644429206848, -0.2167178839445114, 0, -0.9895414710044861, -0.08832491189241409, -0.11404547840356827, 0, 0.02031862363219261, 0.04398375749588013, -0.0212489552795887, 1]
+                                  },
+                                  "t": 1
+                                }
+                              ],
+                              [
+                                120,
+                                {
+                                  "$f32": {
+                                    "n": [0.9347713589668274, -0.09792288392782211, 0.34148740768432617, 0, -0.10587086528539658, 0.8407912850379944, 0.5309061408042908, 0, -0.3391074538230896, -0.5324294567108154, 0.7755804061889648, 0, -2.9213570229558172e-8, 0.06271740049123764, -2.1507053915570395e-8, 1]
+                                  },
+                                  "t": 1
+                                }
+                              ],
+                              [
+                                121,
+                                {
+                                  "$f32": {
+                                    "n": [0.99997478723526, 0.00701866066083312, 0.0010887542739510536, 0, -0.007102619390934706, 0.9881419539451599, 0.15337960422039032, 0, 6.350033459057158e-7, -0.15338344871997833, 0.9881668090820312, 0, -4.631827010825873e-8, 0.04027066379785538, -3.246602275908117e-8, 1]
+                                  },
+                                  "t": 1
+                                }
+                              ],
+                              [
+                                122,
+                                {
+                                  "$f32": {
+                                    "n": [0.9998186230659485, -0.018649153411388397, -0.003862436395138502, 0, 0.018911151215434074, 0.9481684565544128, 0.31720495223999023, 0, -0.002253349404782057, -0.31722044944763184, 0.9483490586280823, 0, 2.317852221267458e-8, 0.02857520990073681, 2.2839827806819812e-8, 1]
+                                  },
+                                  "t": 1
+                                }
+                              ],
+                              [
+                                123,
+                                {
+                                  "$f32": {
+                                    "n": [1, 2.5458190222593657e-8, 2.2690626266808067e-8, 0, -4.254182428553577e-8, 1, -6.629527860013695e-8, 0, -2.321189640497323e-8, 3.770973222572138e-8, 0.9999999403953552, 0, 2.0496070618492013e-8, -1.529566695523954e-8, 6.396331908575803e-9, 1]
+                                  },
+                                  "t": 1
+                                }
+                              ],
+                              [
+                                124,
+                                {
+                                  "$f32": {
+                                    "n": [-0.1460341364145279, 0.3247111141681671, 0.9344713091850281, 0, -0.0462222658097744, 0.9413264989852905, -0.33431658148765564, 0, -0.9881990551948547, -0.09201493859291077, -0.1224568784236908, 0, 0.018693959340453148, 0.031836751848459244, -0.03674028813838959, 1]
+                                  },
+                                  "t": 1
+                                }
+                              ],
+                              [
+                                125,
+                                {
+                                  "$f32": {
+                                    "n": [0.9262271523475647, -0.12846937775611877, 0.3543994426727295, 0, -0.10421928018331528, 0.8162236213684082, 0.5682583451271057, 0, -0.36227303743362427, -0.5632715225219727, 0.7426194548606873, 0, -0.0007788416696712375, 0.07523609697818756, 0.0037819971330463886, 1]
+                                  },
+                                  "t": 1
+                                }
+                              ],
+                              [
+                                126,
+                                {
+                                  "$f32": {
+                                    "n": [0.9999650120735168, 0.008329076692461967, 0.0007741621229797602, 0, -0.008364987559616566, 0.9956719279289246, 0.09256020933389664, 0, 1.269594918085204e-7, -0.09256342798471451, 0.9957067966461182, 0, 3.683230076489963e-8, 0.02504839561879635, 4.440543222017368e-8, 1]
+                                  },
+                                  "t": 1
+                                }
+                              ],
+                              [
+                                127,
+                                {
+                                  "$f32": {
+                                    "n": [0.999782145023346, -0.0207575224339962, -0.0021828184835612774, 0, 0.020821478217840195, 0.9846245646476746, 0.17343901097774506, 0, -0.0014509562170132995, -0.1734466850757599, 0.9848421812057495, 0, 4.6463739522550895e-8, 0.02030080370604992, -3.518723801221313e-8, 1]
+                                  },
+                                  "t": 1
+                                }
+                              ],
+                              [
+                                128,
+                                {
+                                  "$f32": {
+                                    "n": [1, 5.153817994596466e-8, 2.1882433642872456e-8, 0, -7.932705869961865e-8, 1, 2.1163423014058935e-8, 0, -7.819272340725547e-9, 1.089542056575965e-8, 1, 0, -1.7093698900794152e-8, 4.0749362995029514e-8, -1.4747685384008946e-7, 1]
+                                  },
+                                  "t": 1
+                                }
+                              ],
+                              [
+                                129,
+                                {
+                                  "$f32": {
+                                    "n": [-0.9999999403953552, 1.5099580252808664e-7, 4.312462387190408e-9, 0, -1.7692418710635316e-12, -0.028560180217027664, 0.9995920658111572, 0, 1.510573639507129e-7, 0.9995920658111572, 0.028560247272253036, 0, 0.10639005899429321, -0.00438578799366951, -0.03841978311538696, 1]
+                                  },
+                                  "t": 1
+                                }
+                              ],
+                              [
+                                130,
+                                {
+                                  "$f32": {
+                                    "n": [1.0000001192092896, -2.143916283652708e-14, -1.800852354608487e-14, 0, 8.70612819846555e-15, 1, 5.684315119839668e-14, 0, -9.03159840153014e-19, -1.685874053691805e-7, 1, 0, 4.403510445172287e-9, -2.7811870140226347e-8, -1.3103510809742147e-7, 1]
+                                  },
+                                  "t": 1
+                                }
+                              ],
+                              [
+                                131,
+                                {
+                                  "$f32": {
+                                    "n": [-0.9999999403953552, 1.5099580252808664e-7, 4.312462387190408e-9, 0, -1.7692418710635316e-12, -0.028560180217027664, 0.9995920658111572, 0, 1.510573639507129e-7, 0.9995920658111572, 0.028560247272253036, 0, -0.10639005899429321, -0.00438578799366951, -0.03841978311538696, 1]
+                                  },
+                                  "t": 1
+                                }
+                              ],
+                              [
+                                132,
+                                {
+                                  "$f32": {
+                                    "n": [1.0000001192092896, -2.143916283652708e-14, -1.800852354608487e-14, 0, 8.70612819846555e-15, 1, 5.684315119839668e-14, 0, -9.03159840153014e-19, -1.685874053691805e-7, 1, 0, -3.047069929706936e-9, -2.7811491776219555e-8, -4.3967833818214785e-8, 1]
+                                  },
+                                  "t": 1
+                                }
+                              ],
+                              [
+                                133,
+                                {
+                                  "$f32": {
+                                    "n": [5.960464477539063e-8, -4.4951903532819415e-8, 1, 0, -2.9802318834981634e-8, -1, -7.475422592051473e-8, 0, 1, 1.2012619563894593e-14, -8.940696716308594e-8, 0, 0, -0.7917218804359436, 1.6006131172180176, 1]
+                                  },
+                                  "t": 1
+                                }
+                              ]
+                            ],
+                            "nodeNames": [
+                              [
+                                0,
+                                "Sketchfab_model"
+                              ],
+                              [
+                                1,
+                                "fbx_merge.fbx"
+                              ],
+                              [
+                                2,
+                                "Object_2"
+                              ],
+                              [
+                                3,
+                                "RootNode"
+                              ],
+                              [
+                                4,
+                                "Armature"
+                              ],
+                              [
+                                5,
+                                "Object_5"
+                              ],
+                              [
+                                6,
+                                "_rootJoint"
+                              ],
+                              [
+                                7,
+                                "Root_01"
+                              ],
+                              [
+                                8,
+                                "DEF_Cuerpo_02"
+                              ],
+                              [
+                                9,
+                                "Ctrl_Corredera_03"
+                              ],
+                              [
+                                10,
+                                "DEF_Corredera_00"
+                              ],
+                              [
+                                11,
+                                "Ctrl_Martillo_04"
+                              ],
+                              [
+                                12,
+                                "DEF_Martillo_05"
+                              ],
+                              [
+                                13,
+                                "Ctrl_Cargador_06"
+                              ],
+                              [
+                                14,
+                                "DEF_Cargador_07"
+                              ],
+                              [
+                                15,
+                                "DEF_Bala_08"
+                              ],
+                              [
+                                16,
+                                "Ctrl_Bala_09"
+                              ],
+                              [
+                                17,
+                                "Ctrl_Gatillo_010"
+                              ],
+                              [
+                                18,
+                                "DEF_Gatillo_011"
+                              ],
+                              [
+                                19,
+                                "Object_19"
+                              ],
+                              [
+                                20,
+                                "Object_20"
+                              ],
+                              [
+                                21,
+                                "Pistol"
+                              ],
+                              [
+                                22,
+                                "SKM_Comando"
+                              ],
+                              [
+                                23,
+                                "SK_Comando"
+                              ],
+                              [
+                                24,
+                                "Object_24"
+                              ],
+                              [
+                                25,
+                                "_rootJoint"
+                              ],
+                              [
+                                26,
+                                "Object_26"
+                              ],
+                              [
+                                27,
+                                "Object_27"
+                              ],
+                              [
+                                28,
+                                "Object_28"
+                              ],
+                              [
+                                29,
+                                "root_012"
+                              ],
+                              [
+                                30,
+                                "DEF-spine_013"
+                              ],
+                              [
+                                31,
+                                "DEF-spine.001_014"
+                              ],
+                              [
+                                32,
+                                "DEF-spine.002_015"
+                              ],
+                              [
+                                33,
+                                "DEF-spine.003_016"
+                              ],
+                              [
+                                34,
+                                "DEF-spine.004_017"
+                              ],
+                              [
+                                35,
+                                "DEF-spine.005_018"
+                              ],
+                              [
+                                36,
+                                "DEF-spine.006_019"
+                              ],
+                              [
+                                37,
+                                "CB_Weapon_020"
+                              ],
+                              [
+                                38,
+                                "DEF-Weapon_021"
+                              ],
+                              [
+                                39,
+                                "MCH-torso.parent_022"
+                              ],
+                              [
+                                40,
+                                "torso_023"
+                              ],
+                              [
+                                41,
+                                "MCH-spine.001_024"
+                              ],
+                              [
+                                42,
+                                "spine_fk.001_025"
+                              ],
+                              [
+                                43,
+                                "MCH-spine_026"
+                              ],
+                              [
+                                44,
+                                "spine_fk_027"
+                              ],
+                              [
+                                45,
+                                "tweak_spine_028"
+                              ],
+                              [
+                                46,
+                                "ORG-spine_029"
+                              ],
+                              [
+                                47,
+                                "ORG-pelvis.L_030"
+                              ],
+                              [
+                                48,
+                                "DEF-pelvis.L_031"
+                              ],
+                              [
+                                49,
+                                "ORG-pelvis.R_032"
+                              ],
+                              [
+                                50,
+                                "DEF-pelvis.R_033"
+                              ],
+                              [
+                                51,
+                                "DEF-thigh.L_034"
+                              ],
+                              [
+                                52,
+                                "DEF-thigh.L.001_035"
+                              ],
+                              [
+                                53,
+                                "DEF-shin.L_036"
+                              ],
+                              [
+                                54,
+                                "DEF-shin.L.001_037"
+                              ],
+                              [
+                                55,
+                                "DEF-foot.L_038"
+                              ],
+                              [
+                                56,
+                                "DEF-toe.L_039"
+                              ],
+                              [
+                                57,
+                                "DEF-thigh.R_040"
+                              ],
+                              [
+                                58,
+                                "DEF-thigh.R.001_041"
+                              ],
+                              [
+                                59,
+                                "DEF-shin.R_042"
+                              ],
+                              [
+                                60,
+                                "DEF-shin.R.001_043"
+                              ],
+                              [
+                                61,
+                                "DEF-foot.R_044"
+                              ],
+                              [
+                                62,
+                                "DEF-toe.R_045"
+                              ],
+                              [
+                                63,
+                                "MCH-spine.002_046"
+                              ],
+                              [
+                                64,
+                                "spine_fk.002_047"
+                              ],
+                              [
+                                65,
+                                "MCH-spine.003_048"
+                              ],
+                              [
+                                66,
+                                "spine_fk.003_049"
+                              ],
+                              [
+                                67,
+                                "tweak_spine.003_050"
+                              ],
+                              [
+                                68,
+                                "ORG-spine.003_051"
+                              ],
+                              [
+                                69,
+                                "ORG-shoulder.L_052"
+                              ],
+                              [
+                                70,
+                                "DEF-shoulder.L_053"
+                              ],
+                              [
+                                71,
+                                "DEF-upper_arm.L_054"
+                              ],
+                              [
+                                72,
+                                "DEF-upper_arm.L.001_055"
+                              ],
+                              [
+                                73,
+                                "DEF-forearm.L_056"
+                              ],
+                              [
+                                74,
+                                "DEF-forearm.L.001_057"
+                              ],
+                              [
+                                75,
+                                "DEF-hand.L_058"
+                              ],
+                              [
+                                76,
+                                "ORG-palm.01.L_059"
+                              ],
+                              [
+                                77,
+                                "DEF-f_index.01.L_060"
+                              ],
+                              [
+                                78,
+                                "DEF-f_index.02.L_061"
+                              ],
+                              [
+                                79,
+                                "DEF-f_index.03.L_062"
+                              ],
+                              [
+                                80,
+                                "DEF-thumb.01.L_063"
+                              ],
+                              [
+                                81,
+                                "DEF-thumb.02.L_064"
+                              ],
+                              [
+                                82,
+                                "DEF-thumb.03.L_065"
+                              ],
+                              [
+                                83,
+                                "DEF-palm.01.L_066"
+                              ],
+                              [
+                                84,
+                                "ORG-palm.02.L_067"
+                              ],
+                              [
+                                85,
+                                "DEF-f_middle.01.L_068"
+                              ],
+                              [
+                                86,
+                                "DEF-f_middle.02.L_069"
+                              ],
+                              [
+                                87,
+                                "DEF-f_middle.03.L_070"
+                              ],
+                              [
+                                88,
+                                "DEF-palm.02.L_071"
+                              ],
+                              [
+                                89,
+                                "ORG-palm.03.L_072"
+                              ],
+                              [
+                                90,
+                                "DEF-f_ring.01.L_073"
+                              ],
+                              [
+                                91,
+                                "DEF-f_ring.02.L_074"
+                              ],
+                              [
+                                92,
+                                "DEF-f_ring.03.L_075"
+                              ],
+                              [
+                                93,
+                                "DEF-palm.03.L_076"
+                              ],
+                              [
+                                94,
+                                "ORG-palm.04.L_077"
+                              ],
+                              [
+                                95,
+                                "DEF-f_pinky.01.L_078"
+                              ],
+                              [
+                                96,
+                                "DEF-f_pinky.02.L_079"
+                              ],
+                              [
+                                97,
+                                "DEF-f_pinky.03.L_080"
+                              ],
+                              [
+                                98,
+                                "DEF-palm.04.L_081"
+                              ],
+                              [
+                                99,
+                                "ORG-shoulder.R_082"
+                              ],
+                              [
+                                100,
+                                "DEF-shoulder.R_083"
+                              ],
+                              [
+                                101,
+                                "DEF-upper_arm.R_084"
+                              ],
+                              [
+                                102,
+                                "DEF-upper_arm.R.001_085"
+                              ],
+                              [
+                                103,
+                                "DEF-forearm.R_086"
+                              ],
+                              [
+                                104,
+                                "DEF-forearm.R.001_087"
+                              ],
+                              [
+                                105,
+                                "DEF-hand.R_088"
+                              ],
+                              [
+                                106,
+                                "ORG-palm.01.R_089"
+                              ],
+                              [
+                                107,
+                                "DEF-f_index.01.R_090"
+                              ],
+                              [
+                                108,
+                                "DEF-f_index.02.R_091"
+                              ],
+                              [
+                                109,
+                                "DEF-f_index.03.R_092"
+                              ],
+                              [
+                                110,
+                                "DEF-thumb.01.R_093"
+                              ],
+                              [
+                                111,
+                                "DEF-thumb.02.R_094"
+                              ],
+                              [
+                                112,
+                                "DEF-thumb.03.R_095"
+                              ],
+                              [
+                                113,
+                                "DEF-palm.01.R_096"
+                              ],
+                              [
+                                114,
+                                "ORG-palm.02.R_097"
+                              ],
+                              [
+                                115,
+                                "DEF-f_middle.01.R_098"
+                              ],
+                              [
+                                116,
+                                "DEF-f_middle.02.R_099"
+                              ],
+                              [
+                                117,
+                                "DEF-f_middle.03.R_0100"
+                              ],
+                              [
+                                118,
+                                "DEF-palm.02.R_0101"
+                              ],
+                              [
+                                119,
+                                "ORG-palm.03.R_0102"
+                              ],
+                              [
+                                120,
+                                "DEF-f_ring.01.R_0103"
+                              ],
+                              [
+                                121,
+                                "DEF-f_ring.02.R_0104"
+                              ],
+                              [
+                                122,
+                                "DEF-f_ring.03.R_0105"
+                              ],
+                              [
+                                123,
+                                "DEF-palm.03.R_0106"
+                              ],
+                              [
+                                124,
+                                "ORG-palm.04.R_0107"
+                              ],
+                              [
+                                125,
+                                "DEF-f_pinky.01.R_0108"
+                              ],
+                              [
+                                126,
+                                "DEF-f_pinky.02.R_0109"
+                              ],
+                              [
+                                127,
+                                "DEF-f_pinky.03.R_0110"
+                              ],
+                              [
+                                128,
+                                "DEF-palm.04.R_0111"
+                              ],
+                              [
+                                129,
+                                "ORG-breast.L_0112"
+                              ],
+                              [
+                                130,
+                                "DEF-breast.L_0113"
+                              ],
+                              [
+                                131,
+                                "ORG-breast.R_0114"
+                              ],
+                              [
+                                132,
+                                "DEF-breast.R_0115"
+                              ],
+                              [
+                                133,
+                                "CB-Head_0116"
+                              ]
+                            ],
+                            "ikRig": null
+                          },
+                          "jointIndices": {
+                            "$idx": {
+                              "h": "7b614948de261fd86a98d1339e6ac50af029cf14daf56f364ce1ffd135bdf785",
+                              "l": 141288,
+                              "bits": 16
+                            },
+                            "t": 1
+                          },
+                          "jointWeights": {
+                            "$f32": {
+                              "h": "9169a2b5f6e1cc70f9c4e1a98909a78efb6d723b8cefe11889835d153cf2992a",
+                              "l": 282576
+                            },
+                            "t": 1
+                          },
+                          "animations": null,
+                          "materials": [
+                            {
+                              "type": "pbr",
+                              "baseColor": [1, 1, 1],
+                              "metallic": 1,
+                              "roughness": 1,
+                              "opacity": 1,
+                              "emissiveFactor": [0, 0, 0],
+                              "alphaCutoff": 0,
+                              "displacementScale": 0.05,
+                              "textures": {
+                                "baseColorTexture": "880ad90c3a8471539dc565c21a347e21",
+                                "metallicMap": "aa64235601ef8da0e0e3dae6ffe374ac",
+                                "roughnessMap": "aa64235601ef8da0e0e3dae6ffe374ac",
+                                "normalMap": "5073b8b9c1e71bc77274e26734456daf",
+                                "occlusionMap": "aa64235601ef8da0e0e3dae6ffe374ac"
+                              },
+                              "config": {
+                                "side": "double",
+                                "wireframe": false,
+                                "transparent": false,
+                                "castShadow": true,
+                                "probeable": true
+                              }
+                            },
+                            {
+                              "type": "pbr",
+                              "baseColor": [1, 1, 1],
+                              "metallic": 1,
+                              "roughness": 1,
+                              "opacity": 1,
+                              "emissiveFactor": [0, 0, 0],
+                              "alphaCutoff": 0,
+                              "displacementScale": 0.05,
+                              "textures": {
+                                "baseColorTexture": "bfe26f23a11f08b30d55461597fe5db9",
+                                "metallicMap": "c8ebe6c572daca1039bcb5bdeddf809e",
+                                "roughnessMap": "c8ebe6c572daca1039bcb5bdeddf809e",
+                                "normalMap": "0bc7237186ef110c6e79c1099c119b9d",
+                                "occlusionMap": "c8ebe6c572daca1039bcb5bdeddf809e"
+                              },
+                              "config": {
+                                "side": "double",
+                                "wireframe": false,
+                                "transparent": false,
+                                "castShadow": false,
+                                "probeable": true
+                              }
+                            },
+                            {
+                              "type": "pbr",
+                              "baseColor": [1, 1, 1],
+                              "metallic": 0,
+                              "roughness": 1,
+                              "opacity": 1,
+                              "emissiveFactor": [0, 0, 0],
+                              "alphaCutoff": 0,
+                              "displacementScale": 0.05,
+                              "textures": {
+                                "baseColorTexture": "b4f73847aa3e807b48bbd4925d476e35",
+                                "metallicMap": "7ac965cf02b314f7fb6b87d1826219b4",
+                                "roughnessMap": "7ac965cf02b314f7fb6b87d1826219b4",
+                                "normalMap": "939dbd96cf76e31508f1f694ab848686",
+                                "occlusionMap": "7ac965cf02b314f7fb6b87d1826219b4"
+                              },
+                              "config": {
+                                "side": "double",
+                                "wireframe": false,
+                                "transparent": false,
+                                "castShadow": false,
+                                "probeable": true
+                              }
+                            }
+                          ],
+                          "submeshes": [
+                            {
+                              "start": 0,
+                              "count": 13236
+                            },
+                            {
+                              "start": 13236,
+                              "count": 37980
+                            },
+                            {
+                              "start": 51216,
+                              "count": 28236
+                            }
+                          ]
+                        },
+                        "animationMappings": [],
+                        "stateMachine": {
+                          "parameters": [
+                            {
+                              "name": "Moving",
+                              "type": "bool",
+                              "default": false
+                            },
+                            {
+                              "name": "Sprinting",
+                              "type": "bool",
+                              "default": false
+                            },
+                            {
+                              "name": "Aim",
+                              "type": "bool",
+                              "default": false
+                            },
+                            {
+                              "name": "Equip",
+                              "type": "trigger",
+                              "default": false
+                            },
+                            {
+                              "name": "Fire",
+                              "type": "trigger",
+                              "default": false
+                            },
+                            {
+                              "name": "AimFire",
+                              "type": "trigger",
+                              "default": false
+                            },
+                            {
+                              "name": "Reload",
+                              "type": "trigger",
+                              "default": false
+                            }
+                          ],
+                          "states": [
+                            {
+                              "name": "Idle",
+                              "clipName": "Idle",
+                              "loop": true,
+                              "speed": 1,
+                              "isEntry": true,
+                              "x": 40,
+                              "y": 40
+                            },
+                            {
+                              "name": "IdleAim",
+                              "clipName": "IdleAim",
+                              "loop": true,
+                              "speed": 1,
+                              "isEntry": false,
+                              "x": 270,
+                              "y": 40
+                            },
+                            {
+                              "name": "Walk",
+                              "clipName": "Walk",
+                              "loop": true,
+                              "speed": 1,
+                              "isEntry": false,
+                              "x": 500,
+                              "y": 40
+                            },
+                            {
+                              "name": "WalkAim",
+                              "clipName": "WalkAim",
+                              "loop": true,
+                              "speed": 1,
+                              "isEntry": false,
+                              "x": 40,
+                              "y": 180
+                            },
+                            {
+                              "name": "Run",
+                              "clipName": "Run",
+                              "loop": true,
+                              "speed": 1,
+                              "isEntry": false,
+                              "x": 270,
+                              "y": 180
+                            }
+                          ],
+                          "transitions": [
+                            {
+                              "from": "Idle",
+                              "to": "IdleAim",
+                              "conditions": [],
+                              "minDwell": 0.04,
+                              "hasExitTime": false,
+                              "exitTime": 1,
+                              "condition": {
+                                "op": "and",
+                                "children": [
+                                  {
+                                    "param": "Moving",
+                                    "op": "false"
+                                  },
+                                  {
+                                    "param": "Aim",
+                                    "op": "true"
+                                  }
+                                ]
+                              },
+                              "blendTime": 0.16
+                            },
+                            {
+                              "from": "Idle",
+                              "to": "Walk",
+                              "conditions": [],
+                              "minDwell": 0.04,
+                              "hasExitTime": false,
+                              "exitTime": 1,
+                              "condition": {
+                                "op": "and",
+                                "children": [
+                                  {
+                                    "param": "Moving",
+                                    "op": "true"
+                                  },
+                                  {
+                                    "param": "Sprinting",
+                                    "op": "false"
+                                  },
+                                  {
+                                    "param": "Aim",
+                                    "op": "false"
+                                  }
+                                ]
+                              },
+                              "blendTime": 0.16
+                            },
+                            {
+                              "from": "Idle",
+                              "to": "WalkAim",
+                              "conditions": [],
+                              "minDwell": 0.04,
+                              "hasExitTime": false,
+                              "exitTime": 1,
+                              "condition": {
+                                "op": "and",
+                                "children": [
+                                  {
+                                    "param": "Moving",
+                                    "op": "true"
+                                  },
+                                  {
+                                    "param": "Aim",
+                                    "op": "true"
+                                  }
+                                ]
+                              },
+                              "blendTime": 0.16
+                            },
+                            {
+                              "from": "Idle",
+                              "to": "Run",
+                              "conditions": [],
+                              "minDwell": 0.04,
+                              "hasExitTime": false,
+                              "exitTime": 1,
+                              "condition": {
+                                "op": "and",
+                                "children": [
+                                  {
+                                    "param": "Moving",
+                                    "op": "true"
+                                  },
+                                  {
+                                    "param": "Sprinting",
+                                    "op": "true"
+                                  },
+                                  {
+                                    "param": "Aim",
+                                    "op": "false"
+                                  }
+                                ]
+                              },
+                              "blendTime": 0.16
+                            },
+                            {
+                              "from": "IdleAim",
+                              "to": "Idle",
+                              "conditions": [],
+                              "minDwell": 0.04,
+                              "hasExitTime": false,
+                              "exitTime": 1,
+                              "condition": {
+                                "op": "and",
+                                "children": [
+                                  {
+                                    "param": "Moving",
+                                    "op": "false"
+                                  },
+                                  {
+                                    "param": "Aim",
+                                    "op": "false"
+                                  }
+                                ]
+                              },
+                              "blendTime": 0.16
+                            },
+                            {
+                              "from": "IdleAim",
+                              "to": "Walk",
+                              "conditions": [],
+                              "minDwell": 0.04,
+                              "hasExitTime": false,
+                              "exitTime": 1,
+                              "condition": {
+                                "op": "and",
+                                "children": [
+                                  {
+                                    "param": "Moving",
+                                    "op": "true"
+                                  },
+                                  {
+                                    "param": "Sprinting",
+                                    "op": "false"
+                                  },
+                                  {
+                                    "param": "Aim",
+                                    "op": "false"
+                                  }
+                                ]
+                              },
+                              "blendTime": 0.16
+                            },
+                            {
+                              "from": "IdleAim",
+                              "to": "WalkAim",
+                              "conditions": [],
+                              "minDwell": 0.04,
+                              "hasExitTime": false,
+                              "exitTime": 1,
+                              "condition": {
+                                "op": "and",
+                                "children": [
+                                  {
+                                    "param": "Moving",
+                                    "op": "true"
+                                  },
+                                  {
+                                    "param": "Aim",
+                                    "op": "true"
+                                  }
+                                ]
+                              },
+                              "blendTime": 0.16
+                            },
+                            {
+                              "from": "IdleAim",
+                              "to": "Run",
+                              "conditions": [],
+                              "minDwell": 0.04,
+                              "hasExitTime": false,
+                              "exitTime": 1,
+                              "condition": {
+                                "op": "and",
+                                "children": [
+                                  {
+                                    "param": "Moving",
+                                    "op": "true"
+                                  },
+                                  {
+                                    "param": "Sprinting",
+                                    "op": "true"
+                                  },
+                                  {
+                                    "param": "Aim",
+                                    "op": "false"
+                                  }
+                                ]
+                              },
+                              "blendTime": 0.16
+                            },
+                            {
+                              "from": "Walk",
+                              "to": "Idle",
+                              "conditions": [],
+                              "minDwell": 0.04,
+                              "hasExitTime": false,
+                              "exitTime": 1,
+                              "condition": {
+                                "op": "and",
+                                "children": [
+                                  {
+                                    "param": "Moving",
+                                    "op": "false"
+                                  },
+                                  {
+                                    "param": "Aim",
+                                    "op": "false"
+                                  }
+                                ]
+                              },
+                              "blendTime": 0.16
+                            },
+                            {
+                              "from": "Walk",
+                              "to": "IdleAim",
+                              "conditions": [],
+                              "minDwell": 0.04,
+                              "hasExitTime": false,
+                              "exitTime": 1,
+                              "condition": {
+                                "op": "and",
+                                "children": [
+                                  {
+                                    "param": "Moving",
+                                    "op": "false"
+                                  },
+                                  {
+                                    "param": "Aim",
+                                    "op": "true"
+                                  }
+                                ]
+                              },
+                              "blendTime": 0.16
+                            },
+                            {
+                              "from": "Walk",
+                              "to": "WalkAim",
+                              "conditions": [],
+                              "minDwell": 0.04,
+                              "hasExitTime": false,
+                              "exitTime": 1,
+                              "condition": {
+                                "op": "and",
+                                "children": [
+                                  {
+                                    "param": "Moving",
+                                    "op": "true"
+                                  },
+                                  {
+                                    "param": "Aim",
+                                    "op": "true"
+                                  }
+                                ]
+                              },
+                              "blendTime": 0.16
+                            },
+                            {
+                              "from": "Walk",
+                              "to": "Run",
+                              "conditions": [],
+                              "minDwell": 0.04,
+                              "hasExitTime": false,
+                              "exitTime": 1,
+                              "condition": {
+                                "op": "and",
+                                "children": [
+                                  {
+                                    "param": "Moving",
+                                    "op": "true"
+                                  },
+                                  {
+                                    "param": "Sprinting",
+                                    "op": "true"
+                                  },
+                                  {
+                                    "param": "Aim",
+                                    "op": "false"
+                                  }
+                                ]
+                              },
+                              "blendTime": 0.16
+                            },
+                            {
+                              "from": "WalkAim",
+                              "to": "Idle",
+                              "conditions": [],
+                              "minDwell": 0.04,
+                              "hasExitTime": false,
+                              "exitTime": 1,
+                              "condition": {
+                                "op": "and",
+                                "children": [
+                                  {
+                                    "param": "Moving",
+                                    "op": "false"
+                                  },
+                                  {
+                                    "param": "Aim",
+                                    "op": "false"
+                                  }
+                                ]
+                              },
+                              "blendTime": 0.16
+                            },
+                            {
+                              "from": "WalkAim",
+                              "to": "IdleAim",
+                              "conditions": [],
+                              "minDwell": 0.04,
+                              "hasExitTime": false,
+                              "exitTime": 1,
+                              "condition": {
+                                "op": "and",
+                                "children": [
+                                  {
+                                    "param": "Moving",
+                                    "op": "false"
+                                  },
+                                  {
+                                    "param": "Aim",
+                                    "op": "true"
+                                  }
+                                ]
+                              },
+                              "blendTime": 0.16
+                            },
+                            {
+                              "from": "WalkAim",
+                              "to": "Walk",
+                              "conditions": [],
+                              "minDwell": 0.04,
+                              "hasExitTime": false,
+                              "exitTime": 1,
+                              "condition": {
+                                "op": "and",
+                                "children": [
+                                  {
+                                    "param": "Moving",
+                                    "op": "true"
+                                  },
+                                  {
+                                    "param": "Sprinting",
+                                    "op": "false"
+                                  },
+                                  {
+                                    "param": "Aim",
+                                    "op": "false"
+                                  }
+                                ]
+                              },
+                              "blendTime": 0.16
+                            },
+                            {
+                              "from": "WalkAim",
+                              "to": "Run",
+                              "conditions": [],
+                              "minDwell": 0.04,
+                              "hasExitTime": false,
+                              "exitTime": 1,
+                              "condition": {
+                                "op": "and",
+                                "children": [
+                                  {
+                                    "param": "Moving",
+                                    "op": "true"
+                                  },
+                                  {
+                                    "param": "Sprinting",
+                                    "op": "true"
+                                  },
+                                  {
+                                    "param": "Aim",
+                                    "op": "false"
+                                  }
+                                ]
+                              },
+                              "blendTime": 0.16
+                            },
+                            {
+                              "from": "Run",
+                              "to": "Idle",
+                              "conditions": [],
+                              "minDwell": 0.04,
+                              "hasExitTime": false,
+                              "exitTime": 1,
+                              "condition": {
+                                "op": "and",
+                                "children": [
+                                  {
+                                    "param": "Moving",
+                                    "op": "false"
+                                  },
+                                  {
+                                    "param": "Aim",
+                                    "op": "false"
+                                  }
+                                ]
+                              },
+                              "blendTime": 0.16
+                            },
+                            {
+                              "from": "Run",
+                              "to": "IdleAim",
+                              "conditions": [],
+                              "minDwell": 0.04,
+                              "hasExitTime": false,
+                              "exitTime": 1,
+                              "condition": {
+                                "op": "and",
+                                "children": [
+                                  {
+                                    "param": "Moving",
+                                    "op": "false"
+                                  },
+                                  {
+                                    "param": "Aim",
+                                    "op": "true"
+                                  }
+                                ]
+                              },
+                              "blendTime": 0.16
+                            },
+                            {
+                              "from": "Run",
+                              "to": "Walk",
+                              "conditions": [],
+                              "minDwell": 0.04,
+                              "hasExitTime": false,
+                              "exitTime": 1,
+                              "condition": {
+                                "op": "and",
+                                "children": [
+                                  {
+                                    "param": "Moving",
+                                    "op": "true"
+                                  },
+                                  {
+                                    "param": "Sprinting",
+                                    "op": "false"
+                                  },
+                                  {
+                                    "param": "Aim",
+                                    "op": "false"
+                                  }
+                                ]
+                              },
+                              "blendTime": 0.16
+                            },
+                            {
+                              "from": "Run",
+                              "to": "WalkAim",
+                              "conditions": [],
+                              "minDwell": 0.04,
+                              "hasExitTime": false,
+                              "exitTime": 1,
+                              "condition": {
+                                "op": "and",
+                                "children": [
+                                  {
+                                    "param": "Moving",
+                                    "op": "true"
+                                  },
+                                  {
+                                    "param": "Aim",
+                                    "op": "true"
+                                  }
+                                ]
+                              },
+                              "blendTime": 0.16
+                            }
+                          ],
+                          "layers": [
+                            {
+                              "name": "Actions",
+                              "blend": "override",
+                              "weight": 1,
+                              "states": [
+                                {
+                                  "name": "Off",
+                                  "clipName": "",
+                                  "loop": true,
+                                  "speed": 1,
+                                  "isEntry": true,
+                                  "x": 40,
+                                  "y": 40
+                                },
+                                {
+                                  "name": "Equip",
+                                  "clipName": "Equip",
+                                  "loop": false,
+                                  "speed": 1,
+                                  "isEntry": false,
+                                  "ikWeight": 0,
+                                  "triggers": [
+                                    {
+                                      "trigger": "Equip",
+                                      "blendTime": 0.06
+                                    }
+                                  ],
+                                  "x": 300,
+                                  "y": 40
+                                },
+                                {
+                                  "name": "Fire",
+                                  "clipName": "Fire",
+                                  "loop": false,
+                                  "speed": 1,
+                                  "isEntry": false,
+                                  "ikWeight": 0,
+                                  "triggers": [
+                                    {
+                                      "trigger": "Fire",
+                                      "blendTime": 0.06
+                                    }
+                                  ],
+                                  "x": 500,
+                                  "y": 40
+                                },
+                                {
+                                  "name": "AimFire",
+                                  "clipName": "AimFire",
+                                  "loop": false,
+                                  "speed": 1,
+                                  "isEntry": false,
+                                  "ikWeight": 0,
+                                  "triggers": [
+                                    {
+                                      "trigger": "AimFire",
+                                      "blendTime": 0.06
+                                    }
+                                  ],
+                                  "x": 700,
+                                  "y": 40
+                                },
+                                {
+                                  "name": "Reload",
+                                  "clipName": "Reload",
+                                  "loop": false,
+                                  "speed": 1,
+                                  "isEntry": false,
+                                  "ikWeight": 0,
+                                  "triggers": [
+                                    {
+                                      "trigger": "Reload",
+                                      "blendTime": 0.06
+                                    }
+                                  ],
+                                  "x": 900,
+                                  "y": 40
+                                }
+                              ],
+                              "transitions": [
+                                {
+                                  "from": "Equip",
+                                  "to": "Off",
+                                  "conditions": [],
+                                  "minDwell": 0,
+                                  "hasExitTime": true,
+                                  "exitTime": 0.886,
+                                  "blendTime": 0.18
+                                },
+                                {
+                                  "from": "Fire",
+                                  "to": "Off",
+                                  "conditions": [],
+                                  "minDwell": 0,
+                                  "hasExitTime": true,
+                                  "exitTime": 0.691,
+                                  "blendTime": 0.18
+                                },
+                                {
+                                  "from": "AimFire",
+                                  "to": "Off",
+                                  "conditions": [],
+                                  "minDwell": 0,
+                                  "hasExitTime": true,
+                                  "exitTime": 0.691,
+                                  "blendTime": 0.18
+                                },
+                                {
+                                  "from": "Reload",
+                                  "to": "Off",
+                                  "conditions": [],
+                                  "minDwell": 0,
+                                  "hasExitTime": true,
+                                  "exitTime": 0.934,
+                                  "blendTime": 0.18
+                                }
+                              ]
+                            }
+                          ],
+                          "events": [],
+                          "eventActions": [
+                            {
+                              "event": "shot",
+                              "actions": [
+                                {
+                                  "kind": "sound",
+                                  "target": "Sounds/ShotPistol"
+                                },
+                                {
+                                  "kind": "spawn",
+                                  "template": "Muzzle Flash",
+                                  "at": "Muzzle",
+                                  "rotation": "camera",
+                                  "follow": true
+                                }
+                              ]
+                            }
+                          ],
+                          "controllerId": "090a067aee0fbeff9e874d5707b15502"
+                        },
+                        "ragdoll": null
+                      },
+                      {
+                        "name": "AK-47 Viewmodel",
+                        "type": "model",
+                        "position": [0, -1.6009999513626099, -0.02199999988079071],
+                        "rotation": [0, 0, 0],
+                        "scale": [1, 1, 1],
+                        "children": [
+                          {
+                            "name": "Muzzle",
+                            "type": "node",
+                            "position": [-0.12200000137090683, 1.4700000286102295, 0.8320000171661377],
+                            "rotation": [0, 0, 0],
+                            "scale": [1, 1, 1],
+                            "children": [],
+                            "variables": {},
+                            "spawnOnStart": true
+                          }
+                        ],
+                        "variables": {
+                          "__modelId": {
+                            "type": "string",
+                            "value": "21849aa132ecd3a7b365b111ac847623",
+                            "access": "public"
+                          },
+                          "__materialId": {
+                            "type": "string",
+                            "value": "f195dfa3599454f37bc2ff758680cba0",
+                            "access": "public"
+                          },
+                          "__materialIds": {
+                            "type": "string",
+                            "value": "[\"f195dfa3599454f37bc2ff758680cba0\",\"f66b43db39788756b85c02801e3ee7f4\",\"b6f53e48187b425c8feb2e305d0c4e5e\",\"3a9e798f88941a388a8ac34d0946325b\"]",
+                            "access": "public"
+                          },
+                          "__modelBaseTRS": {
+                            "type": "string",
+                            "value": "[0,-1.6009999513626099,-0.02199999988079071,0,0,0,1,1,1]",
+                            "access": "public"
+                          }
+                        },
+                        "spawnOnStart": true,
+                        "motionBlur": "none",
+                        "viewmodel": true,
+                        "model": {
+                          "geometry": {
+                            "$geo": {
+                              "positions": {
+                                "h": "82f775670780d387eafe86f0dd41e584781665e24e57149490625c65aaf664da",
+                                "l": 434064
+                              },
+                              "normals": {
+                                "h": "3425bc824ee5c860e69086a41f176cee038a7c37fb25b9301d73ac3c48526053",
+                                "l": 434064
+                              },
+                              "tangents": {
+                                "h": "cf1d3b51d6f5c867c8339940d9b65ddc64ce9ceb660846805f97015169378b55",
+                                "l": 434064
+                              },
+                              "bitangents": {
+                                "h": "4842d0cf5e24de9d836350397de4de1f78e7ba465b8cc23c1103e61fca5192f8",
+                                "l": 434064
+                              },
+                              "texCoords": {
+                                "h": "b8ab0a60d64c96b16f07a10a680a53156ccde1a8d05f0511b4aae1e1b129e20e",
+                                "l": 289376
+                              },
+                              "indices": {
+                                "h": "dcd1e0b954969446b596810616f96ce7ad377bf5b6bfc81cfdda9d5903d1a060",
+                                "l": 280710,
+                                "bits": 16
+                              },
+                              "typed": true
+                            }
+                          },
+                          "material": {
+                            "type": "pbr",
+                            "baseColor": [1, 1, 1],
+                            "metallic": 1,
+                            "roughness": 1,
+                            "opacity": 1,
+                            "emissiveFactor": [0, 0, 0],
+                            "alphaCutoff": 0,
+                            "displacementScale": 0.05,
+                            "textures": {
+                              "baseColorTexture": "7f52f31ae3774a6671320d18acd590d9",
+                              "metallicMap": "a13d482458670e23d0c854270416585d",
+                              "roughnessMap": "a13d482458670e23d0c854270416585d",
+                              "normalMap": "b41058e0fc2b48723b5e52e553e3936a",
+                              "occlusionMap": "a13d482458670e23d0c854270416585d"
+                            },
+                            "config": {
+                              "side": "double",
+                              "wireframe": false,
+                              "transparent": false,
+                              "castShadow": true,
+                              "probeable": true
+                            }
+                          },
+                          "skin": {
+                            "name": "Armature",
+                            "joints": [
+                              {
+                                "nodeIndex": 8,
+                                "inverseBindMatrix": {
+                                  "$f32": {
+                                    "n": [0.9915727972984314, -0.004425695165991783, 0.1294754296541214, 0, -0.12947413325309753, 0.0005781323998235166, 0.9915826320648193, 0, -0.0044632963836193085, -0.9999900460243225, 2.4733850523261935e-7, 0, 0.31483250856399536, 0.28643620014190674, -1.4219516515731812, 1]
+                                  },
+                                  "t": 1
+                                },
+                                "parentIndex": 35
+                              },
+                              {
+                                "nodeIndex": 9,
+                                "inverseBindMatrix": {
+                                  "$f32": {
+                                    "n": [0.9915727972984314, -0.004425695165991783, 0.1294754296541214, 0, -0.12947413325309753, 0.0005781323998235166, 0.9915826320648193, 0, -0.0044632963836193085, -0.9999900460243225, 2.4733850523261935e-7, 0, 0.31483250856399536, 0.28643620014190674, -1.4219516515731812, 1]
+                                  },
+                                  "t": 1
+                                },
+                                "parentIndex": 8
+                              },
+                              {
+                                "nodeIndex": 10,
+                                "inverseBindMatrix": {
+                                  "$f32": {
+                                    "n": [0.9915727972984314, -0.004425700753927231, 0.1294754147529602, 0, -0.12947413325309753, 0.0005781331565231085, 0.9915826320648193, 0, -0.004463301505893469, -0.9999900460243225, 2.473761355759052e-7, 0, 0.3148324489593506, 0.2887328863143921, -1.4174071550369263, 1]
+                                  },
+                                  "t": 1
+                                },
+                                "parentIndex": 9
+                              },
+                              {
+                                "nodeIndex": 11,
+                                "inverseBindMatrix": {
+                                  "$f32": {
+                                    "n": [0.9915727972984314, -0.004425700753927231, 0.1294754147529602, 0, -0.12947413325309753, 0.0005781331565231085, 0.9915826320648193, 0, -0.004463301505893469, -0.9999900460243225, 2.473761355759052e-7, 0, 0.3148324489593506, 0.38575226068496704, -1.4552195072174072, 1]
+                                  },
+                                  "t": 1
+                                },
+                                "parentIndex": 9
+                              },
+                              {
+                                "nodeIndex": 12,
+                                "inverseBindMatrix": {
+                                  "$f32": {
+                                    "n": [0.9915727972984314, -0.004425695165991783, 0.1294754296541214, 0, -0.12947413325309753, 0.0005781323998235166, 0.9915826320648193, 0, -0.0044632963836193085, -0.9999900460243225, 2.4733850523261935e-7, 0, 0.3144241273403168, 0.3891889452934265, -1.3689155578613281, 1]
+                                  },
+                                  "t": 1
+                                },
+                                "parentIndex": 9
+                              },
+                              {
+                                "nodeIndex": 23,
+                                "inverseBindMatrix": {
+                                  "$f32": {
+                                    "n": [1, 0, 0, 0, 0, -1.3435887069590535e-7, 1, 0, 0, -1, -1.3435887069590535e-7, 0, 0, 0, 0, 1]
+                                  },
+                                  "t": 1
+                                },
+                                "parentIndex": 22
+                              },
+                              {
+                                "nodeIndex": 27,
+                                "inverseBindMatrix": {
+                                  "$f32": {
+                                    "n": [1, 0, 0, 0, 0, -1.3435887069590535e-7, 1, 0, 0, -1, -1.3435887069590535e-7, 0, 0, 0, 0, 1]
+                                  },
+                                  "t": 1
+                                },
+                                "parentIndex": 23
+                              },
+                              {
+                                "nodeIndex": 28,
+                                "inverseBindMatrix": {
+                                  "$f32": {
+                                    "n": [1, 0, 0, 0, 0, 0.9683388471603394, -0.24963954091072083, 0, 0, 0.24963954091072083, 0.9683388471603394, 0, 0, -0.8663467764854431, 0.2745684087276459, 1]
+                                  },
+                                  "t": 1
+                                },
+                                "parentIndex": 27
+                              },
+                              {
+                                "nodeIndex": 35,
+                                "inverseBindMatrix": {
+                                  "$f32": {
+                                    "n": [0.9915727972984314, -0.004425706807523966, 0.129475399851799, 0, -0.12947411835193634, 0.0005777967744506896, 0.9915825724601746, 0, -0.004463253542780876, -0.9999899864196777, -8.632113690509868e-8, 0, 0.31483250856399536, 0.286436527967453, -1.4219515323638916, 1]
+                                  },
+                                  "t": 1
+                                },
+                                "parentIndex": 28
+                              },
+                              {
+                                "nodeIndex": 37,
+                                "inverseBindMatrix": {
+                                  "$f32": {
+                                    "n": [1, 0, 0, 0, 0, -1.3435887069590535e-7, 1, 0, 0, -1, -1.3435887069590535e-7, 0, 0, -0.032528042793273926, -0.9736847281455994, 1]
+                                  },
+                                  "t": 1
+                                },
+                                "parentIndex": 23
+                              },
+                              {
+                                "nodeIndex": 38,
+                                "inverseBindMatrix": {
+                                  "$f32": {
+                                    "n": [1, 0, 0, 0, 0, -1.3435887069590535e-7, 1, 0, 0, -1, -1.3435887069590535e-7, 0, 0, -0.03252803534269333, -0.9736847281455994, 1]
+                                  },
+                                  "t": 1
+                                },
+                                "parentIndex": 37
+                              },
+                              {
+                                "nodeIndex": 61,
+                                "inverseBindMatrix": {
+                                  "$f32": {
+                                    "n": [1, 0, 0, 0, 0, -1.3435887069590535e-7, 1, 0, 0, -1, -1.3435887069590535e-7, 0, 0, -0.00035940142697654665, -1.1617543697357178, 1]
+                                  },
+                                  "t": 1
+                                },
+                                "parentIndex": 38
+                              },
+                              {
+                                "nodeIndex": 62,
+                                "inverseBindMatrix": {
+                                  "$f32": {
+                                    "n": [1, 0, 0, 0, 0, 0.9994938373565674, 0.03181258961558342, 0, 0, -0.03181258961558342, 0.9994938373565674, 0, 0, -1.161177635192871, -0.036599051207304, 1]
+                                  },
+                                  "t": 1
+                                },
+                                "parentIndex": 61
+                              },
+                              {
+                                "nodeIndex": 63,
+                                "inverseBindMatrix": {
+                                  "$f32": {
+                                    "n": [1, 0, 0, 0, 0, 3.422854533141617e-8, 1.0000001192092896, 0, 0, -1.0000001192092896, 3.422854533141617e-8, 0, 0, -0.005301697179675102, -1.3170264959335327, 1]
+                                  },
+                                  "t": 1
+                                },
+                                "parentIndex": 62
+                              },
+                              {
+                                "nodeIndex": 64,
+                                "inverseBindMatrix": {
+                                  "$f32": {
+                                    "n": [1, 0, 0, 0, 0, 0.999592125415802, 0.028559530153870583, 0, 0, -0.028559530153870583, 0.999592125415802, 0, 0, -1.3166406154632568, -0.032314155250787735, 1]
+                                  },
+                                  "t": 1
+                                },
+                                "parentIndex": 63
+                              },
+                              {
+                                "nodeIndex": 65,
+                                "inverseBindMatrix": {
+                                  "$f32": {
+                                    "n": [1, 0, 0, 0, 0, 0.999592125415802, 0.028559517115354538, 0, 0, -0.028559517115354538, 0.999592125415802, 0, 0, -1.3166406154632568, -0.03231414034962654, 1]
+                                  },
+                                  "t": 1
+                                },
+                                "parentIndex": 64
+                              },
+                              {
+                                "nodeIndex": 66,
+                                "inverseBindMatrix": {
+                                  "$f32": {
+                                    "n": [1, 0, 0, 0, 0, 0.999592125415802, 0.028559545055031776, 0, 0, -0.028559545055031776, 0.999592125415802, 0, 0, -1.3166406154632568, -0.032314177602529526, 1]
+                                  },
+                                  "t": 1
+                                },
+                                "parentIndex": 65
+                              },
+                              {
+                                "nodeIndex": 67,
+                                "inverseBindMatrix": {
+                                  "$f32": {
+                                    "n": [-0.008645541965961456, 0.9999624490737915, 0.0005313355359248817, 0, 0.00022985576651990414, -0.0005293434951454401, 0.9999997615814209, 0, 0.999962568283081, 0.008645687252283096, -0.00022524582163896412, 0, -0.06164877489209175, -0.01621103100478649, -1.442280888557434, 1]
+                                  },
+                                  "t": 1
+                                },
+                                "parentIndex": 66
+                              },
+                              {
+                                "nodeIndex": 68,
+                                "inverseBindMatrix": {
+                                  "$f32": {
+                                    "n": [-0.008645541965961456, 0.9999624490737915, 0.0005313355359248817, 0, 0.00022985576651990414, -0.0005293434951454401, 0.9999997615814209, 0, 0.999962568283081, 0.008645687252283096, -0.00022524582163896412, 0, -0.06164878234267235, -0.016211023554205894, -1.4422807693481445, 1]
+                                  },
+                                  "t": 1
+                                },
+                                "parentIndex": 67
+                              },
+                              {
+                                "nodeIndex": 69,
+                                "inverseBindMatrix": {
+                                  "$f32": {
+                                    "n": [-0.7766459584236145, -0.2821630835533142, -0.563209593296051, 0, -0.4932434558868408, -0.2837387025356293, 0.8223157525062561, 0, -0.39183154702186584, 0.9164476990699768, 0.08118944615125656, 0, 0.882591962814331, 0.3953596353530884, -1.0657261610031128, 1]
+                                  },
+                                  "t": 1
+                                },
+                                "parentIndex": 67
+                              },
+                              {
+                                "nodeIndex": 70,
+                                "inverseBindMatrix": {
+                                  "$f32": {
+                                    "n": [-0.7438123822212219, -0.282163143157959, -0.6059102416038513, 0, -0.5386175513267517, -0.2837386727333069, 0.7933369874954224, 0, -0.3957705795764923, 0.9164477586746216, 0.05907024070620537, 0, 0.941013514995575, 0.25101274251937866, -1.014512062072754, 1]
+                                  },
+                                  "t": 1
+                                },
+                                "parentIndex": 69
+                              },
+                              {
+                                "nodeIndex": 71,
+                                "inverseBindMatrix": {
+                                  "$f32": {
+                                    "n": [-0.7049678564071655, -0.6774554252624512, -0.20993882417678833, 0, -0.5866410732269287, 0.3906235694885254, 0.7094120383262634, 0, -0.39858800172805786, 0.6232714653015137, -0.6728001832962036, 0, 1.0019218921661377, -0.6546161770820618, -0.7026726007461548, 1]
+                                  },
+                                  "t": 1
+                                },
+                                "parentIndex": 70
+                              },
+                              {
+                                "nodeIndex": 72,
+                                "inverseBindMatrix": {
+                                  "$f32": {
+                                    "n": [-0.456280380487442, -0.6776540875434875, 0.5767090916633606, 0, 0.4413071274757385, 0.39045748114585876, 0.8079548478126526, 0, -0.7726942896842957, 0.623159646987915, 0.12089542299509048, 0, -0.28106197714805603, -0.7723783850669861, -1.1912469863891602, 1]
+                                  },
+                                  "t": 1
+                                },
+                                "parentIndex": 71
+                              },
+                              {
+                                "nodeIndex": 73,
+                                "inverseBindMatrix": {
+                                  "$f32": {
+                                    "n": [-0.01381616573780775, -0.7759326696395874, 0.6306645274162292, 0, 0.975280225276947, -0.14957047998905182, -0.1626570075750351, 0, 0.2205396145582199, 0.6128273010253906, 0.7588181495666504, 0, -1.5056169033050537, -0.11531461775302887, -0.10410582274198532, 1]
+                                  },
+                                  "t": 1
+                                },
+                                "parentIndex": 72
+                              },
+                              {
+                                "nodeIndex": 74,
+                                "inverseBindMatrix": {
+                                  "$f32": {
+                                    "n": [-0.7030846476554871, -0.7092028856277466, -0.05199376493692398, 0, -0.019214805215597153, -0.05414286255836487, 0.9983482956886292, 0, -0.7108466029167175, 0.7029224038124084, 0.024439776316285133, 0, 0.34607669711112976, -0.33177077770233154, -1.442514419555664, 1]
+                                  },
+                                  "t": 1
+                                },
+                                "parentIndex": 73
+                              },
+                              {
+                                "nodeIndex": 75,
+                                "inverseBindMatrix": {
+                                  "$f32": {
+                                    "n": [-0.6704438328742981, -0.620913028717041, 0.4061677157878876, 0, -0.32022836804389954, 0.7359675765037537, 0.5964943766593933, 0, -0.6692973971366882, 0.2698495388031006, -0.692258894443512, 0, 0.7537205219268799, -1.2785323858261108, -0.41008010506629944, 1]
+                                  },
+                                  "t": 1
+                                },
+                                "parentIndex": 74
+                              },
+                              {
+                                "nodeIndex": 76,
+                                "inverseBindMatrix": {
+                                  "$f32": {
+                                    "n": [-0.5450608134269714, -0.13405290246009827, 0.8276100754737854, 0, -0.13701701164245605, 0.9881057143211365, 0.06981044262647629, 0, -0.8271245360374451, -0.0753457099199295, -0.556945264339447, 0, 0.596260130405426, -1.4156749248504639, 0.34112584590911865, 1]
+                                  },
+                                  "t": 1
+                                },
+                                "parentIndex": 75
+                              },
+                              {
+                                "nodeIndex": 77,
+                                "inverseBindMatrix": {
+                                  "$f32": {
+                                    "n": [-0.5439950823783875, 0.44462260603904724, 0.7116037607192993, 0, -0.168939009308815, 0.7726647257804871, -0.6119222640991211, 0, -0.8219056725502014, -0.4531003534793854, -0.3452117145061493, 0, 0.6407212018966675, -0.8176608681678772, 1.2121846675872803, 1]
+                                  },
+                                  "t": 1
+                                },
+                                "parentIndex": 76
+                              },
+                              {
+                                "nodeIndex": 78,
+                                "inverseBindMatrix": {
+                                  "$f32": {
+                                    "n": [0.0077492608688771725, -0.3603440225124359, -0.9327872395515442, 0, -0.9060980677604675, 0.3920592963695526, -0.1589834839105606, 0, 0.4229966402053833, 0.8464287519454956, -0.3234688341617584, 0, 1.096403956413269, -1.0382429361343384, 0.33740317821502686, 1]
+                                  },
+                                  "t": 1
+                                },
+                                "parentIndex": 74
+                              },
+                              {
+                                "nodeIndex": 79,
+                                "inverseBindMatrix": {
+                                  "$f32": {
+                                    "n": [0.0029258402064442635, -0.42261090874671936, -0.9063064455986023, 0, -0.9030900001525879, 0.38809219002723694, -0.1838829219341278, 0, 0.4294413924217224, 0.8190143704414368, -0.38052019476890564, 0, 1.0879032611846924, -1.0732816457748413, 0.4087604880332947, 1]
+                                  },
+                                  "t": 1
+                                },
+                                "parentIndex": 78
+                              },
+                              {
+                                "nodeIndex": 80,
+                                "inverseBindMatrix": {
+                                  "$f32": {
+                                    "n": [0.01012970507144928, -0.2896382510662079, -0.9570825695991516, 0, -0.909463107585907, 0.39519432187080383, -0.12922188639640808, 0, 0.4156612157821655, 0.8717402815818787, -0.25941213965415955, 0, 1.106175422668457, -1.1277443170547485, 0.2514185905456543, 1]
+                                  },
+                                  "t": 1
+                                },
+                                "parentIndex": 79
+                              },
+                              {
+                                "nodeIndex": 81,
+                                "inverseBindMatrix": {
+                                  "$f32": {
+                                    "n": [-0.7030845880508423, -0.7092029452323914, -0.05199357122182846, 0, -0.01921447552740574, -0.054142892360687256, 0.9983483552932739, 0, -0.7108466029167175, 0.7029222846031189, 0.024440055713057518, 0, 0.34607625007629395, -0.331770658493042, -1.4425145387649536, 1]
+                                  },
+                                  "t": 1
+                                },
+                                "parentIndex": 74
+                              },
+                              {
+                                "nodeIndex": 82,
+                                "inverseBindMatrix": {
+                                  "$f32": {
+                                    "n": [-0.5648291110992432, -0.8250070214271545, -0.018211858347058296, 0, 0.014277201145887375, -0.03183607757091522, 0.9993911981582642, 0, -0.8250844478607178, 0.5642251372337341, 0.029760658740997314, 0, 0.34981298446655273, -0.3096315562725067, -1.4324617385864258, 1]
+                                  },
+                                  "t": 1
+                                },
+                                "parentIndex": 73
+                              },
+                              {
+                                "nodeIndex": 83,
+                                "inverseBindMatrix": {
+                                  "$f32": {
+                                    "n": [-0.5176336169242859, -0.20343074202537537, 0.8310663104057312, 0, -0.14642973244190216, 0.9780557751655579, 0.14820677042007446, 0, -0.8429790139198303, -0.044975996017456055, -0.5360628962516785, 0, 0.5940333008766174, -1.389885663986206, 0.19728714227676392, 1]
+                                  },
+                                  "t": 1
+                                },
+                                "parentIndex": 82
+                              },
+                              {
+                                "nodeIndex": 84,
+                                "inverseBindMatrix": {
+                                  "$f32": {
+                                    "n": [-0.33262738585472107, 0.15510022640228271, 0.9302165508270264, 0, -0.10518193989992142, 0.9741271734237671, -0.20003271102905273, 0, -0.9371742606163025, -0.164378359913826, -0.30770760774612427, 0, 0.612263023853302, -1.3107959032058716, 0.5968800783157349, 1]
+                                  },
+                                  "t": 1
+                                },
+                                "parentIndex": 83
+                              },
+                              {
+                                "nodeIndex": 85,
+                                "inverseBindMatrix": {
+                                  "$f32": {
+                                    "n": [-0.33638131618499756, 0.38651061058044434, 0.8587532043457031, 0, -0.12176476418972015, 0.8863871097564697, -0.44664451479911804, 0, -0.9338206052780151, -0.2548087537288666, -0.25110065937042236, 0, 0.634611964225769, -1.1272449493408203, 0.9233636856079102, 1]
+                                  },
+                                  "t": 1
+                                },
+                                "parentIndex": 84
+                              },
+                              {
+                                "nodeIndex": 86,
+                                "inverseBindMatrix": {
+                                  "$f32": {
+                                    "n": [-0.5648290514945984, -0.8250069618225098, -0.018211694434285164, 0, 0.014277523383498192, -0.03183607757091522, 0.9993911981582642, 0, -0.8250845074653625, 0.5642250776290894, 0.02976095862686634, 0, 0.3498125374317169, -0.3096315562725067, -1.4324619770050049, 1]
+                                  },
+                                  "t": 1
+                                },
+                                "parentIndex": 82
+                              },
+                              {
+                                "nodeIndex": 87,
+                                "inverseBindMatrix": {
+                                  "$f32": {
+                                    "n": [-0.44866427779197693, -0.8882167935371399, 0.09884995967149734, 0, 0.06178887560963631, 0.07951325923204422, 0.9949170351028442, 0, -0.8915619254112244, 0.45249149203300476, 0.019207121804356575, 0, 0.3067035675048828, -0.4146636128425598, -1.4043980836868286, 1]
+                                  },
+                                  "t": 1
+                                },
+                                "parentIndex": 73
+                              },
+                              {
+                                "nodeIndex": 88,
+                                "inverseBindMatrix": {
+                                  "$f32": {
+                                    "n": [-0.6902748346328735, -0.09876244515180588, 0.7167752385139465, 0, 0.010083870030939579, 0.9892311096191406, 0.14601443707942963, 0, -0.7234770059585571, 0.1080179512500763, -0.6818454265594482, 0, 0.2574596405029297, -1.4713588953018188, 0.2511097490787506, 1]
+                                  },
+                                  "t": 1
+                                },
+                                "parentIndex": 87
+                              },
+                              {
+                                "nodeIndex": 89,
+                                "inverseBindMatrix": {
+                                  "$f32": {
+                                    "n": [-0.5985231995582581, 0.14663095772266388, 0.787571907043457, 0, 0.0205747839063406, 0.9855955839157104, -0.16786320507526398, 0, -0.8008412718772888, -0.08426588773727417, -0.5929186940193176, 0, 0.2963739335536957, -1.3690154552459717, 0.6725602149963379, 1]
+                                  },
+                                  "t": 1
+                                },
+                                "parentIndex": 88
+                              },
+                              {
+                                "nodeIndex": 90,
+                                "inverseBindMatrix": {
+                                  "$f32": {
+                                    "n": [-0.5926827788352966, 0.505756139755249, 0.6268476247787476, 0, 0.0382813923060894, 0.7950800061225891, -0.6052952408790588, 0, -0.8045257925987244, -0.3347514271736145, -0.49059125781059265, 0, 0.27286168932914734, -0.9320567846298218, 1.2450968027114868, 1]
+                                  },
+                                  "t": 1
+                                },
+                                "parentIndex": 89
+                              },
+                              {
+                                "nodeIndex": 91,
+                                "inverseBindMatrix": {
+                                  "$f32": {
+                                    "n": [-0.44866418838500977, -0.8882167935371399, 0.0988498255610466, 0, 0.06178892403841019, 0.07951313257217407, 0.9949169754981995, 0, -0.8915618658065796, 0.4524914622306824, 0.01920728199183941, 0, 0.30670350790023804, -0.4146634042263031, -1.4043982028961182, 1]
+                                  },
+                                  "t": 1
+                                },
+                                "parentIndex": 87
+                              },
+                              {
+                                "nodeIndex": 92,
+                                "inverseBindMatrix": {
+                                  "$f32": {
+                                    "n": [-0.33531761169433594, -0.8963583707809448, 0.29000648856163025, 0, 0.0582168884575367, 0.2875252366065979, 0.9560021162033081, 0, -0.9403047561645508, 0.3374476134777069, -0.04422910138964653, 0, 0.3277682960033417, -0.6485031247138977, -1.3073474168777466, 1]
+                                  },
+                                  "t": 1
+                                },
+                                "parentIndex": 73
+                              },
+                              {
+                                "nodeIndex": 93,
+                                "inverseBindMatrix": {
+                                  "$f32": {
+                                    "n": [-0.6162275671958923, 0.012111390009522438, 0.7874749898910522, 0, 0.017683513462543488, 0.9998424053192139, -0.0015396212693303823, 0, -0.7873696088790894, 0.012976567260921001, -0.6163446307182312, 0, 0.2653190791606903, -1.4467419385910034, 0.4315944314002991, 1]
+                                  },
+                                  "t": 1
+                                },
+                                "parentIndex": 92
+                              },
+                              {
+                                "nodeIndex": 94,
+                                "inverseBindMatrix": {
+                                  "$f32": {
+                                    "n": [-0.16877786815166473, 0.3746219873428345, 0.9116865992546082, 0, 0.006500639952719212, 0.9253588318824768, -0.3790366053581238, 0, -0.9856327176094055, -0.05804644152522087, -0.1586153656244278, 0, 0.45061391592025757, -1.2699270248413086, 0.7791528701782227, 1]
+                                  },
+                                  "t": 1
+                                },
+                                "parentIndex": 93
+                              },
+                              {
+                                "nodeIndex": 95,
+                                "inverseBindMatrix": {
+                                  "$f32": {
+                                    "n": [-0.1588330715894699, 0.7441744208335876, 0.648827075958252, 0, 0.02495231293141842, 0.6599852442741394, -0.7508641481399536, 0, -0.9869901537895203, -0.10307228565216064, -0.1233963668346405, 0, 0.42535752058029175, -0.8178303837776184, 1.274775505065918, 1]
+                                  },
+                                  "t": 1
+                                },
+                                "parentIndex": 94
+                              },
+                              {
+                                "nodeIndex": 96,
+                                "inverseBindMatrix": {
+                                  "$f32": {
+                                    "n": [-0.3353177011013031, -0.8963583111763, 0.29000645875930786, 0, 0.058216776698827744, 0.2875252962112427, 0.9560020565986633, 0, -0.9403045773506165, 0.3374477028846741, -0.04422920569777489, 0, 0.32776835560798645, -0.6485031843185425, -1.3073474168777466, 1]
+                                  },
+                                  "t": 1
+                                },
+                                "parentIndex": 92
+                              },
+                              {
+                                "nodeIndex": 97,
+                                "inverseBindMatrix": {
+                                  "$f32": {
+                                    "n": [0.5070949196815491, -0.8618900775909424, -0.0005287984386086464, 0, 0.00007421964255627245, -0.0005698918248526752, 0.9999998211860657, 0, -0.8618901968002319, -0.5070949196815491, -0.0002250327670481056, 0, 0.06120474636554718, 0.017816180363297462, -1.442280888557434, 1]
+                                  },
+                                  "t": 1
+                                },
+                                "parentIndex": 66
+                              },
+                              {
+                                "nodeIndex": 98,
+                                "inverseBindMatrix": {
+                                  "$f32": {
+                                    "n": [0.5070949196815491, -0.8618900775909424, -0.00052888214122504, 0, 0.00007413591811200604, -0.0005700382171198726, 0.9999998211860657, 0, -0.8618901968002319, -0.5070949196815491, -0.0002251791302114725, 0, 0.06120486930012703, 0.01781640201807022, -1.442280888557434, 1]
+                                  },
+                                  "t": 1
+                                },
+                                "parentIndex": 97
+                              },
+                              {
+                                "nodeIndex": 99,
+                                "inverseBindMatrix": {
+                                  "$f32": {
+                                    "n": [-0.9326097965240479, -0.3602617681026459, -0.021225836127996445, 0, 0.32210400700569153, -0.8574709296226501, 0.4012390077114105, 0, -0.16275161504745483, 0.36736246943473816, 0.915727436542511, 0, -0.6262009739875793, 1.1665149927139282, -0.5530654788017273, 1]
+                                  },
+                                  "t": 1
+                                },
+                                "parentIndex": 97
+                              },
+                              {
+                                "nodeIndex": 100,
+                                "inverseBindMatrix": {
+                                  "$f32": {
+                                    "n": [-0.9315668344497681, -0.3602617681026459, 0.048937492072582245, 0, 0.35135340690612793, -0.8574709296226501, 0.37589162588119507, 0, -0.09345690906047821, 0.36736252903938293, 0.9253705143928528, 0, -0.6660025715827942, 1.0236421823501587, -0.5044299364089966, 1]
+                                  },
+                                  "t": 1
+                                },
+                                "parentIndex": 99
+                              },
+                              {
+                                "nodeIndex": 101,
+                                "inverseBindMatrix": {
+                                  "$f32": {
+                                    "n": [-0.895822286605835, 0.4441700279712677, 0.014677765779197216, 0, 0.42718085646629333, 0.8515102863311768, 0.3040505647659302, 0, 0.12255188077688217, 0.2786453366279602, -0.952542781829834, 0, -0.7629315853118896, -0.9026938080787659, -0.2772051692008972, 1]
+                                  },
+                                  "t": 1
+                                },
+                                "parentIndex": 100
+                              },
+                              {
+                                "nodeIndex": 102,
+                                "inverseBindMatrix": {
+                                  "$f32": {
+                                    "n": [-0.8655707240104675, 0.44512030482292175, -0.22946758568286896, 0, 0.32921674847602844, 0.8510574102401733, 0.40904486179351807, 0, 0.37736424803733826, 0.2785126566886902, -0.8831914067268372, 0, -0.6600476503372192, -1.0183830261230469, -0.4737515449523926, 1]
+                                  },
+                                  "t": 1
+                                },
+                                "parentIndex": 101
+                              },
+                              {
+                                "nodeIndex": 103,
+                                "inverseBindMatrix": {
+                                  "$f32": {
+                                    "n": [-0.9547461271286011, 0.023565951734781265, -0.2964872121810913, 0, -0.2861880660057068, 0.19859842956066132, 0.9373660683631897, 0, 0.08097182959318161, 0.9797976016998291, -0.18286682665348053, 0, 0.21495191752910614, -0.41392406821250916, -1.3153934478759766, 1]
+                                  },
+                                  "t": 1
+                                },
+                                "parentIndex": 102
+                              },
+                              {
+                                "nodeIndex": 104,
+                                "inverseBindMatrix": {
+                                  "$f32": {
+                                    "n": [-0.13775815069675446, 0.10933000594377518, 0.9844133257865906, 0, 0.9472659826278687, 0.30486932396888733, 0.09870072454214096, 0, -0.28932642936706543, 0.9460980892181396, -0.1455627828836441, 0, -1.2932227849960327, -0.5794360041618347, 0.06203565001487732, 1]
+                                  },
+                                  "t": 1
+                                },
+                                "parentIndex": 103
+                              },
+                              {
+                                "nodeIndex": 105,
+                                "inverseBindMatrix": {
+                                  "$f32": {
+                                    "n": [0.16350513696670532, 0.22951887547969818, 0.9594723582267761, 0, 0.9254338145256042, 0.3012887239456177, -0.2297770082950592, 0, -0.34181642532348633, 0.925497829914093, -0.16314229369163513, 0, -1.1968121528625488, -0.6245719790458679, 0.5268377065658569, 1]
+                                  },
+                                  "t": 1
+                                },
+                                "parentIndex": 104
+                              },
+                              {
+                                "nodeIndex": 106,
+                                "inverseBindMatrix": {
+                                  "$f32": {
+                                    "n": [0.16621296107769012, 0.7965823411941528, 0.5812312364578247, 0, 0.9173842072486877, 0.09125038236379623, -0.3874010741710663, 0, -0.3616344630718231, 0.597603440284729, -0.7156051397323608, 0, -1.1789653301239014, -0.17977596819400787, 0.8545772433280945, 1]
+                                  },
+                                  "t": 1
+                                },
+                                "parentIndex": 105
+                              },
+                              {
+                                "nodeIndex": 107,
+                                "inverseBindMatrix": {
+                                  "$f32": {
+                                    "n": [0.19248777627944946, 0.9691562652587891, -0.1538977473974228, 0, 0.9192925095558167, -0.23295803368091583, -0.31722506880760193, 0, -0.3432924151420593, -0.08041511476039886, -0.9357796311378479, 0, -1.1835445165634155, 0.4912334382534027, 0.7210406064987183, 1]
+                                  },
+                                  "t": 1
+                                },
+                                "parentIndex": 106
+                              },
+                              {
+                                "nodeIndex": 108,
+                                "inverseBindMatrix": {
+                                  "$f32": {
+                                    "n": [0.5731668472290039, 0.8085119724273682, -0.13337193429470062, 0, -0.5043902397155762, 0.21982456743717194, -0.8350255489349365, 0, -0.6458097100257874, 0.5458804368972778, 0.5338016748428345, 0, 0.9141868948936462, -0.2872028648853302, 1.05592942237854, 1]
+                                  },
+                                  "t": 1
+                                },
+                                "parentIndex": 104
+                              },
+                              {
+                                "nodeIndex": 109,
+                                "inverseBindMatrix": {
+                                  "$f32": {
+                                    "n": [0.26667970418930054, 0.16981637477874756, -0.9487066268920898, 0, -0.9636685252189636, 0.031665120273828506, -0.2652174234390259, 0, -0.014997374266386032, 0.9849668741226196, 0.17209115624427795, 0, 1.3975269794464111, -0.23476150631904602, 0.23534125089645386, 1]
+                                  },
+                                  "t": 1
+                                },
+                                "parentIndex": 108
+                              },
+                              {
+                                "nodeIndex": 110,
+                                "inverseBindMatrix": {
+                                  "$f32": {
+                                    "n": [0.2716747224330902, -0.420240581035614, -0.8657890558242798, 0, -0.9622573256492615, -0.13350094854831696, -0.23714607954025269, 0, -0.01592526026070118, 0.8975384831428528, -0.44064846634864807, 0, 1.3959689140319824, -0.06807056069374084, 0.34950321912765503, 1]
+                                  },
+                                  "t": 1
+                                },
+                                "parentIndex": 109
+                              },
+                              {
+                                "nodeIndex": 111,
+                                "inverseBindMatrix": {
+                                  "$f32": {
+                                    "n": [-0.13775847852230072, 0.10932998359203339, 0.9844132661819458, 0, 0.9472659230232239, 0.30486926436424255, 0.09870102256536484, 0, -0.28932633996009827, 0.9460981488227844, -0.14556285738945007, 0, -1.293222427368164, -0.5794358849525452, 0.06203525885939598, 1]
+                                  },
+                                  "t": 1
+                                },
+                                "parentIndex": 104
+                              },
+                              {
+                                "nodeIndex": 112,
+                                "inverseBindMatrix": {
+                                  "$f32": {
+                                    "n": [-0.1904352903366089, 0.12158133834600449, 0.9741418361663818, 0, 0.9737929105758667, 0.14908291399478912, 0.17176027595996857, 0, -0.12434503436088562, 0.9813216924667358, -0.1467856764793396, 0, -1.3540483713150024, -0.37609153985977173, -0.028920529410243034, 1]
+                                  },
+                                  "t": 1
+                                },
+                                "parentIndex": 103
+                              },
+                              {
+                                "nodeIndex": 113,
+                                "inverseBindMatrix": {
+                                  "$f32": {
+                                    "n": [-0.03751083090901375, 0.998217761516571, 0.04641365632414818, 0, 0.9942655563354492, 0.04193626716732979, -0.09837338328361511, 0, -0.10014447569847107, 0.04245743528008461, -0.9940667152404785, 0, -1.361603021621704, 0.10389194637537003, 0.4056374728679657, 1]
+                                  },
+                                  "t": 1
+                                },
+                                "parentIndex": 112
+                              },
+                              {
+                                "nodeIndex": 114,
+                                "inverseBindMatrix": {
+                                  "$f32": {
+                                    "n": [-0.05295853316783905, 0.49947383999824524, -0.8647087812423706, 0, 0.9959781169891357, 0.0890875980257988, -0.009539185091853142, 0, 0.07227025181055069, -0.8617361783981323, -0.5021829009056091, 0, -1.411130428314209, 0.1682835817337036, 0.03446390852332115, 1]
+                                  },
+                                  "t": 1
+                                },
+                                "parentIndex": 113
+                              },
+                              {
+                                "nodeIndex": 115,
+                                "inverseBindMatrix": {
+                                  "$f32": {
+                                    "n": [-0.04359748959541321, -0.42866554856300354, -0.9024108052253723, 0, 0.9979820847511292, 0.02305048145353794, -0.05916423350572586, 0, 0.04616270214319229, -0.9031691551208496, 0.4267955720424652, 0, -1.4062912464141846, 0.13476018607616425, -0.1230529174208641, 1]
+                                  },
+                                  "t": 1
+                                },
+                                "parentIndex": 114
+                              },
+                              {
+                                "nodeIndex": 116,
+                                "inverseBindMatrix": {
+                                  "$f32": {
+                                    "n": [-0.1904357224702835, 0.12158140540122986, 0.9741417169570923, 0, 0.9737928509712219, 0.14908291399478912, 0.17176072299480438, 0, -0.12434495240449905, 0.9813216328620911, -0.14678576588630676, 0, -1.354048490524292, -0.37609151005744934, -0.02892117388546467, 1]
+                                  },
+                                  "t": 1
+                                },
+                                "parentIndex": 112
+                              },
+                              {
+                                "nodeIndex": 117,
+                                "inverseBindMatrix": {
+                                  "$f32": {
+                                    "n": [-0.2669125497341156, 0.1423129290342331, 0.9531552195549011, 0, 0.9634591937065125, 0.016361385583877563, 0.2673550844192505, 0, 0.02245311066508293, 0.9896865487098694, -0.14147980511188507, 0, -1.36457359790802, -0.1899469792842865, -0.15715542435646057, 1]
+                                  },
+                                  "t": 1
+                                },
+                                "parentIndex": 103
+                              },
+                              {
+                                "nodeIndex": 118,
+                                "inverseBindMatrix": {
+                                  "$f32": {
+                                    "n": [-0.20047371089458466, 0.9483426809310913, 0.24587877094745636, 0, 0.9421911835670471, 0.2554076313972473, -0.21689315140247345, 0, -0.2684883773326874, 0.18818344175815582, -0.9447227120399475, 0, -1.2477118968963623, -0.22661784291267395, 0.5835577845573425, 1]
+                                  },
+                                  "t": 1
+                                },
+                                "parentIndex": 117
+                              },
+                              {
+                                "nodeIndex": 119,
+                                "inverseBindMatrix": {
+                                  "$f32": {
+                                    "n": [-0.26824936270713806, 0.6960123181343079, -0.6660398840904236, 0, 0.9599068760871887, 0.2515132427215576, -0.12377350777387619, 0, 0.08136996626853943, -0.6725384593009949, -0.7355753183364868, 0, -1.3742731809616089, -0.06761159002780914, 0.27204856276512146, 1]
+                                  },
+                                  "t": 1
+                                },
+                                "parentIndex": 118
+                              },
+                              {
+                                "nodeIndex": 120,
+                                "inverseBindMatrix": {
+                                  "$f32": {
+                                    "n": [-0.2778475880622864, -0.2852383255958557, -0.917300283908844, 0, 0.9568976759910583, 0.0018582948250696063, -0.2904193699359894, 0, 0.08454333990812302, -0.9584547877311707, 0.27242758870124817, 0, -1.3717094659805298, 0.19987572729587555, 0.22196893393993378, 1]
+                                  },
+                                  "t": 1
+                                },
+                                "parentIndex": 119
+                              },
+                              {
+                                "nodeIndex": 121,
+                                "inverseBindMatrix": {
+                                  "$f32": {
+                                    "n": [-0.2669125497341156, 0.1423129290342331, 0.9531552195549011, 0, 0.9634591937065125, 0.016361385583877563, 0.2673550844192505, 0, 0.02245311066508293, 0.9896865487098694, -0.14147980511188507, 0, -1.36457359790802, -0.1899469792842865, -0.15715540945529938, 1]
+                                  },
+                                  "t": 1
+                                },
+                                "parentIndex": 117
+                              },
+                              {
+                                "nodeIndex": 122,
+                                "inverseBindMatrix": {
+                                  "$f32": {
+                                    "n": [-0.2910659611225128, 0.15397806465625763, 0.9442306160926819, 0, 0.9412307143211365, -0.1306953877210617, 0.31145399808883667, 0, 0.17136363685131073, 0.9793924689292908, -0.10688792169094086, 0, -1.3494048118591309, 0.020240463316440582, -0.2272707223892212, 1]
+                                  },
+                                  "t": 1
+                                },
+                                "parentIndex": 103
+                              },
+                              {
+                                "nodeIndex": 123,
+                                "inverseBindMatrix": {
+                                  "$f32": {
+                                    "n": [-0.4477408528327942, 0.8873986005783081, 0.10978080332279205, 0, 0.8609507083892822, 0.46099957823753357, -0.21504254639148712, 0, -0.24143736064434052, -0.0017674793489277363, -0.9704147577285767, 0, -1.1606183052062988, -0.4681498408317566, 0.5584381818771362, 1]
+                                  },
+                                  "t": 1
+                                },
+                                "parentIndex": 122
+                              },
+                              {
+                                "nodeIndex": 124,
+                                "inverseBindMatrix": {
+                                  "$f32": {
+                                    "n": [-0.45576581358909607, 0.7445635199546814, -0.4877527058124542, 0, 0.8898979425430298, 0.36949068307876587, -0.26750391721725464, 0, -0.018953589722514153, -0.55596923828125, -0.830986738204956, 0, -1.2584872245788574, -0.24579231441020966, 0.5069682598114014, 1]
+                                  },
+                                  "t": 1
+                                },
+                                "parentIndex": 123
+                              },
+                              {
+                                "nodeIndex": 125,
+                                "inverseBindMatrix": {
+                                  "$f32": {
+                                    "n": [-0.4702431261539459, 0.27159184217453003, -0.8397078514099121, 0, 0.8825333714485168, 0.1473771035671234, -0.44655874371528625, 0, 0.0024719664361327887, -0.9510614275932312, -0.3089918792247772, 0, -1.2554693222045898, 0.07250195741653442, 0.5738797187805176, 1]
+                                  },
+                                  "t": 1
+                                },
+                                "parentIndex": 124
+                              },
+                              {
+                                "nodeIndex": 126,
+                                "inverseBindMatrix": {
+                                  "$f32": {
+                                    "n": [-0.29106584191322327, 0.15397799015045166, 0.9442306160926819, 0, 0.9412307739257812, -0.13069525361061096, 0.31145384907722473, 0, 0.1713634729385376, 0.9793924689292908, -0.10688792169094086, 0, -1.3494049310684204, 0.020240258425474167, -0.22727051377296448, 1]
+                                  },
+                                  "t": 1
+                                },
+                                "parentIndex": 122
+                              },
+                              {
+                                "nodeIndex": 127,
+                                "inverseBindMatrix": {
+                                  "$f32": {
+                                    "n": [-1, -1.759339635781787e-12, 1.510573781615676e-7, 0, 1.510573781615676e-7, -7.085780566740141e-7, 1, 0, -1.6574741796074322e-12, 1, 6.401211862794298e-7, 0, 0.10638988018035889, 0.043581441044807434, -1.3115452527999878, 1]
+                                  },
+                                  "t": 1
+                                },
+                                "parentIndex": 66
+                              },
+                              {
+                                "nodeIndex": 128,
+                                "inverseBindMatrix": {
+                                  "$f32": {
+                                    "n": [-0.9999998807907104, -1.7553124752323068e-12, 1.5105734973985818e-7, 0, 1.5105734973985818e-7, -5.399906513048336e-7, 1, 0, -1.6661801062120563e-12, 1, 6.40121129436011e-7, 0, 0.10638988018035889, 0.04358125105500221, -1.3115452527999878, 1]
+                                  },
+                                  "t": 1
+                                },
+                                "parentIndex": 127
+                              },
+                              {
+                                "nodeIndex": 129,
+                                "inverseBindMatrix": {
+                                  "$f32": {
+                                    "n": [-1, -1.759339635781787e-12, 1.510573781615676e-7, 0, 1.510573781615676e-7, -7.085780566740141e-7, 1, 0, -1.6574741796074322e-12, 1, 6.401211862794298e-7, 0, -0.10639027506113052, 0.043581441044807434, -1.3115451335906982, 1]
+                                  },
+                                  "t": 1
+                                },
+                                "parentIndex": 66
+                              },
+                              {
+                                "nodeIndex": 130,
+                                "inverseBindMatrix": {
+                                  "$f32": {
+                                    "n": [-0.9999998807907104, -1.7553124752323068e-12, 1.5105734973985818e-7, 0, 1.5105734973985818e-7, -5.399906513048336e-7, 1, 0, -1.6661801062120563e-12, 1, 6.40121129436011e-7, 0, -0.10639026761054993, 0.04358125105500221, -1.3115452527999878, 1]
+                                  },
+                                  "t": 1
+                                },
+                                "parentIndex": 129
+                              }
+                            ],
+                            "nodeParents": [
+                              [1, 0],
+                              [2, 1],
+                              [3, 2],
+                              [4, 3],
+                              [6, 3],
+                              [19, 3],
+                              [20, 3],
+                              [21, 3],
+                              [132, 3],
+                              [5, 4],
+                              [7, 6],
+                              [8, 35],
+                              [14, 7],
+                              [15, 7],
+                              [17, 7],
+                              [18, 7],
+                              [13, 7],
+                              [16, 7],
+                              [9, 8],
+                              [10, 9],
+                              [11, 9],
+                              [12, 9],
+                              [22, 21],
+                              [23, 22],
+                              [25, 22],
+                              [26, 22],
+                              [24, 22],
+                              [27, 23],
+                              [37, 23],
+                              [131, 23],
+                              [28, 27],
+                              [36, 27],
+                              [29, 28],
+                              [35, 28],
+                              [30, 29],
+                              [31, 30],
+                              [32, 31],
+                              [33, 32],
+                              [34, 33],
+                              [38, 37],
+                              [39, 38],
+                              [61, 38],
+                              [40, 39],
+                              [41, 40],
+                              [42, 41],
+                              [43, 42],
+                              [44, 43],
+                              [45, 44],
+                              [47, 44],
+                              [49, 44],
+                              [55, 44],
+                              [46, 45],
+                              [48, 47],
+                              [50, 49],
+                              [51, 50],
+                              [52, 51],
+                              [53, 52],
+                              [54, 53],
+                              [56, 55],
+                              [57, 56],
+                              [58, 57],
+                              [59, 58],
+                              [60, 59],
+                              [62, 61],
+                              [63, 62],
+                              [64, 63],
+                              [65, 64],
+                              [66, 65],
+                              [67, 66],
+                              [97, 66],
+                              [127, 66],
+                              [129, 66],
+                              [68, 67],
+                              [69, 67],
+                              [70, 69],
+                              [71, 70],
+                              [72, 71],
+                              [73, 72],
+                              [74, 73],
+                              [82, 73],
+                              [87, 73],
+                              [92, 73],
+                              [75, 74],
+                              [78, 74],
+                              [81, 74],
+                              [76, 75],
+                              [77, 76],
+                              [79, 78],
+                              [80, 79],
+                              [83, 82],
+                              [86, 82],
+                              [84, 83],
+                              [85, 84],
+                              [88, 87],
+                              [91, 87],
+                              [89, 88],
+                              [90, 89],
+                              [93, 92],
+                              [96, 92],
+                              [94, 93],
+                              [95, 94],
+                              [98, 97],
+                              [99, 97],
+                              [100, 99],
+                              [101, 100],
+                              [102, 101],
+                              [103, 102],
+                              [104, 103],
+                              [112, 103],
+                              [117, 103],
+                              [122, 103],
+                              [105, 104],
+                              [108, 104],
+                              [111, 104],
+                              [106, 105],
+                              [107, 106],
+                              [109, 108],
+                              [110, 109],
+                              [113, 112],
+                              [116, 112],
+                              [114, 113],
+                              [115, 114],
+                              [118, 117],
+                              [121, 117],
+                              [119, 118],
+                              [120, 119],
+                              [123, 122],
+                              [126, 122],
+                              [124, 123],
+                              [125, 124],
+                              [128, 127],
+                              [130, 129]
+                            ],
+                            "nodeTransforms": [
+                              [
+                                0,
+                                {
+                                  "$f32": {
+                                    "n": [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1]
+                                  },
+                                  "t": 1
+                                }
+                              ],
+                              [
+                                1,
+                                {
+                                  "$f32": {
+                                    "n": [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1]
+                                  },
+                                  "t": 1
+                                }
+                              ],
+                              [
+                                2,
+                                {
+                                  "$f32": {
+                                    "n": [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1]
+                                  },
+                                  "t": 1
+                                }
+                              ],
+                              [
+                                3,
+                                {
+                                  "$f32": {
+                                    "n": [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1]
+                                  },
+                                  "t": 1
+                                }
+                              ],
+                              [
+                                4,
+                                {
+                                  "$f32": {
+                                    "n": [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1]
+                                  },
+                                  "t": 1
+                                }
+                              ],
+                              [
+                                5,
+                                {
+                                  "$f32": {
+                                    "n": [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1]
+                                  },
+                                  "t": 1
+                                }
+                              ],
+                              [
+                                6,
+                                {
+                                  "$f32": {
+                                    "n": [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1]
+                                  },
+                                  "t": 1
+                                }
+                              ],
+                              [
+                                7,
+                                {
+                                  "$f32": {
+                                    "n": [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1]
+                                  },
+                                  "t": 1
+                                }
+                              ],
+                              [
+                                8,
+                                {
+                                  "$f32": {
+                                    "n": [1, 3.1738107253431735e-8, -1.7037834254551854e-8, 0, -4.3010363270923335e-8, 0.9999999403953552, 3.337389955504477e-7, 0, 1.102434854516332e-8, -3.343140519973531e-7, 0.9999999403953552, 0, 1.712605168791015e-8, -1.587726501384168e-7, -4.541319142958855e-8, 1]
+                                  },
+                                  "t": 1
+                                }
+                              ],
+                              [
+                                9,
+                                {
+                                  "$f32": {
+                                    "n": [1, 9.276235335420324e-11, 3.3068536797742354e-9, 0, -1.785660230790853e-10, 1, -1.4761527070139557e-11, 0, -3.75139519448453e-9, -6.474392202915347e-12, 1, 0, -1.6820528969674342e-8, -1.837958407691076e-8, 1.4099979850357158e-8, 1]
+                                  },
+                                  "t": 1
+                                }
+                              ],
+                              [
+                                10,
+                                {
+                                  "$f32": {
+                                    "n": [1, 5.689257065455422e-9, 1.8082584318790396e-8, 0, -5.3405742050927074e-9, 1, -4.3075411293447274e-11, 0, -3.75139519448453e-9, -6.474392202915347e-12, 1, 0, 4.983026258287282e-8, -0.0022966989781707525, -0.00454444345086813, 1]
+                                  },
+                                  "t": 1
+                                }
+                              ],
+                              [
+                                11,
+                                {
+                                  "$f32": {
+                                    "n": [1, 5.689257065455422e-9, 1.8082584318790396e-8, 0, -5.3405742050927074e-9, 1, -4.3075411293447274e-11, 0, -3.75139519448453e-9, -6.474392202915347e-12, 1, 0, 3.393591541112073e-8, -0.0993160754442215, 0.03326784074306488, 1]
+                                  },
+                                  "t": 1
+                                }
+                              ],
+                              [
+                                12,
+                                {
+                                  "$f32": {
+                                    "n": [1, 9.276235335420324e-11, 3.3068536797742354e-9, 0, -1.785660230790853e-10, 1, -1.4761527070139557e-11, 0, -3.75139519448453e-9, -6.474392202915347e-12, 1, 0, 0.0004083781677763909, -0.10275276005268097, -0.053036078810691833, 1]
+                                  },
+                                  "t": 1
+                                }
+                              ],
+                              [
+                                13,
+                                {
+                                  "$f32": {
+                                    "n": [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1]
+                                  },
+                                  "t": 1
+                                }
+                              ],
+                              [
+                                14,
+                                {
+                                  "$f32": {
+                                    "n": [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1]
+                                  },
+                                  "t": 1
+                                }
+                              ],
+                              [
+                                15,
+                                {
+                                  "$f32": {
+                                    "n": [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1]
+                                  },
+                                  "t": 1
+                                }
+                              ],
+                              [
+                                16,
+                                {
+                                  "$f32": {
+                                    "n": [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1]
+                                  },
+                                  "t": 1
+                                }
+                              ],
+                              [
+                                17,
+                                {
+                                  "$f32": {
+                                    "n": [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1]
+                                  },
+                                  "t": 1
+                                }
+                              ],
+                              [
+                                18,
+                                {
+                                  "$f32": {
+                                    "n": [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1]
+                                  },
+                                  "t": 1
+                                }
+                              ],
+                              [
+                                19,
+                                {
+                                  "$f32": {
+                                    "n": [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1]
+                                  },
+                                  "t": 1
+                                }
+                              ],
+                              [
+                                20,
+                                {
+                                  "$f32": {
+                                    "n": [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1]
+                                  },
+                                  "t": 1
+                                }
+                              ],
+                              [
+                                21,
+                                {
+                                  "$f32": {
+                                    "n": [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1]
+                                  },
+                                  "t": 1
+                                }
+                              ],
+                              [
+                                22,
+                                {
+                                  "$f32": {
+                                    "n": [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1]
+                                  },
+                                  "t": 1
+                                }
+                              ],
+                              [
+                                23,
+                                {
+                                  "$f32": {
+                                    "n": [1, 0, 0, 0, 0, -1.3435885648505064e-7, -0.9999999403953552, 0, 0, 0.9999999403953552, -1.3435885648505064e-7, 0, 0, 0, 0, 1]
+                                  },
+                                  "t": 1
+                                }
+                              ],
+                              [
+                                24,
+                                {
+                                  "$f32": {
+                                    "n": [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1]
+                                  },
+                                  "t": 1
+                                }
+                              ],
+                              [
+                                25,
+                                {
+                                  "$f32": {
+                                    "n": [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1]
+                                  },
+                                  "t": 1
+                                }
+                              ],
+                              [
+                                26,
+                                {
+                                  "$f32": {
+                                    "n": [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1]
+                                  },
+                                  "t": 1
+                                }
+                              ],
+                              [
+                                27,
+                                {
+                                  "$f32": {
+                                    "n": [1, 0, 0, 0, 0, 0.9999999403953552, 6.202441954949924e-15, 0, 0, -6.202441954949924e-15, 0.9999999403953552, 0, 0, 0, 0, 1]
+                                  },
+                                  "t": 1
+                                }
+                              ],
+                              [
+                                28,
+                                {
+                                  "$f32": {
+                                    "n": [1, 0, 0, 0, 0, -0.24963967502117157, 0.9683387875556946, 0, 0, -0.9683387875556946, -0.24963967502117157, 0, 0, 0.04960072413086891, 0.9074603915214539, 1]
+                                  },
+                                  "t": 1
+                                }
+                              ],
+                              [
+                                29,
+                                {
+                                  "$f32": {
+                                    "n": [1, 0, 0, 0, 0, 0.9916855692863464, -0.12868471443653107, 0, 0, 0.12868471443653107, 0.9916855692863464, 0, 0, 0.13677912950515747, 1.577624963999824e-8, 1]
+                                  },
+                                  "t": 1
+                                }
+                              ],
+                              [
+                                30,
+                                {
+                                  "$f32": {
+                                    "n": [1, 0, 0, 0, 0, 0.9879986047744751, -0.15446265041828156, 0, 0, 0.15446265041828156, 0.9879986047744751, 0, 0, 0.12277700006961823, -9.237558273866853e-9, 1]
+                                  },
+                                  "t": 1
+                                }
+                              ],
+                              [
+                                31,
+                                {
+                                  "$f32": {
+                                    "n": [1, 0, 0, 0, 0, 0.999994695186615, 0.0032543553970754147, 0, 0, -0.0032543553970754147, 0.999994695186615, 0, 0, 0.15535065531730652, -6.162432342193824e-9, 1]
+                                  },
+                                  "t": 1
+                                }
+                              ],
+                              [
+                                32,
+                                {
+                                  "$f32": {
+                                    "n": [1, 0, 0, 0, 0, 0.918603777885437, 0.3951800465583801, 0, 0, -0.3951800465583801, 0.918603777885437, 0, 0, 0.17304421961307526, 2.1576924691402155e-9, 1]
+                                  },
+                                  "t": 1
+                                }
+                              ],
+                              [
+                                33,
+                                {
+                                  "$f32": {
+                                    "n": [1, 0, 0, 0, 0, 0.9820040464401245, -0.18885955214500427, 0, 0, 0.18885955214500427, 0.9820040464401245, 0, 0, 0.05945224314928055, -1.0828599350531931e-8, 1]
+                                  },
+                                  "t": 1
+                                }
+                              ],
+                              [
+                                34,
+                                {
+                                  "$f32": {
+                                    "n": [1, 0, 0, 0, 0, 0.9824361205101013, -0.1865992248058319, 0, 0, 0.1865992248058319, 0.9824361205101013, 0, 0, 0.05634097754955292, -1.0251060444943505e-8, 1]
+                                  },
+                                  "t": 1
+                                }
+                              ],
+                              [
+                                35,
+                                {
+                                  "$f32": {
+                                    "n": [0.9915727376937866, -0.12648902833461761, 0.027999907732009888, 0, -0.004425696097314358, -0.24907757341861725, -0.968473494052887, 0, 0.1294754147529602, 0.9601880311965942, -0.24753832817077637, 0, -0.12680388987064362, 0.6101617813110352, 0.1911718249320984, 1]
+                                  },
+                                  "t": 1
+                                }
+                              ],
+                              [
+                                36,
+                                {
+                                  "$f32": {
+                                    "n": [0.9915727376937866, 0.004463281948119402, -0.12947413325309753, 0, -0.004425684921443462, 0.9999900460243225, 0.0005780966021120548, 0, 0.1294754296541214, -2.1306598796400067e-7, 0.9915826320648193, 0, -0.12680388987064362, -0.287838876247406, 1.4505795240402222, 1]
+                                  },
+                                  "t": 1
+                                }
+                              ],
+                              [
+                                37,
+                                {
+                                  "$f32": {
+                                    "n": [1, 0, 0, 0, 0, 0.9999999403953552, 6.202441954949924e-15, 0, 0, -6.202441954949924e-15, 0.9999999403953552, 0, 0, 0.032528042793273926, 0.9736846685409546, 1]
+                                  },
+                                  "t": 1
+                                }
+                              ],
+                              [
+                                38,
+                                {
+                                  "$f32": {
+                                    "n": [1, 0, 0, 0, 0, 0.9999999403953552, 6.202441954949924e-15, 0, 0, -6.202441954949924e-15, 0.9999999403953552, 0, 0, -7.888592890026302e-9, -5.5234195883713255e-8, 1]
+                                  },
+                                  "t": 1
+                                }
+                              ],
+                              [
+                                39,
+                                {
+                                  "$f32": {
+                                    "n": [1, 0, 0, 0, 0, 0.9999999403953552, 6.202441954949924e-15, 0, 0, -6.202441954949924e-15, 0.9999999403953552, 0, 0, -0.03216863423585892, 0.18806952238082886, 1]
+                                  },
+                                  "t": 1
+                                }
+                              ],
+                              [
+                                40,
+                                {
+                                  "$f32": {
+                                    "n": [1, 0, 0, 0, 0, -0.122953861951828, 0.9924123883247375, 0, 0, -0.9924123883247375, -0.122953861951828, 0, 0, -1.4356334787635205e-8, -1.1916097975017692e-7, 1]
+                                  },
+                                  "t": 1
+                                }
+                              ],
+                              [
+                                41,
+                                {
+                                  "$f32": {
+                                    "n": [1, 0, 0, 0, 0, -0.122953861951828, -0.9924123883247375, 0, 0, 0.9924123883247375, -0.122953861951828, 0, 0, -0.12277699261903763, 8.76565575680388e-9, 1]
+                                  },
+                                  "t": 1
+                                }
+                              ],
+                              [
+                                42,
+                                {
+                                  "$f32": {
+                                    "n": [1, 0, 0, 0, 0, -0.24963970482349396, 0.9683387875556946, 0, 0, -0.9683387875556946, -0.24963970482349396, 0, 0, -9.335806794297241e-9, -1.1713271419466764e-7, 1]
+                                  },
+                                  "t": 1
+                                }
+                              ],
+                              [
+                                43,
+                                {
+                                  "$f32": {
+                                    "n": [1, 0, 0, 0, 0, 1, -2.4619993155283737e-7, 0, 0, 2.4619993155283737e-7, 1, 0, 0, -0.13677920401096344, 3.196689846163281e-8, 1]
+                                  },
+                                  "t": 1
+                                }
+                              ],
+                              [
+                                44,
+                                {
+                                  "$f32": {
+                                    "n": [1, 0, 0, 0, 0, 0.9999999403953552, 1.0100561098624894e-7, 0, 0, -1.0100561098624894e-7, 0.9999999403953552, 0, 0, -6.874992664052115e-8, 7.397542578502225e-9, 1]
+                                  },
+                                  "t": 1
+                                }
+                              ],
+                              [
+                                45,
+                                {
+                                  "$f32": {
+                                    "n": [-0.4217723309993744, -0.052532393485307693, 0.9051788449287415, 0, 0.5363218188285828, 0.790489912033081, 0.2957780659198761, 0, -0.7310726642608643, 0.6102180480957031, -0.30523255467414856, 0, 0, 9.767814646011175e-8, -2.5601940123465283e-8, 1]
+                                  },
+                                  "t": 1
+                                }
+                              ],
+                              [
+                                46,
+                                {
+                                  "$f32": {
+                                    "n": [1, 1.9800262762714738e-8, 1.7758887693730685e-8, 0, -1.1304582159255006e-8, 1, -2.546923383306421e-8, 0, -1.3372098095487672e-8, -3.6935077218913648e-9, 1, 0, 3.469375897680038e-9, -4.0258345990196176e-8, 1.3385536234977735e-8, 1]
+                                  },
+                                  "t": 1
+                                }
+                              ],
+                              [
+                                47,
+                                {
+                                  "$f32": {
+                                    "n": [-0.4217723309993744, 0.052532393485307693, -0.9051788449287415, 0, -0.5363218188285828, 0.790489912033081, 0.2957780659198761, 0, 0.7310726642608643, 0.6102180480957031, -0.30523255467414856, 0, 0, 9.767814646011175e-8, -2.5601940123465283e-8, 1]
+                                  },
+                                  "t": 1
+                                }
+                              ],
+                              [
+                                48,
+                                {
+                                  "$f32": {
+                                    "n": [1, -1.9800262762714738e-8, -1.7758887693730685e-8, 0, 1.1304582159255006e-8, 1, -2.546923383306421e-8, 0, 1.3372098095487672e-8, -3.6935077218913648e-9, 1, 0, -3.469375897680038e-9, -4.0258345990196176e-8, 1.3385536234977735e-8, 1]
+                                  },
+                                  "t": 1
+                                }
+                              ],
+                              [
+                                49,
+                                {
+                                  "$f32": {
+                                    "n": [1, 0, 0, 0, 0, -0.9464232921600342, 0.32292911410331726, 0, 0, -0.32292911410331726, -0.9464232921600342, 0, 0.08805934339761734, 0.06363495439291, 0.023310814052820206, 1]
+                                  },
+                                  "t": 1
+                                }
+                              ],
+                              [
+                                50,
+                                {
+                                  "$f32": {
+                                    "n": [1, -6.278971889954119e-14, -2.152868716631673e-10, 0, 6.277358461596189e-14, 1, -6.804800989357318e-8, 0, 2.152868994187429e-10, 6.804800989357318e-8, 1, 0, 0, 0.24098126590251923, -7.09035630208632e-9, 1]
+                                  },
+                                  "t": 1
+                                }
+                              ],
+                              [
+                                51,
+                                {
+                                  "$f32": {
+                                    "n": [1, -0.00003838170596281998, 0.0002166924241464585, 0, -1.3438952728428433e-10, 0.9846728444099426, 0.17441105842590332, 0, -0.00022006539802532643, -0.17441105842590332, 0.9846728444099426, 0, 1.3490319972220277e-11, 0.2409813106060028, -5.027291027914771e-9, 1]
+                                  },
+                                  "t": 1
+                                }
+                              ],
+                              [
+                                52,
+                                {
+                                  "$f32": {
+                                    "n": [1, -9.543341117357329e-11, -1.414386247011734e-10, 0, 9.738836820316621e-11, 1, 1.5353220916836108e-9, 0, 1.6707724093123488e-10, 2.0997092953223273e-14, 1, 0, 8.829704967183716e-9, 0.204070582985878, 1.4404803572176661e-8, 1]
+                                  },
+                                  "t": 1
+                                }
+                              ],
+                              [
+                                53,
+                                {
+                                  "$f32": {
+                                    "n": [0.9999998807907104, 0.00021878376719541848, -0.00011172148515470326, 0, -0.0001972086902242154, 0.44377508759498596, -0.8961381316184998, 0, -0.00014648126671090722, 0.8961381316184998, 0.44377514719963074, 0, 1.405101812679277e-9, 0.20407065749168396, 1.1407507827243535e-8, 1]
+                                  },
+                                  "t": 1
+                                }
+                              ],
+                              [
+                                54,
+                                {
+                                  "$f32": {
+                                    "n": [-0.9999999403953552, -8.010594143570415e-8, 0.00024405322619713843, 0, -0.00012941598834004253, 0.8479979634284973, -0.529999315738678, 0, -0.00020691422105301172, -0.5299992561340332, -0.8479980230331421, 0, 1.1116468634497778e-8, 0.11613534390926361, -2.1437159603010514e-8, 1]
+                                  },
+                                  "t": 1
+                                }
+                              ],
+                              [
+                                55,
+                                {
+                                  "$f32": {
+                                    "n": [1, 0, 0, 0, 0, -0.9464232921600342, 0.32292911410331726, 0, 0, -0.32292911410331726, -0.9464232921600342, 0, -0.08805934339761734, 0.06363495439291, 0.023310814052820206, 1]
+                                  },
+                                  "t": 1
+                                }
+                              ],
+                              [
+                                56,
+                                {
+                                  "$f32": {
+                                    "n": [1, -6.278971889954119e-14, -2.152868716631673e-10, 0, 6.277358461596189e-14, 1, -6.804800989357318e-8, 0, 2.152868994187429e-10, 6.804800989357318e-8, 1, 0, 0, 0.24098126590251923, -7.09035630208632e-9, 1]
+                                  },
+                                  "t": 1
+                                }
+                              ],
+                              [
+                                57,
+                                {
+                                  "$f32": {
+                                    "n": [1, -0.00003838170596281998, 0.0002166924241464585, 0, -1.3438952728428433e-10, 0.9846728444099426, 0.17441105842590332, 0, -0.00022006539802532643, -0.17441105842590332, 0.9846728444099426, 0, 1.3490319972220277e-11, 0.2409813106060028, -5.065206920562559e-9, 1]
+                                  },
+                                  "t": 1
+                                }
+                              ],
+                              [
+                                58,
+                                {
+                                  "$f32": {
+                                    "n": [1, -9.543341117357329e-11, -1.414386247011734e-10, 0, 9.738836820316621e-11, 1, 1.5353220916836108e-9, 0, 1.6707724093123488e-10, 2.0997092953223273e-14, 1, 0, -1.047590814096111e-8, 0.20407064259052277, 1.0512821724262267e-8, 1]
+                                  },
+                                  "t": 1
+                                }
+                              ],
+                              [
+                                59,
+                                {
+                                  "$f32": {
+                                    "n": [0.9999998807907104, 0.00021878376719541848, -0.00011172148515470326, 0, -0.0001972086902242154, 0.44377508759498596, -0.8961381316184998, 0, -0.00014648126671090722, 0.8961381316184998, 0.44377514719963074, 0, 4.450847246317835e-9, 0.20407067239284515, 9.47398071104999e-9, 1]
+                                  },
+                                  "t": 1
+                                }
+                              ],
+                              [
+                                60,
+                                {
+                                  "$f32": {
+                                    "n": [-0.9999999403953552, -8.010594143570415e-8, 0.00024405322619713843, 0, -0.00012941598834004253, 0.8479979634284973, -0.529999315738678, 0, -0.00020691422105301172, -0.5299992561340332, -0.8479980230331421, 0, 1.113266545615943e-8, 0.11613534390926361, -2.544162391870941e-8, 1]
+                                  },
+                                  "t": 1
+                                }
+                              ],
+                              [
+                                61,
+                                {
+                                  "$f32": {
+                                    "n": [1, 0, 0, 0, 0, 0.9999999403953552, 6.202441954949924e-15, 0, 0, -6.202441954949924e-15, 0.9999999403953552, 0, 0, -0.03216863423585892, 0.18806952238082886, 1]
+                                  },
+                                  "t": 1
+                                }
+                              ],
+                              [
+                                62,
+                                {
+                                  "$f32": {
+                                    "n": [1, 0, 0, 0, 0, 0.031812455505132675, 0.9994938373565674, 0, 0, -0.9994938373565674, 0.031812455505132675, 0, 0, -1.4356334787635205e-8, -1.1916097975017692e-7, 1]
+                                  },
+                                  "t": 1
+                                }
+                              ],
+                              [
+                                63,
+                                {
+                                  "$f32": {
+                                    "n": [1, 0, 0, 0, 0, 0.031812623143196106, -0.9994937777519226, 0, 0, 0.9994937777519226, 0.031812623143196106, 0, 0, 0.15535077452659607, -8.401090934029298e-11, 1]
+                                  },
+                                  "t": 1
+                                }
+                              ],
+                              [
+                                64,
+                                {
+                                  "$f32": {
+                                    "n": [1, 0, 0, 0, 0, 0.028559565544128418, 0.9995921850204468, 0, 0, -0.9995921850204468, 0.028559565544128418, 0, 0, 9.855985361184594e-9, 3.761102007615591e-8, 1]
+                                  },
+                                  "t": 1
+                                }
+                              ],
+                              [
+                                65,
+                                {
+                                  "$f32": {
+                                    "n": [1, 0, 0, 0, 0, 1, 1.3192802406081228e-8, 0, 0, -1.3192802406081228e-8, 1, 0, 0, -7.434851845289359e-9, 2.685220046316772e-9, 1]
+                                  },
+                                  "t": 1
+                                }
+                              ],
+                              [
+                                66,
+                                {
+                                  "$f32": {
+                                    "n": [1, 0, 0, 0, 0, 1, -2.776867624731949e-8, 0, 0, 2.776867624731949e-8, 1, 0, 0, -7.5039778835162e-9, 4.1431164055083514e-10, 1]
+                                  },
+                                  "t": 1
+                                }
+                              ],
+                              [
+                                67,
+                                {
+                                  "$f32": {
+                                    "n": [-0.008645567111670971, -0.02832874096930027, 0.9995613098144531, 0, 0.9999625086784363, -0.0007760686567053199, 0.008627017959952354, 0, 0.0005313109722919762, 0.9995984435081482, 0.02833436243236065, 0, 0.016443734988570213, 0.12330204993486404, 0.07031351327896118, 1]
+                                  },
+                                  "t": 1
+                                }
+                              ],
+                              [
+                                68,
+                                {
+                                  "$f32": {
+                                    "n": [1, 2.2448669659280718e-11, -1.0878160351668331e-11, 0, -9.565059161387168e-11, 1, -7.626539157146173e-12, 0, -5.3336939899450986e-12, -3.1036027914321807e-11, 1, 0, 5.4044191344360115e-9, -6.84819845275797e-9, -2.0551972568227939e-7, 1]
+                                  },
+                                  "t": 1
+                                }
+                              ],
+                              [
+                                69,
+                                {
+                                  "$f32": {
+                                    "n": [-0.385215699672699, -0.7797433733940125, -0.49356773495674133, 0, 0.9187875986099243, -0.27407896518707275, -0.28409501910209656, 0, 0.08624465763568878, -0.5629218220710754, 0.8219980597496033, 0, 0.007001160643994808, 0.18042348325252533, -0.018317464739084244, 1]
+                                  },
+                                  "t": 1
+                                }
+                              ],
+                              [
+                                70,
+                                {
+                                  "$f32": {
+                                    "n": [0.9984237551689148, -2.807611920729869e-9, -0.05612388625741005, 0, -5.532403690722276e-8, 0.9999999403953552, 1.4192792718858982e-7, 0, 0.05612383410334587, -5.423873261634071e-8, 0.9984237551689148, 0, 4.784281770753296e-8, 0.14434684813022614, 5.141430037269856e-8, 1]
+                                  },
+                                  "t": 1
+                                }
+                              ],
+                              [
+                                71,
+                                {
+                                  "$f32": {
+                                    "n": [0.9980885982513428, 0.00008363759843632579, -0.061801448464393616, 0, 0.04683058336377144, 0.6515137553215027, 0.7571900486946106, 0, 0.04032789170742035, -0.758637011051178, 0.6502644419670105, 0, 1.9907659520868037e-8, 0.1443469524383545, 5.253159685025821e-8, 1]
+                                  },
+                                  "t": 1
+                                }
+                              ],
+                              [
+                                72,
+                                {
+                                  "$f32": {
+                                    "n": [0.3707606792449951, -0.00010372181714046746, 0.9287282228469849, 0, 0.0002818762441165745, 0.9999998807907104, -7.675417919017491e-7, 0, -0.9287282228469849, 0.00026225182227790356, 0.3707607686519623, 0, 0.0000016372372328987694, 0.1180453896522522, 0.000024636687157908455, 1]
+                                  },
+                                  "t": 1
+                                }
+                              ],
+                              [
+                                73,
+                                {
+                                  "$f32": {
+                                    "n": [0.26629236340522766, 0.5275993943214417, 0.8066766262054443, 0, -0.18549181520938873, 0.8493021726608276, -0.4942455291748047, 0, -0.9458759427070618, -0.018018126487731934, 0.3240281045436859, 0, 0.000011193115824426059, 0.11804530024528503, 0.0000384313752874732, 1]
+                                  },
+                                  "t": 1
+                                }
+                              ],
+                              [
+                                74,
+                                {
+                                  "$f32": {
+                                    "n": [-0.1657957285642624, 0.11279405653476715, -0.979688286781311, 0, 0.11201626807451248, 0.9891617894172668, 0.09492787718772888, 0, 0.9797776341438293, -0.0940023735165596, -0.17663359642028809, 0, 0.0022682223934680223, 0.03822518140077591, 0.0116392457857728, 1]
+                                  },
+                                  "t": 1
+                                }
+                              ],
+                              [
+                                75,
+                                {
+                                  "$f32": {
+                                    "n": [0.9532995223999023, 0.022354643791913986, -0.30119800567626953, 0, 0.2305912971496582, 0.5901891589164734, 0.7736306190490723, 0, 0.19505803287029266, -0.8069553971290588, 0.5574722290039062, 0, 0.0023631316144019365, 0.07503964006900787, 0.00222479528747499, 1]
+                                  },
+                                  "t": 1
+                                }
+                              ],
+                              [
+                                76,
+                                {
+                                  "$f32": {
+                                    "n": [0.9629017114639282, 0.014396156184375286, 0.2694683074951172, 0, -0.17611582577228546, 0.7901169061660767, 0.5871102213859558, 0, -0.20445938408374786, -0.612787127494812, 0.7633403539657593, 0, 0.0000042465644582989626, 0.04046996682882309, 0.00000878417085914407, 1]
+                                  },
+                                  "t": 1
+                                }
+                              ],
+                              [
+                                77,
+                                {
+                                  "$f32": {
+                                    "n": [0.9994763135910034, -0.03207840770483017, -0.004253095481544733, 0, 0.02655583992600441, 0.7380106449127197, 0.6742663979530334, 0, -0.01849052496254444, -0.6740262508392334, 0.738476037979126, 0, 0.000002082133505609818, 0.025365041568875313, 0.0000028026895506627625, 1]
+                                  },
+                                  "t": 1
+                                }
+                              ],
+                              [
+                                78,
+                                {
+                                  "$f32": {
+                                    "n": [-0.2887236475944519, 0.3408968150615692, -0.8946664929389954, 0, -0.3558620512485504, 0.8293035626411438, 0.4308338761329651, 0, 0.8888200521469116, 0.44276976585388184, -0.11812731623649597, 0, -0.006727528292685747, 0.0060952226631343365, 0.02556821145117283, 1]
+                                  },
+                                  "t": 1
+                                }
+                              ],
+                              [
+                                79,
+                                {
+                                  "$f32": {
+                                    "n": [0.9999630451202393, 0.008372403681278229, 0.0019363033352419734, 0, -0.00848417729139328, 0.997677743434906, 0.0675802156329155, 0, -0.0013660092372447252, -0.06759411096572876, 0.9977118968963623, 0, -0.000006604160262213554, 0.051067717373371124, 0.00000406007575293188, 1]
+                                  },
+                                  "t": 1
+                                }
+                              ],
+                              [
+                                80,
+                                {
+                                  "$f32": {
+                                    "n": [0.9998587965965271, -0.01680397428572178, -0.00011337233445374295, 0, 0.01661788485944271, 0.9897439479827881, -0.1418832242488861, 0, 0.00249639805406332, 0.14186128973960876, 0.9898833632469177, 0, -0.0000028390591069182847, 0.025817997753620148, 0.000002835354962371639, 1]
+                                  },
+                                  "t": 1
+                                }
+                              ],
+                              [
+                                81,
+                                {
+                                  "$f32": {
+                                    "n": [1, -9.943968137804404e-8, 3.352583064497594e-7, 0, 4.530769004418289e-8, 1, -5.644732326004487e-8, 0, -3.2750727996244677e-7, 2.9371257426191733e-8, 1, 0, -9.378329224318804e-9, -1.4527089753357814e-8, -6.190604295852609e-8, 1]
+                                  },
+                                  "t": 1
+                                }
+                              ],
+                              [
+                                82,
+                                {
+                                  "$f32": {
+                                    "n": [-0.16023579239845276, -0.06950041651725769, -0.9846289157867432, 0, 0.10478340089321136, 0.9906840920448303, -0.08697996288537979, 0, 0.9815014004707336, -0.11711001396179199, -0.15146057307720184, 0, -0.011156936176121235, 0.04798899218440056, -0.0035630539059638977, 1]
+                                  },
+                                  "t": 1
+                                }
+                              ],
+                              [
+                                83,
+                                {
+                                  "$f32": {
+                                    "n": [0.9858129620552063, -0.04391680285334587, -0.1620011329650879, 0, 0.16597652435302734, 0.11131776124238968, 0.9798266887664795, 0, -0.024997327476739883, -0.9928141832351685, 0.11702770739793777, 0, -0.00017270093667320907, 0.06704492121934891, 0.0025313510559499264, 1]
+                                  },
+                                  "t": 1
+                                }
+                              ],
+                              [
+                                84,
+                                {
+                                  "$f32": {
+                                    "n": [0.9775993227958679, 0.006943183485418558, 0.2103603035211563, 0, -0.08435876667499542, 0.9285915493965149, 0.3613879680633545, 0, -0.19282957911491394, -0.3710383474826813, 0.9083762168884277, 0, 0.000004400658326630946, 0.04452275112271309, 0.000005528394012799254, 1]
+                                  },
+                                  "t": 1
+                                }
+                              ],
+                              [
+                                85,
+                                {
+                                  "$f32": {
+                                    "n": [0.9998497366905212, -0.017287276685237885, -0.001206828746944666, 0, 0.01700427196919918, 0.9652866721153259, 0.2606387734413147, 0, -0.003340817289426923, -0.2606201767921448, 0.9654356241226196, 0, -8.279840244540537e-7, 0.028936466202139854, 0.0000015266283526216284, 1]
+                                  },
+                                  "t": 1
+                                }
+                              ],
+                              [
+                                86,
+                                {
+                                  "$f32": {
+                                    "n": [1, -7.638377041985223e-9, 3.4047278063553676e-7, 0, 8.275400631418961e-8, 1, -3.484252886210015e-8, 0, -3.2015915962801955e-7, 1.677483707496208e-10, 1, 0, 1.1251310993998231e-9, 2.3183444497476557e-8, 1.0781437254081538e-7, 1]
+                                  },
+                                  "t": 1
+                                }
+                              ],
+                              [
+                                87,
+                                {
+                                  "$f32": {
+                                    "n": [-0.13016444444656372, -0.2074819803237915, -0.9695402979850769, 0, 0.1896117925643921, 0.9546027183532715, -0.22974146902561188, 0, 0.9731929898262024, -0.21374040842056274, -0.08491432666778564, 0, -0.02031952328979969, 0.04398323968052864, -0.021263299509882927, 1]
+                                  },
+                                  "t": 1
+                                }
+                              ],
+                              [
+                                88,
+                                {
+                                  "$f32": {
+                                    "n": [0.9553492665290833, 0.2865482568740845, -0.07209692895412445, 0, 0.009129959158599377, 0.21525664627552032, 0.9765148758888245, 0, 0.2953380346298218, -0.9335708618164062, 0.20302914083003998, 0, 0.000010870852747757453, 0.06271029263734818, -0.000014836870832368731, 1]
+                                  },
+                                  "t": 1
+                                }
+                              ],
+                              [
+                                89,
+                                {
+                                  "$f32": {
+                                    "n": [0.9927431344985962, -0.007040392607450485, 0.12004756927490234, 0, -0.03031259961426258, 0.9513979554176331, 0.3064689338207245, 0, -0.11637070029973984, -0.3078838586807251, 0.9442803859710693, 0, 0.0000043346576603653375, 0.04027659446001053, 0.000006040691914677154, 1]
+                                  },
+                                  "t": 1
+                                }
+                              ],
+                              [
+                                90,
+                                {
+                                  "$f32": {
+                                    "n": [0.9998193979263306, 0.018618423491716385, 0.00381204835139215, 0, -0.01826540194451809, 0.8859949707984924, 0.4633350372314453, 0, 0.005249073728919029, -0.46332094073295593, 0.8861750364303589, 0, 0.0000015257633094734047, 0.028581339865922928, 9.71575332187058e-7, 1]
+                                  },
+                                  "t": 1
+                                }
+                              ],
+                              [
+                                91,
+                                {
+                                  "$f32": {
+                                    "n": [1.0000001192092896, -2.6021984567137224e-8, 8.699902309672325e-8, 0, 3.9776100635435796e-8, 1, -1.8619708441747207e-7, 0, -5.7408442444284447e-8, 1.2715105413008132e-7, 1.0000001192092896, 0, -2.1460017762819916e-8, -1.1503280994418219e-8, 1.14964677777607e-7, 1]
+                                  },
+                                  "t": 1
+                                }
+                              ],
+                              [
+                                92,
+                                {
+                                  "$f32": {
+                                    "n": [-0.1459638625383377, -0.3247680068016052, -0.9344624876976013, 0, 0.36722251772880554, 0.8593055605888367, -0.35600805282592773, 0, 0.9186089038848877, -0.3951199948787689, -0.006165471859276295, 0, -0.018688641488552094, 0.03183725103735924, -0.03675137087702751, 1]
+                                  },
+                                  "t": 1
+                                }
+                              ],
+                              [
+                                93,
+                                {
+                                  "$f32": {
+                                    "n": [0.9480288028717041, 0.2917492091655731, -0.12697987258434296, 0, 0.04194462671875954, 0.2810027003288269, 0.9587899446487427, 0, 0.31540796160697937, -0.9142865538597107, 0.25416135787963867, 0, 0.0007929039420560002, 0.07522965222597122, 0.0037697856314480305, 1]
+                                  },
+                                  "t": 1
+                                }
+                              ],
+                              [
+                                94,
+                                {
+                                  "$f32": {
+                                    "n": [0.8801777362823486, -0.008334646001458168, 0.4745710492134094, 0, -0.16878478229045868, 0.9289969205856323, 0.3293573260307312, 0, -0.44362014532089233, -0.3699933588504791, 0.8162756562232971, 0, 0.0000023404941202898044, 0.02505345270037651, 0.000002357003495490062, 1]
+                                  },
+                                  "t": 1
+                                }
+                              ],
+                              [
+                                95,
+                                {
+                                  "$f32": {
+                                    "n": [0.9997794032096863, 0.02087876759469509, 0.0022879831958562136, 0, -0.019718414172530174, 0.8954902291297913, 0.44464412331581116, 0, 0.007234739605337381, -0.44459110498428345, 0.8957043290138245, 0, 0.0000012452270539142773, 0.02030501328408718, 0.000001203177816933021, 1]
+                                  },
+                                  "t": 1
+                                }
+                              ],
+                              [
+                                96,
+                                {
+                                  "$f32": {
+                                    "n": [1.0000001192092896, 1.0587688592522682e-7, -1.0792106053258976e-7, 0, -1.0550351703386696e-7, 1, 1.0881252343608594e-8, 0, 1.3945576426976913e-7, -8.688134300882666e-8, 1, 0, 1.038793939756033e-9, -7.115683331448963e-8, 5.477361142425252e-8, 1]
+                                  },
+                                  "t": 1
+                                }
+                              ],
+                              [
+                                97,
+                                {
+                                  "$f32": {
+                                    "n": [0.5070949196815491, 0.024689359590411186, -0.8615365624427795, 0, -0.8618900179862976, 0.013912752270698547, -0.5069043040275574, 0, -0.0005288205575197935, 0.9995983839035034, 0.028334612026810646, 0, -0.016443734988570213, 0.12330204993486404, 0.07031351327896118, 1]
+                                  },
+                                  "t": 1
+                                }
+                              ],
+                              [
+                                98,
+                                {
+                                  "$f32": {
+                                    "n": [1, 1.8213585306625646e-8, -8.369448067924168e-8, 0, -3.0041122922597197e-9, 1, -1.46370638276494e-7, 0, 8.372661142175275e-8, 1.4637652157034609e-7, 1, 0, 7.41900096912218e-10, -1.1234990715536242e-8, -2.8968136334128758e-8, 1]
+                                  },
+                                  "t": 1
+                                }
+                              ],
+                              [
+                                99,
+                                {
+                                  "$f32": {
+                                    "n": [-0.3326237201690674, 0.8861539959907532, 0.3226337134838104, 0, -0.49937665462493896, 0.12470704317092896, -0.8573628067970276, 0, -0.7999902367591858, -0.4462950527667999, 0.4010440707206726, 0, -0.007001180667430162, 0.18042361736297607, -0.018317149952054024, 1]
+                                  },
+                                  "t": 1
+                                }
+                              ],
+                              [
+                                100,
+                                {
+                                  "$f32": {
+                                    "n": [0.9971708059310913, -1.185049125496107e-8, 0.0751689225435257, 0, -2.0475159345778593e-8, 1, 1.1293414203805696e-8, 0, -0.0751689225435257, -4.930868513497444e-8, 0.9971708059310913, 0, -1.0450071386003401e-7, 0.14287275075912476, 1.0594660260210276e-8, 1]
+                                  },
+                                  "t": 1
+                                }
+                              ],
+                              [
+                                101,
+                                {
+                                  "$f32": {
+                                    "n": [0.9731564521789551, 0.0014563236618414521, 0.2301403135061264, 0, -0.14063435792922974, -0.7877989411354065, 0.5996623039245605, 0, 0.1821776032447815, -0.6159309148788452, -0.7664467096328735, 0, 1.4095014044812615e-8, 0.14287281036376953, -1.622385354949074e-7, 1]
+                                  },
+                                  "t": 1
+                                }
+                              ],
+                              [
+                                102,
+                                {
+                                  "$f32": {
+                                    "n": [0.962279200553894, 0.0010216992814093828, -0.27206164598464966, 0, -0.001060981652699411, 0.9999994039535522, 0.000002646422672114568, 0, 0.2720615267753601, 0.0002861376851797104, 0.962279736995697, 0, 0.000027636488084681332, 0.11649855226278305, -0.0008946184534579515, 1]
+                                  },
+                                  "t": 1
+                                }
+                              ],
+                              [
+                                103,
+                                {
+                                  "$f32": {
+                                    "n": [0.7627381086349487, -0.6459875702857971, 0.030505910515785217, 0, 0.41472452878952026, 0.45239439606666565, -0.7895206809043884, 0, 0.4962198734283447, 0.6148490905761719, 0.6129652857780457, 0, 0.0003891809028573334, 0.11649869382381439, -0.0008199110743589699, 1]
+                                  },
+                                  "t": 1
+                                }
+                              ],
+                              [
+                                104,
+                                {
+                                  "$f32": {
+                                    "n": [-0.16299942135810852, -0.09860225766897202, 0.9816868305206299, 0, -0.11502500623464584, 0.9901077151298523, 0.08034919947385788, 0, -0.9798983335494995, -0.09982168674468994, -0.17272870242595673, 0, -0.001703631249256432, 0.03845782205462456, 0.011418819427490234, 1]
+                                  },
+                                  "t": 1
+                                }
+                              ],
+                              [
+                                105,
+                                {
+                                  "$f32": {
+                                    "n": [0.9530041813850403, -0.02337941713631153, 0.30205339193344116, 0, -0.013988452032208443, 0.9925586581230164, 0.12096087634563446, 0, -0.3026336431503296, -0.11950140446424484, 0.9455856084823608, 0, -0.00195382465608418, 0.07546541094779968, 0.000915432465262711, 1]
+                                  },
+                                  "t": 1
+                                }
+                              ],
+                              [
+                                106,
+                                {
+                                  "$f32": {
+                                    "n": [0.9997676014900208, -0.020145351067185402, 0.007680828217417002, 0, 0.010420853272080421, 0.763404130935669, 0.645837128162384, 0, -0.018874190747737885, -0.6456069946289062, 0.7634366154670715, 0, -0.00011793938028858975, 0.04064011573791504, -0.00041643387521617115, 1]
+                                  },
+                                  "t": 1
+                                }
+                              ],
+                              [
+                                107,
+                                {
+                                  "$f32": {
+                                    "n": [0.9994848370552063, 0.03206536918878555, 0.0014067827723920345, 0, -0.02354487217962742, 0.7026989459991455, 0.7110975980758667, 0, 0.021813103929162025, -0.7107644081115723, 0.7030920386314392, 0, -0.000192716543097049, 0.025475576519966125, -0.000030578241421608254, 1]
+                                  },
+                                  "t": 1
+                                }
+                              ],
+                              [
+                                108,
+                                {
+                                  "$f32": {
+                                    "n": [-0.36990028619766235, -0.7021081447601318, 0.6084553003311157, 0, -0.06108444184064865, 0.6718688607215881, 0.738146960735321, 0, -0.9270612001419067, 0.23587356507778168, -0.2914124131202698, 0, 0.006302788387984037, 0.0063188932836055756, 0.025502623990178108, 1]
+                                  },
+                                  "t": 1
+                                }
+                              ],
+                              [
+                                109,
+                                {
+                                  "$f32": {
+                                    "n": [0.6486023664474487, -0.0044110678136348724, 0.7611146569252014, 0, -0.5547395944595337, 0.6819335222244263, 0.4766870439052582, 0, -0.521132230758667, -0.7314008474349976, 0.43985676765441895, 0, 0.0001599962415639311, 0.05118224397301674, 0.0006425332394428551, 1]
+                                  },
+                                  "t": 1
+                                }
+                              ],
+                              [
+                                110,
+                                {
+                                  "$f32": {
+                                    "n": [0.9999861121177673, -0.000021029505660408176, -0.0052727810107171535, 0, 0.0031203143298625946, 0.8084546327590942, 0.5885502696037292, 0, 0.004250412806868553, -0.588558554649353, 0.8084433674812317, 0, 0.0003043508331757039, 0.02600291557610035, 0.00021126023784745485, 1]
+                                  },
+                                  "t": 1
+                                }
+                              ],
+                              [
+                                111,
+                                {
+                                  "$f32": {
+                                    "n": [1, 6.559160681263165e-8, -3.1075038009475975e-7, 0, -3.5402837994524816e-8, 1, -8.998066292065232e-9, 0, 3.3538296406732115e-7, 3.843838669581601e-8, 1, 0, -3.8947860048210714e-7, -3.770491829868661e-8, -1.7146266628742524e-8, 1]
+                                  },
+                                  "t": 1
+                                }
+                              ],
+                              [
+                                112,
+                                {
+                                  "$f32": {
+                                    "n": [-0.10693897306919098, 0.06707297265529633, 0.9920006990432739, 0, -0.079285629093647, 0.9939694404602051, -0.07575325667858124, 0, -0.9910994172096252, -0.08675238490104675, -0.1009761393070221, 0, 0.011669598519802094, 0.04821055009961128, -0.0035869546700268984, 1]
+                                  },
+                                  "t": 1
+                                }
+                              ],
+                              [
+                                113,
+                                {
+                                  "$f32": {
+                                    "n": [0.9878045916557312, 0.04539346694946289, 0.14893430471420288, 0, -0.15453796088695526, 0.1692810356616974, 0.9733765125274658, 0, 0.018973153084516525, -0.9845218062400818, 0.17423155903816223, 0, -0.0006916245329193771, 0.06748834252357483, 0.002068031346425414, 1]
+                                  },
+                                  "t": 1
+                                }
+                              ],
+                              [
+                                114,
+                                {
+                                  "$f32": {
+                                    "n": [0.9850158095359802, -0.008028133772313595, -0.17227719724178314, 0, 0.15613918006420135, 0.46573251485824585, 0.8710418939590454, 0, 0.07324231415987015, -0.8848891258239746, 0.4600074589252472, 0, -0.0004171773325651884, 0.04468480125069618, 0.00009618374315323308, 1]
+                                  },
+                                  "t": 1
+                                }
+                              ],
+                              [
+                                115,
+                                {
+                                  "$f32": {
+                                    "n": [0.999613344669342, 0.027351990342140198, 0.0049970741383731365, 0, -0.01961297169327736, 0.5662398338317871, 0.8240070343017578, 0, 0.019708657637238503, -0.8237864971160889, 0.5665574073791504, 0, -0.0003146120870951563, 0.029072526842355728, 0.00016444618813693523, 1]
+                                  },
+                                  "t": 1
+                                }
+                              ],
+                              [
+                                116,
+                                {
+                                  "$f32": {
+                                    "n": [1, 2.6589994650549897e-9, -4.733724097150116e-7, 0, -1.5827275490210013e-8, 1.0000001192092896, 4.4577671332035607e-8, 0, 4.523143104506744e-7, -7.649289557321026e-8, 1, 0, 8.717659483181706e-8, -8.881115398651218e-9, 2.2071338534601637e-8, 1]
+                                  },
+                                  "t": 1
+                                }
+                              ],
+                              [
+                                117,
+                                {
+                                  "$f32": {
+                                    "n": [-0.01907876878976822, 0.20705096423625946, 0.978144109249115, 0, -0.060418471693992615, 0.9762954711914062, -0.20783813297748566, 0, -0.9979908466339111, -0.06306321173906326, -0.006116761825978756, 0, 0.020601551979780197, 0.044145867228507996, -0.02108331024646759, 1]
+                                  },
+                                  "t": 1
+                                }
+                              ],
+                              [
+                                118,
+                                {
+                                  "$f32": {
+                                    "n": [0.9552433490753174, -0.2788337767124176, 0.09880273789167404, 0, -0.0028244159184396267, 0.32538288831710815, 0.9455782175064087, 0, -0.295807808637619, -0.903536319732666, 0.31003233790397644, 0, -0.000724259065464139, 0.0631520077586174, -0.0005149494390934706, 1]
+                                  },
+                                  "t": 1
+                                }
+                              ],
+                              [
+                                119,
+                                {
+                                  "$f32": {
+                                    "n": [0.9363458752632141, 0.0060877008363604546, -0.35102608799934387, 0, 0.27801012992858887, 0.5977360010147095, 0.751945436000824, 0, 0.214398592710495, -0.8016698360443115, 0.5579952001571655, 0, -0.00044697208795696497, 0.04025533050298691, 0.00019043606880586594, 1]
+                                  },
+                                  "t": 1
+                                }
+                              ],
+                              [
+                                120,
+                                {
+                                  "$f32": {
+                                    "n": [0.9999443888664246, -0.009571564383804798, 0.00443098833784461, 0, 0.00030934446840547025, 0.44653570652008057, 0.8947658538818359, 0, -0.010542909614741802, -0.8947146534919739, 0.4465138018131256, 0, -0.00036165694473311305, 0.02860620990395546, 0.00017243156617041677, 1]
+                                  },
+                                  "t": 1
+                                }
+                              ],
+                              [
+                                121,
+                                {
+                                  "$f32": {
+                                    "n": [1, 1.0615227585830667e-9, -1.2000033189352166e-9, 0, 3.833011685827614e-11, 1, 9.427405522899335e-9, 0, -4.440158019036744e-9, -7.265315460358579e-9, 1, 0, 2.4316729962947647e-8, 7.888873554406928e-9, -1.0525623039825405e-8, 1]
+                                  },
+                                  "t": 1
+                                }
+                              ],
+                              [
+                                122,
+                                {
+                                  "$f32": {
+                                    "n": [0.022400707006454468, 0.3479693531990051, 0.9372382164001465, 0, -0.03030332364141941, 0.9372790455818176, -0.3472602665424347, 0, -0.9992898106575012, -0.020622525364160538, 0.03154037147760391, 0, 0.018683582544326782, 0.03196960315108299, -0.036482810974121094, 1]
+                                  },
+                                  "t": 1
+                                }
+                              ],
+                              [
+                                123,
+                                {
+                                  "$f32": {
+                                    "n": [0.8993018269538879, -0.41792652010917664, -0.1288173943758011, 0, 0.17531251907348633, 0.0746583491563797, 0.9816780090332031, 0, -0.4006519317626953, -0.9054080843925476, 0.14040817320346832, 0, 0.00015318662917707115, 0.07575302571058273, 0.004384567029774189, 1]
+                                  },
+                                  "t": 1
+                                }
+                              ],
+                              [
+                                124,
+                                {
+                                  "$f32": {
+                                    "n": [0.9747992753982544, 0.0058301035314798355, -0.2230074107646942, 0, 0.118973508477211, 0.8320423364639282, 0.5418033003807068, 0, 0.18871036171913147, -0.5546814799308777, 0.8103806376457214, 0, -0.0002731911663431674, 0.024902798235416412, 0.00012001978029729798, 1]
+                                  },
+                                  "t": 1
+                                }
+                              ],
+                              [
+                                125,
+                                {
+                                  "$f32": {
+                                    "n": [0.9996386766433716, -0.02541237138211727, -0.008772972971200943, 0, 0.02539430744946003, 0.785432755947113, 0.6184259057044983, 0, -0.008825094439089298, -0.6184251308441162, 0.785794198513031, 0, -0.0002481399569660425, 0.02025945484638214, 0.0001655970700085163, 1]
+                                  },
+                                  "t": 1
+                                }
+                              ],
+                              [
+                                126,
+                                {
+                                  "$f32": {
+                                    "n": [1, -1.4176099227825034e-7, 1.4051360608391406e-7, 0, 1.4429636507884425e-7, 1, -1.79231687269521e-8, 0, -1.5956193522015383e-7, 3.225437339438031e-8, 1, 0, 1.2327598142292118e-7, 2.0729151728460238e-8, -5.474666053828514e-9, 1]
+                                  },
+                                  "t": 1
+                                }
+                              ],
+                              [
+                                127,
+                                {
+                                  "$f32": {
+                                    "n": [-0.9999999403953552, 1.5099580252808664e-7, 4.3124779303127525e-9, 0, -1.7541689672009864e-12, -0.028560183942317963, 0.9995920658111572, 0, 1.510573639507129e-7, 0.9995920658111572, 0.028560250997543335, 0, 0.1063900738954544, -0.004385788459330797, -0.038419779390096664, 1]
+                                  },
+                                  "t": 1
+                                }
+                              ],
+                              [
+                                128,
+                                {
+                                  "$f32": {
+                                    "n": [1.0000001192092896, -2.143915436619761e-14, -3.221936809689151e-14, 0, 8.70612819846555e-15, 1, 5.684315119839668e-14, 0, 1.4209959401376756e-14, -1.685874053691805e-7, 1, 0, -1.0497597457970187e-8, -3.1537410905002616e-8, -1.182582121117548e-8, 1]
+                                  },
+                                  "t": 1
+                                }
+                              ],
+                              [
+                                129,
+                                {
+                                  "$f32": {
+                                    "n": [-0.9999999403953552, 1.5099580252808664e-7, 4.3124779303127525e-9, 0, -1.7541689672009864e-12, -0.028560183942317963, 0.9995920658111572, 0, 1.510573639507129e-7, 0.9995920658111572, 0.028560250997543335, 0, -0.1063900738954544, -0.004385788459330797, -0.038419779390096664, 1]
+                                  },
+                                  "t": 1
+                                }
+                              ],
+                              [
+                                130,
+                                {
+                                  "$f32": {
+                                    "n": [1.0000001192092896, -2.143915436619761e-14, -3.221936809689151e-14, 0, 8.70612819846555e-15, 1, 5.684315119839668e-14, 0, 1.4209959401376756e-14, -1.685874053691805e-7, 1, 0, 4.403563735877469e-9, -3.153703787006634e-8, 7.524145217985279e-8, 1]
+                                  },
+                                  "t": 1
+                                }
+                              ],
+                              [
+                                131,
+                                {
+                                  "$f32": {
+                                    "n": [5.960464477539063e-8, -4.4951903532819415e-8, 1, 0, -2.9802318834981634e-8, -1, -7.475422592051473e-8, 0, 1, 1.2012619563894593e-14, -8.940696716308594e-8, 0, 0, -1.001393437385559, 1.6006131172180176, 1]
+                                  },
+                                  "t": 1
+                                }
+                              ],
+                              [
+                                132,
+                                {
+                                  "$f32": {
+                                    "n": [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1]
+                                  },
+                                  "t": 1
+                                }
+                              ]
+                            ],
+                            "nodeNames": [
+                              [
+                                0,
+                                "Sketchfab_model"
+                              ],
+                              [
+                                1,
+                                "fbx_merge.fbx"
+                              ],
+                              [
+                                2,
+                                "Object_2"
+                              ],
+                              [
+                                3,
+                                "RootNode"
+                              ],
+                              [
+                                4,
+                                "Camera"
+                              ],
+                              [
+                                5,
+                                "Object_5"
+                              ],
+                              [
+                                6,
+                                "SKEL_AK_47_Rifle"
+                              ],
+                              [
+                                7,
+                                "Object_7"
+                              ],
+                              [
+                                8,
+                                "_rootJoint"
+                              ],
+                              [
+                                9,
+                                "Grip_01"
+                              ],
+                              [
+                                10,
+                                "Trigger_02"
+                              ],
+                              [
+                                11,
+                                "bolt_03"
+                              ],
+                              [
+                                12,
+                                "Magazine_04"
+                              ],
+                              [
+                                13,
+                                "Object_13"
+                              ],
+                              [
+                                14,
+                                "Object_14"
+                              ],
+                              [
+                                15,
+                                "Object_15"
+                              ],
+                              [
+                                16,
+                                "Object_16"
+                              ],
+                              [
+                                17,
+                                "Object_17"
+                              ],
+                              [
+                                18,
+                                "Object_18"
+                              ],
+                              [
+                                19,
+                                "SKM_Comando"
+                              ],
+                              [
+                                20,
+                                "SK_AK-47"
+                              ],
+                              [
+                                21,
+                                "SK_Comando"
+                              ],
+                              [
+                                22,
+                                "Object_22"
+                              ],
+                              [
+                                23,
+                                "_rootJoint"
+                              ],
+                              [
+                                24,
+                                "Object_24"
+                              ],
+                              [
+                                25,
+                                "Object_25"
+                              ],
+                              [
+                                26,
+                                "Object_26"
+                              ],
+                              [
+                                27,
+                                "root_05"
+                              ],
+                              [
+                                28,
+                                "DEF-spine_06"
+                              ],
+                              [
+                                29,
+                                "DEF-spine.001_07"
+                              ],
+                              [
+                                30,
+                                "DEF-spine.002_08"
+                              ],
+                              [
+                                31,
+                                "DEF-spine.003_00"
+                              ],
+                              [
+                                32,
+                                "DEF-spine.004_09"
+                              ],
+                              [
+                                33,
+                                "DEF-spine.005_010"
+                              ],
+                              [
+                                34,
+                                "DEF-spine.006_011"
+                              ],
+                              [
+                                35,
+                                "CB_Weapon_012"
+                              ],
+                              [
+                                36,
+                                "DEF-Weapon_013"
+                              ],
+                              [
+                                37,
+                                "MCH-torso.parent_014"
+                              ],
+                              [
+                                38,
+                                "torso_015"
+                              ],
+                              [
+                                39,
+                                "MCH-spine.001_016"
+                              ],
+                              [
+                                40,
+                                "spine_fk.001_017"
+                              ],
+                              [
+                                41,
+                                "MCH-spine_018"
+                              ],
+                              [
+                                42,
+                                "spine_fk_019"
+                              ],
+                              [
+                                43,
+                                "tweak_spine_020"
+                              ],
+                              [
+                                44,
+                                "ORG-spine_021"
+                              ],
+                              [
+                                45,
+                                "ORG-pelvis.L_022"
+                              ],
+                              [
+                                46,
+                                "DEF-pelvis.L_023"
+                              ],
+                              [
+                                47,
+                                "ORG-pelvis.R_024"
+                              ],
+                              [
+                                48,
+                                "DEF-pelvis.R_025"
+                              ],
+                              [
+                                49,
+                                "DEF-thigh.L_026"
+                              ],
+                              [
+                                50,
+                                "DEF-thigh.L.001_027"
+                              ],
+                              [
+                                51,
+                                "DEF-shin.L_028"
+                              ],
+                              [
+                                52,
+                                "DEF-shin.L.001_029"
+                              ],
+                              [
+                                53,
+                                "DEF-foot.L_030"
+                              ],
+                              [
+                                54,
+                                "DEF-toe.L_031"
+                              ],
+                              [
+                                55,
+                                "DEF-thigh.R_032"
+                              ],
+                              [
+                                56,
+                                "DEF-thigh.R.001_033"
+                              ],
+                              [
+                                57,
+                                "DEF-shin.R_034"
+                              ],
+                              [
+                                58,
+                                "DEF-shin.R.001_035"
+                              ],
+                              [
+                                59,
+                                "DEF-foot.R_036"
+                              ],
+                              [
+                                60,
+                                "DEF-toe.R_037"
+                              ],
+                              [
+                                61,
+                                "MCH-spine.002_038"
+                              ],
+                              [
+                                62,
+                                "spine_fk.002_039"
+                              ],
+                              [
+                                63,
+                                "MCH-spine.003_040"
+                              ],
+                              [
+                                64,
+                                "spine_fk.003_041"
+                              ],
+                              [
+                                65,
+                                "tweak_spine.003_042"
+                              ],
+                              [
+                                66,
+                                "ORG-spine.003_043"
+                              ],
+                              [
+                                67,
+                                "ORG-shoulder.L_044"
+                              ],
+                              [
+                                68,
+                                "DEF-shoulder.L_045"
+                              ],
+                              [
+                                69,
+                                "DEF-upper_arm.L_046"
+                              ],
+                              [
+                                70,
+                                "DEF-upper_arm.L.001_047"
+                              ],
+                              [
+                                71,
+                                "DEF-forearm.L_048"
+                              ],
+                              [
+                                72,
+                                "DEF-forearm.L.001_049"
+                              ],
+                              [
+                                73,
+                                "DEF-hand.L_050"
+                              ],
+                              [
+                                74,
+                                "ORG-palm.01.L_051"
+                              ],
+                              [
+                                75,
+                                "DEF-f_index.01.L_052"
+                              ],
+                              [
+                                76,
+                                "DEF-f_index.02.L_053"
+                              ],
+                              [
+                                77,
+                                "DEF-f_index.03.L_054"
+                              ],
+                              [
+                                78,
+                                "DEF-thumb.01.L_055"
+                              ],
+                              [
+                                79,
+                                "DEF-thumb.02.L_056"
+                              ],
+                              [
+                                80,
+                                "DEF-thumb.03.L_057"
+                              ],
+                              [
+                                81,
+                                "DEF-palm.01.L_058"
+                              ],
+                              [
+                                82,
+                                "ORG-palm.02.L_059"
+                              ],
+                              [
+                                83,
+                                "DEF-f_middle.01.L_060"
+                              ],
+                              [
+                                84,
+                                "DEF-f_middle.02.L_061"
+                              ],
+                              [
+                                85,
+                                "DEF-f_middle.03.L_062"
+                              ],
+                              [
+                                86,
+                                "DEF-palm.02.L_063"
+                              ],
+                              [
+                                87,
+                                "ORG-palm.03.L_064"
+                              ],
+                              [
+                                88,
+                                "DEF-f_ring.01.L_065"
+                              ],
+                              [
+                                89,
+                                "DEF-f_ring.02.L_066"
+                              ],
+                              [
+                                90,
+                                "DEF-f_ring.03.L_067"
+                              ],
+                              [
+                                91,
+                                "DEF-palm.03.L_068"
+                              ],
+                              [
+                                92,
+                                "ORG-palm.04.L_069"
+                              ],
+                              [
+                                93,
+                                "DEF-f_pinky.01.L_070"
+                              ],
+                              [
+                                94,
+                                "DEF-f_pinky.02.L_071"
+                              ],
+                              [
+                                95,
+                                "DEF-f_pinky.03.L_072"
+                              ],
+                              [
+                                96,
+                                "DEF-palm.04.L_073"
+                              ],
+                              [
+                                97,
+                                "ORG-shoulder.R_074"
+                              ],
+                              [
+                                98,
+                                "DEF-shoulder.R_075"
+                              ],
+                              [
+                                99,
+                                "DEF-upper_arm.R_076"
+                              ],
+                              [
+                                100,
+                                "DEF-upper_arm.R.001_077"
+                              ],
+                              [
+                                101,
+                                "DEF-forearm.R_078"
+                              ],
+                              [
+                                102,
+                                "DEF-forearm.R.001_079"
+                              ],
+                              [
+                                103,
+                                "DEF-hand.R_080"
+                              ],
+                              [
+                                104,
+                                "ORG-palm.01.R_081"
+                              ],
+                              [
+                                105,
+                                "DEF-f_index.01.R_082"
+                              ],
+                              [
+                                106,
+                                "DEF-f_index.02.R_083"
+                              ],
+                              [
+                                107,
+                                "DEF-f_index.03.R_084"
+                              ],
+                              [
+                                108,
+                                "DEF-thumb.01.R_085"
+                              ],
+                              [
+                                109,
+                                "DEF-thumb.02.R_086"
+                              ],
+                              [
+                                110,
+                                "DEF-thumb.03.R_087"
+                              ],
+                              [
+                                111,
+                                "DEF-palm.01.R_088"
+                              ],
+                              [
+                                112,
+                                "ORG-palm.02.R_089"
+                              ],
+                              [
+                                113,
+                                "DEF-f_middle.01.R_090"
+                              ],
+                              [
+                                114,
+                                "DEF-f_middle.02.R_091"
+                              ],
+                              [
+                                115,
+                                "DEF-f_middle.03.R_092"
+                              ],
+                              [
+                                116,
+                                "DEF-palm.02.R_093"
+                              ],
+                              [
+                                117,
+                                "ORG-palm.03.R_094"
+                              ],
+                              [
+                                118,
+                                "DEF-f_ring.01.R_095"
+                              ],
+                              [
+                                119,
+                                "DEF-f_ring.02.R_096"
+                              ],
+                              [
+                                120,
+                                "DEF-f_ring.03.R_097"
+                              ],
+                              [
+                                121,
+                                "DEF-palm.03.R_098"
+                              ],
+                              [
+                                122,
+                                "ORG-palm.04.R_099"
+                              ],
+                              [
+                                123,
+                                "DEF-f_pinky.01.R_0100"
+                              ],
+                              [
+                                124,
+                                "DEF-f_pinky.02.R_0101"
+                              ],
+                              [
+                                125,
+                                "DEF-f_pinky.03.R_0102"
+                              ],
+                              [
+                                126,
+                                "DEF-palm.04.R_0103"
+                              ],
+                              [
+                                127,
+                                "ORG-breast.L_0104"
+                              ],
+                              [
+                                128,
+                                "DEF-breast.L_0105"
+                              ],
+                              [
+                                129,
+                                "ORG-breast.R_0106"
+                              ],
+                              [
+                                130,
+                                "DEF-breast.R_0107"
+                              ],
+                              [
+                                131,
+                                "CB-Head_0108"
+                              ],
+                              [
+                                132,
+                                "SM-CARGADOR"
+                              ]
+                            ],
+                            "ikRig": null
+                          },
+                          "jointIndices": {
+                            "$idx": {
+                              "h": "3d5dde94825603a5621c28f3d1aaa659a04804a3e299a239fecd15b30fa3b148",
+                              "l": 289376,
+                              "bits": 16
+                            },
+                            "t": 1
+                          },
+                          "jointWeights": {
+                            "$f32": {
+                              "h": "7b68b18d83917a299c929d08a0e994c92e3d1e8f9de33032550b4bf7ce31c6a1",
+                              "l": 578752
+                            },
+                            "t": 1
+                          },
+                          "animations": null,
+                          "materials": [
+                            {
+                              "type": "pbr",
+                              "baseColor": [1, 1, 1],
+                              "metallic": 1,
+                              "roughness": 1,
+                              "opacity": 1,
+                              "emissiveFactor": [0, 0, 0],
+                              "alphaCutoff": 0,
+                              "displacementScale": 0.05,
+                              "textures": {
+                                "baseColorTexture": "7f52f31ae3774a6671320d18acd590d9",
+                                "metallicMap": "a13d482458670e23d0c854270416585d",
+                                "roughnessMap": "a13d482458670e23d0c854270416585d",
+                                "normalMap": "b41058e0fc2b48723b5e52e553e3936a",
+                                "occlusionMap": "a13d482458670e23d0c854270416585d"
+                              },
+                              "config": {
+                                "side": "double",
+                                "wireframe": false,
+                                "transparent": false,
+                                "castShadow": true,
+                                "probeable": true
+                              }
+                            },
+                            {
+                              "type": "pbr",
+                              "baseColor": [1, 1, 1],
+                              "metallic": 1,
+                              "roughness": 1,
+                              "opacity": 1,
+                              "emissiveFactor": [0, 0, 0],
+                              "alphaCutoff": 0,
+                              "displacementScale": 0.05,
+                              "textures": {
+                                "baseColorTexture": "f69b348b6d4c8ff9981859501aed1dc3",
+                                "metallicMap": "2db0ca4fe50d0f548d9d3dd84e0501c0",
+                                "roughnessMap": "2db0ca4fe50d0f548d9d3dd84e0501c0",
+                                "normalMap": "284890b17935dacd530505c30bbda932",
+                                "occlusionMap": "2db0ca4fe50d0f548d9d3dd84e0501c0"
+                              },
+                              "config": {
+                                "side": "double",
+                                "wireframe": false,
+                                "transparent": false,
+                                "castShadow": true,
+                                "probeable": true
+                              }
+                            },
+                            {
+                              "type": "pbr",
+                              "baseColor": [1, 1, 1],
+                              "metallic": 1,
+                              "roughness": 1,
+                              "opacity": 1,
+                              "emissiveFactor": [0, 0, 0],
+                              "alphaCutoff": 0,
+                              "displacementScale": 0.05,
+                              "textures": {
+                                "baseColorTexture": "bfe26f23a11f08b30d55461597fe5db9",
+                                "metallicMap": "c8ebe6c572daca1039bcb5bdeddf809e",
+                                "roughnessMap": "c8ebe6c572daca1039bcb5bdeddf809e",
+                                "normalMap": "0bc7237186ef110c6e79c1099c119b9d",
+                                "occlusionMap": "c8ebe6c572daca1039bcb5bdeddf809e"
+                              },
+                              "config": {
+                                "side": "double",
+                                "wireframe": false,
+                                "transparent": false,
+                                "castShadow": false,
+                                "probeable": true
+                              }
+                            },
+                            {
+                              "type": "pbr",
+                              "baseColor": [1, 1, 1],
+                              "metallic": 0,
+                              "roughness": 1,
+                              "opacity": 1,
+                              "emissiveFactor": [0, 0, 0],
+                              "alphaCutoff": 0,
+                              "displacementScale": 0.05,
+                              "textures": {
+                                "baseColorTexture": "b4f73847aa3e807b48bbd4925d476e35",
+                                "metallicMap": "7ac965cf02b314f7fb6b87d1826219b4",
+                                "roughnessMap": "7ac965cf02b314f7fb6b87d1826219b4",
+                                "normalMap": "939dbd96cf76e31508f1f694ab848686",
+                                "occlusionMap": "7ac965cf02b314f7fb6b87d1826219b4"
+                              },
+                              "config": {
+                                "side": "double",
+                                "wireframe": false,
+                                "transparent": false,
+                                "castShadow": false,
+                                "probeable": true
+                              }
+                            }
+                          ],
+                          "submeshes": [
+                            {
+                              "start": 0,
+                              "count": 21678
+                            },
+                            {
+                              "start": 21678,
+                              "count": 52461
+                            },
+                            {
+                              "start": 74139,
+                              "count": 37980
+                            },
+                            {
+                              "start": 112119,
+                              "count": 28236
+                            }
+                          ]
+                        },
+                        "animationMappings": [],
+                        "stateMachine": {
+                          "parameters": [
+                            {
+                              "name": "Moving",
+                              "type": "bool",
+                              "default": false
+                            },
+                            {
+                              "name": "Sprinting",
+                              "type": "bool",
+                              "default": false
+                            },
+                            {
+                              "name": "Aim",
+                              "type": "bool",
+                              "default": false
+                            },
+                            {
+                              "name": "Equip",
+                              "type": "trigger",
+                              "default": false
+                            },
+                            {
+                              "name": "Fire",
+                              "type": "trigger",
+                              "default": false
+                            },
+                            {
+                              "name": "AimFire",
+                              "type": "trigger",
+                              "default": false
+                            },
+                            {
+                              "name": "Reload",
+                              "type": "trigger",
+                              "default": false
+                            }
+                          ],
+                          "states": [
+                            {
+                              "name": "Idle",
+                              "clipName": "Idle",
+                              "loop": true,
+                              "speed": 1,
+                              "isEntry": true,
+                              "x": 40,
+                              "y": 40
+                            },
+                            {
+                              "name": "IdleAim",
+                              "clipName": "IdleAim",
+                              "loop": true,
+                              "speed": 1,
+                              "isEntry": false,
+                              "x": 270,
+                              "y": 40
+                            },
+                            {
+                              "name": "Walk",
+                              "clipName": "Walk",
+                              "loop": true,
+                              "speed": 1,
+                              "isEntry": false,
+                              "x": 500,
+                              "y": 40
+                            },
+                            {
+                              "name": "WalkAim",
+                              "clipName": "WalkAim",
+                              "loop": true,
+                              "speed": 1,
+                              "isEntry": false,
+                              "x": 40,
+                              "y": 180
+                            },
+                            {
+                              "name": "Run",
+                              "clipName": "Run",
+                              "loop": true,
+                              "speed": 1,
+                              "isEntry": false,
+                              "x": 270,
+                              "y": 180
+                            }
+                          ],
+                          "transitions": [
+                            {
+                              "from": "Idle",
+                              "to": "IdleAim",
+                              "conditions": [],
+                              "minDwell": 0.04,
+                              "hasExitTime": false,
+                              "exitTime": 1,
+                              "condition": {
+                                "op": "and",
+                                "children": [
+                                  {
+                                    "param": "Moving",
+                                    "op": "false"
+                                  },
+                                  {
+                                    "param": "Aim",
+                                    "op": "true"
+                                  }
+                                ]
+                              },
+                              "blendTime": 0.16
+                            },
+                            {
+                              "from": "Idle",
+                              "to": "Walk",
+                              "conditions": [],
+                              "minDwell": 0.04,
+                              "hasExitTime": false,
+                              "exitTime": 1,
+                              "condition": {
+                                "op": "and",
+                                "children": [
+                                  {
+                                    "param": "Moving",
+                                    "op": "true"
+                                  },
+                                  {
+                                    "param": "Sprinting",
+                                    "op": "false"
+                                  },
+                                  {
+                                    "param": "Aim",
+                                    "op": "false"
+                                  }
+                                ]
+                              },
+                              "blendTime": 0.16
+                            },
+                            {
+                              "from": "Idle",
+                              "to": "WalkAim",
+                              "conditions": [],
+                              "minDwell": 0.04,
+                              "hasExitTime": false,
+                              "exitTime": 1,
+                              "condition": {
+                                "op": "and",
+                                "children": [
+                                  {
+                                    "param": "Moving",
+                                    "op": "true"
+                                  },
+                                  {
+                                    "param": "Aim",
+                                    "op": "true"
+                                  }
+                                ]
+                              },
+                              "blendTime": 0.16
+                            },
+                            {
+                              "from": "Idle",
+                              "to": "Run",
+                              "conditions": [],
+                              "minDwell": 0.04,
+                              "hasExitTime": false,
+                              "exitTime": 1,
+                              "condition": {
+                                "op": "and",
+                                "children": [
+                                  {
+                                    "param": "Moving",
+                                    "op": "true"
+                                  },
+                                  {
+                                    "param": "Sprinting",
+                                    "op": "true"
+                                  },
+                                  {
+                                    "param": "Aim",
+                                    "op": "false"
+                                  }
+                                ]
+                              },
+                              "blendTime": 0.16
+                            },
+                            {
+                              "from": "IdleAim",
+                              "to": "Idle",
+                              "conditions": [],
+                              "minDwell": 0.04,
+                              "hasExitTime": false,
+                              "exitTime": 1,
+                              "condition": {
+                                "op": "and",
+                                "children": [
+                                  {
+                                    "param": "Moving",
+                                    "op": "false"
+                                  },
+                                  {
+                                    "param": "Aim",
+                                    "op": "false"
+                                  }
+                                ]
+                              },
+                              "blendTime": 0.16
+                            },
+                            {
+                              "from": "IdleAim",
+                              "to": "Walk",
+                              "conditions": [],
+                              "minDwell": 0.04,
+                              "hasExitTime": false,
+                              "exitTime": 1,
+                              "condition": {
+                                "op": "and",
+                                "children": [
+                                  {
+                                    "param": "Moving",
+                                    "op": "true"
+                                  },
+                                  {
+                                    "param": "Sprinting",
+                                    "op": "false"
+                                  },
+                                  {
+                                    "param": "Aim",
+                                    "op": "false"
+                                  }
+                                ]
+                              },
+                              "blendTime": 0.16
+                            },
+                            {
+                              "from": "IdleAim",
+                              "to": "WalkAim",
+                              "conditions": [],
+                              "minDwell": 0.04,
+                              "hasExitTime": false,
+                              "exitTime": 1,
+                              "condition": {
+                                "op": "and",
+                                "children": [
+                                  {
+                                    "param": "Moving",
+                                    "op": "true"
+                                  },
+                                  {
+                                    "param": "Aim",
+                                    "op": "true"
+                                  }
+                                ]
+                              },
+                              "blendTime": 0.16
+                            },
+                            {
+                              "from": "IdleAim",
+                              "to": "Run",
+                              "conditions": [],
+                              "minDwell": 0.04,
+                              "hasExitTime": false,
+                              "exitTime": 1,
+                              "condition": {
+                                "op": "and",
+                                "children": [
+                                  {
+                                    "param": "Moving",
+                                    "op": "true"
+                                  },
+                                  {
+                                    "param": "Sprinting",
+                                    "op": "true"
+                                  },
+                                  {
+                                    "param": "Aim",
+                                    "op": "false"
+                                  }
+                                ]
+                              },
+                              "blendTime": 0.16
+                            },
+                            {
+                              "from": "Walk",
+                              "to": "Idle",
+                              "conditions": [],
+                              "minDwell": 0.04,
+                              "hasExitTime": false,
+                              "exitTime": 1,
+                              "condition": {
+                                "op": "and",
+                                "children": [
+                                  {
+                                    "param": "Moving",
+                                    "op": "false"
+                                  },
+                                  {
+                                    "param": "Aim",
+                                    "op": "false"
+                                  }
+                                ]
+                              },
+                              "blendTime": 0.16
+                            },
+                            {
+                              "from": "Walk",
+                              "to": "IdleAim",
+                              "conditions": [],
+                              "minDwell": 0.04,
+                              "hasExitTime": false,
+                              "exitTime": 1,
+                              "condition": {
+                                "op": "and",
+                                "children": [
+                                  {
+                                    "param": "Moving",
+                                    "op": "false"
+                                  },
+                                  {
+                                    "param": "Aim",
+                                    "op": "true"
+                                  }
+                                ]
+                              },
+                              "blendTime": 0.16
+                            },
+                            {
+                              "from": "Walk",
+                              "to": "WalkAim",
+                              "conditions": [],
+                              "minDwell": 0.04,
+                              "hasExitTime": false,
+                              "exitTime": 1,
+                              "condition": {
+                                "op": "and",
+                                "children": [
+                                  {
+                                    "param": "Moving",
+                                    "op": "true"
+                                  },
+                                  {
+                                    "param": "Aim",
+                                    "op": "true"
+                                  }
+                                ]
+                              },
+                              "blendTime": 0.16
+                            },
+                            {
+                              "from": "Walk",
+                              "to": "Run",
+                              "conditions": [],
+                              "minDwell": 0.04,
+                              "hasExitTime": false,
+                              "exitTime": 1,
+                              "condition": {
+                                "op": "and",
+                                "children": [
+                                  {
+                                    "param": "Moving",
+                                    "op": "true"
+                                  },
+                                  {
+                                    "param": "Sprinting",
+                                    "op": "true"
+                                  },
+                                  {
+                                    "param": "Aim",
+                                    "op": "false"
+                                  }
+                                ]
+                              },
+                              "blendTime": 0.16
+                            },
+                            {
+                              "from": "WalkAim",
+                              "to": "Idle",
+                              "conditions": [],
+                              "minDwell": 0.04,
+                              "hasExitTime": false,
+                              "exitTime": 1,
+                              "condition": {
+                                "op": "and",
+                                "children": [
+                                  {
+                                    "param": "Moving",
+                                    "op": "false"
+                                  },
+                                  {
+                                    "param": "Aim",
+                                    "op": "false"
+                                  }
+                                ]
+                              },
+                              "blendTime": 0.16
+                            },
+                            {
+                              "from": "WalkAim",
+                              "to": "IdleAim",
+                              "conditions": [],
+                              "minDwell": 0.04,
+                              "hasExitTime": false,
+                              "exitTime": 1,
+                              "condition": {
+                                "op": "and",
+                                "children": [
+                                  {
+                                    "param": "Moving",
+                                    "op": "false"
+                                  },
+                                  {
+                                    "param": "Aim",
+                                    "op": "true"
+                                  }
+                                ]
+                              },
+                              "blendTime": 0.16
+                            },
+                            {
+                              "from": "WalkAim",
+                              "to": "Walk",
+                              "conditions": [],
+                              "minDwell": 0.04,
+                              "hasExitTime": false,
+                              "exitTime": 1,
+                              "condition": {
+                                "op": "and",
+                                "children": [
+                                  {
+                                    "param": "Moving",
+                                    "op": "true"
+                                  },
+                                  {
+                                    "param": "Sprinting",
+                                    "op": "false"
+                                  },
+                                  {
+                                    "param": "Aim",
+                                    "op": "false"
+                                  }
+                                ]
+                              },
+                              "blendTime": 0.16
+                            },
+                            {
+                              "from": "WalkAim",
+                              "to": "Run",
+                              "conditions": [],
+                              "minDwell": 0.04,
+                              "hasExitTime": false,
+                              "exitTime": 1,
+                              "condition": {
+                                "op": "and",
+                                "children": [
+                                  {
+                                    "param": "Moving",
+                                    "op": "true"
+                                  },
+                                  {
+                                    "param": "Sprinting",
+                                    "op": "true"
+                                  },
+                                  {
+                                    "param": "Aim",
+                                    "op": "false"
+                                  }
+                                ]
+                              },
+                              "blendTime": 0.16
+                            },
+                            {
+                              "from": "Run",
+                              "to": "Idle",
+                              "conditions": [],
+                              "minDwell": 0.04,
+                              "hasExitTime": false,
+                              "exitTime": 1,
+                              "condition": {
+                                "op": "and",
+                                "children": [
+                                  {
+                                    "param": "Moving",
+                                    "op": "false"
+                                  },
+                                  {
+                                    "param": "Aim",
+                                    "op": "false"
+                                  }
+                                ]
+                              },
+                              "blendTime": 0.16
+                            },
+                            {
+                              "from": "Run",
+                              "to": "IdleAim",
+                              "conditions": [],
+                              "minDwell": 0.04,
+                              "hasExitTime": false,
+                              "exitTime": 1,
+                              "condition": {
+                                "op": "and",
+                                "children": [
+                                  {
+                                    "param": "Moving",
+                                    "op": "false"
+                                  },
+                                  {
+                                    "param": "Aim",
+                                    "op": "true"
+                                  }
+                                ]
+                              },
+                              "blendTime": 0.16
+                            },
+                            {
+                              "from": "Run",
+                              "to": "Walk",
+                              "conditions": [],
+                              "minDwell": 0.04,
+                              "hasExitTime": false,
+                              "exitTime": 1,
+                              "condition": {
+                                "op": "and",
+                                "children": [
+                                  {
+                                    "param": "Moving",
+                                    "op": "true"
+                                  },
+                                  {
+                                    "param": "Sprinting",
+                                    "op": "false"
+                                  },
+                                  {
+                                    "param": "Aim",
+                                    "op": "false"
+                                  }
+                                ]
+                              },
+                              "blendTime": 0.16
+                            },
+                            {
+                              "from": "Run",
+                              "to": "WalkAim",
+                              "conditions": [],
+                              "minDwell": 0.04,
+                              "hasExitTime": false,
+                              "exitTime": 1,
+                              "condition": {
+                                "op": "and",
+                                "children": [
+                                  {
+                                    "param": "Moving",
+                                    "op": "true"
+                                  },
+                                  {
+                                    "param": "Aim",
+                                    "op": "true"
+                                  }
+                                ]
+                              },
+                              "blendTime": 0.16
+                            }
+                          ],
+                          "layers": [
+                            {
+                              "name": "Actions",
+                              "blend": "override",
+                              "weight": 1,
+                              "states": [
+                                {
+                                  "name": "Off",
+                                  "clipName": "",
+                                  "loop": true,
+                                  "speed": 1,
+                                  "isEntry": true,
+                                  "x": 40,
+                                  "y": 40
+                                },
+                                {
+                                  "name": "Equip",
+                                  "clipName": "Equip",
+                                  "loop": false,
+                                  "speed": 1,
+                                  "isEntry": false,
+                                  "ikWeight": 0,
+                                  "triggers": [
+                                    {
+                                      "trigger": "Equip",
+                                      "blendTime": 0.06
+                                    }
+                                  ],
+                                  "x": 300,
+                                  "y": 40
+                                },
+                                {
+                                  "name": "Fire",
+                                  "clipName": "Fire",
+                                  "loop": false,
+                                  "speed": 1,
+                                  "isEntry": false,
+                                  "ikWeight": 0,
+                                  "triggers": [
+                                    {
+                                      "trigger": "Fire",
+                                      "blendTime": 0.06
+                                    }
+                                  ],
+                                  "x": 500,
+                                  "y": 40
+                                },
+                                {
+                                  "name": "AimFire",
+                                  "clipName": "AimFire",
+                                  "loop": false,
+                                  "speed": 1,
+                                  "isEntry": false,
+                                  "ikWeight": 0,
+                                  "triggers": [
+                                    {
+                                      "trigger": "AimFire",
+                                      "blendTime": 0.06
+                                    }
+                                  ],
+                                  "x": 700,
+                                  "y": 40
+                                },
+                                {
+                                  "name": "Reload",
+                                  "clipName": "Reload",
+                                  "loop": false,
+                                  "speed": 1,
+                                  "isEntry": false,
+                                  "ikWeight": 0,
+                                  "triggers": [
+                                    {
+                                      "trigger": "Reload",
+                                      "blendTime": 0.06
+                                    }
+                                  ],
+                                  "x": 900,
+                                  "y": 40
+                                }
+                              ],
+                              "transitions": [
+                                {
+                                  "from": "Equip",
+                                  "to": "Off",
+                                  "conditions": [],
+                                  "minDwell": 0,
+                                  "hasExitTime": true,
+                                  "exitTime": 0.902,
+                                  "blendTime": 0.18
+                                },
+                                {
+                                  "from": "Fire",
+                                  "to": "Off",
+                                  "conditions": [],
+                                  "minDwell": 0,
+                                  "hasExitTime": true,
+                                  "exitTime": 0.73,
+                                  "blendTime": 0.18
+                                },
+                                {
+                                  "from": "AimFire",
+                                  "to": "Off",
+                                  "conditions": [],
+                                  "minDwell": 0,
+                                  "hasExitTime": true,
+                                  "exitTime": 0.73,
+                                  "blendTime": 0.18
+                                },
+                                {
+                                  "from": "Reload",
+                                  "to": "Off",
+                                  "conditions": [],
+                                  "minDwell": 0,
+                                  "hasExitTime": true,
+                                  "exitTime": 0.961,
+                                  "blendTime": 0.18
+                                }
+                              ]
+                            }
+                          ],
+                          "events": [],
+                          "eventActions": [
+                            {
+                              "event": "shot",
+                              "actions": [
+                                {
+                                  "kind": "sound",
+                                  "target": "Sounds/ShotRifle"
+                                },
+                                {
+                                  "kind": "spawn",
+                                  "template": "Muzzle Flash",
+                                  "at": "Muzzle",
+                                  "rotation": "camera",
+                                  "follow": true
+                                }
+                              ]
+                            }
+                          ],
+                          "controllerId": "7f2f6f1ea94563fbeb4f016973053d46"
+                        },
+                        "ragdoll": null
+                      },
+                      {
+                        "name": "SAPS-12 Viewmodel",
+                        "type": "model",
+                        "position": [0, -1.6009999513626099, -0.02199999988079071],
+                        "rotation": [0, 0, 0],
+                        "scale": [1, 1, 1],
+                        "children": [
+                          {
+                            "name": "Muzzle",
+                            "type": "node",
+                            "position": [-0.09799999743700027, 1.4079999923706055, 0.875],
+                            "rotation": [0, 0, 0],
+                            "scale": [1, 1, 1],
+                            "children": [],
+                            "variables": {},
+                            "spawnOnStart": true
+                          }
+                        ],
+                        "variables": {
+                          "__modelId": {
+                            "type": "string",
+                            "value": "d14a508b1c5c7a3c0bc1a3e7eeabd157",
+                            "access": "public"
+                          },
+                          "__materialId": {
+                            "type": "string",
+                            "value": "b6f53e48187b425c8feb2e305d0c4e5e",
+                            "access": "public"
+                          },
+                          "__materialIds": {
+                            "type": "string",
+                            "value": "[\"b6f53e48187b425c8feb2e305d0c4e5e\",\"3a9e798f88941a388a8ac34d0946325b\",\"80477285c6bfb5318ba887d6969cd719\",\"db0bf88dfbeaf384c94ad77505f69138\"]",
+                            "access": "public"
+                          },
+                          "__modelBaseTRS": {
+                            "type": "string",
+                            "value": "[0,-1.6009999513626099,-0.02199999988079071,0,0,0,1,1,1]",
+                            "access": "public"
+                          }
+                        },
+                        "spawnOnStart": true,
+                        "motionBlur": "none",
+                        "viewmodel": true,
+                        "model": {
+                          "geometry": {
+                            "$geo": {
+                              "positions": {
+                                "h": "aef8c3a1f4fe0bcf009ea402cededa88df543c3abcf20d8fc066e044a7c1c7cb",
+                                "l": 524484
+                              },
+                              "normals": {
+                                "h": "7bbca378cab163f107b9e253adcfa43297e32d3a6c2e9c9865216ada390c8827",
+                                "l": 524484
+                              },
+                              "tangents": {
+                                "h": "47eb49f74fe02f1e7fa94d49d457c52b5447be530a0bbf69bbf4caaf3e08d95f",
+                                "l": 524484
+                              },
+                              "bitangents": {
+                                "h": "c3ce0fb6b54725742d5495c7811f632809f17996daefa938ca992aaaa0cb5969",
+                                "l": 524484
+                              },
+                              "texCoords": {
+                                "h": "6aa8fcbafb2f93a0cc6bcd3c2ec0a229d14c8862dd0d2ea3c7b19294ec91266a",
+                                "l": 349656
+                              },
+                              "indices": {
+                                "h": "c915b8481694a09011f593eb6f9dbeaf27ffd73ff78a8b2b1783293fdbad2277",
+                                "l": 330648,
+                                "bits": 16
+                              },
+                              "typed": true
+                            }
+                          },
+                          "material": {
+                            "type": "pbr",
+                            "baseColor": [1, 1, 1],
+                            "metallic": 1,
+                            "roughness": 1,
+                            "opacity": 1,
+                            "emissiveFactor": [0, 0, 0],
+                            "alphaCutoff": 0,
+                            "displacementScale": 0.05,
+                            "textures": {
+                              "baseColorTexture": "bfe26f23a11f08b30d55461597fe5db9",
+                              "metallicMap": "c8ebe6c572daca1039bcb5bdeddf809e",
+                              "roughnessMap": "c8ebe6c572daca1039bcb5bdeddf809e",
+                              "normalMap": "0bc7237186ef110c6e79c1099c119b9d",
+                              "occlusionMap": "c8ebe6c572daca1039bcb5bdeddf809e"
+                            },
+                            "config": {
+                              "side": "double",
+                              "wireframe": false,
+                              "transparent": false,
+                              "castShadow": false,
+                              "probeable": true
+                            }
+                          },
+                          "skin": {
+                            "name": "Armature",
+                            "joints": [
+                              {
+                                "nodeIndex": 10,
+                                "inverseBindMatrix": {
+                                  "$f32": {
+                                    "n": [1, 0, 0, 0, 0, -1.3435887069590535e-7, 1, 0, 0, -1, -1.3435887069590535e-7, 0, 0, 0, 0, 1]
+                                  },
+                                  "t": 1
+                                },
+                                "parentIndex": 9
+                              },
+                              {
+                                "nodeIndex": 14,
+                                "inverseBindMatrix": {
+                                  "$f32": {
+                                    "n": [1, 0, 0, 0, 0, -1.3435887069590535e-7, 1, 0, 0, -1, -1.3435887069590535e-7, 0, 0, 0, 0, 1]
+                                  },
+                                  "t": 1
+                                },
+                                "parentIndex": 10
+                              },
+                              {
+                                "nodeIndex": 15,
+                                "inverseBindMatrix": {
+                                  "$f32": {
+                                    "n": [1, 0, 0, 0, 0, 0.9683387875556946, -0.24963955581188202, 0, 0, 0.24963955581188202, 0.9683387875556946, 0, 0, -0.8663465976715088, 0.27456846833229065, 1]
+                                  },
+                                  "t": 1
+                                },
+                                "parentIndex": 14
+                              },
+                              {
+                                "nodeIndex": 22,
+                                "inverseBindMatrix": {
+                                  "$f32": {
+                                    "n": [1, 0, 0, 0, 0, 3.422854177870249e-8, 1, 0, 0, -1, 3.422854177870249e-8, 0, 0, 5.137898284601761e-8, -5.466785424346199e-8, 1]
+                                  },
+                                  "t": 1
+                                },
+                                "parentIndex": 15
+                              },
+                              {
+                                "nodeIndex": 24,
+                                "inverseBindMatrix": {
+                                  "$f32": {
+                                    "n": [1, 0, 0, 0, 0, -1.3435887069590535e-7, 1, 0, 0, -1, -1.3435887069590535e-7, 0, 0, -0.03252803534269333, -0.973684549331665, 1]
+                                  },
+                                  "t": 1
+                                },
+                                "parentIndex": 10
+                              },
+                              {
+                                "nodeIndex": 25,
+                                "inverseBindMatrix": {
+                                  "$f32": {
+                                    "n": [1, 0, 0, 0, 0, -1.3435887069590535e-7, 1, 0, 0, -1, -1.3435887069590535e-7, 0, 0, -0.03252802789211273, -0.973684549331665, 1]
+                                  },
+                                  "t": 1
+                                },
+                                "parentIndex": 24
+                              },
+                              {
+                                "nodeIndex": 48,
+                                "inverseBindMatrix": {
+                                  "$f32": {
+                                    "n": [1, 0, 0, 0, 0, -1.3435887069590535e-7, 1, 0, 0, -1, -1.3435887069590535e-7, 0, 0, -0.0003594008448999375, -1.1617541313171387, 1]
+                                  },
+                                  "t": 1
+                                },
+                                "parentIndex": 25
+                              },
+                              {
+                                "nodeIndex": 49,
+                                "inverseBindMatrix": {
+                                  "$f32": {
+                                    "n": [1, 0, 0, 0, 0, 0.9994938373565674, 0.03181259334087372, 0, 0, -0.03181259334087372, 0.9994938373565674, 0, 0, -1.161177396774292, -0.0365990474820137, 1]
+                                  },
+                                  "t": 1
+                                },
+                                "parentIndex": 48
+                              },
+                              {
+                                "nodeIndex": 50,
+                                "inverseBindMatrix": {
+                                  "$f32": {
+                                    "n": [1, 0, 0, 0, 0, 3.422854533141617e-8, 1.0000001192092896, 0, 0, -1.0000001192092896, 3.422854533141617e-8, 0, 0, -0.005301694385707378, -1.317026138305664, 1]
+                                  },
+                                  "t": 1
+                                },
+                                "parentIndex": 49
+                              },
+                              {
+                                "nodeIndex": 51,
+                                "inverseBindMatrix": {
+                                  "$f32": {
+                                    "n": [1, 0, 0, 0, 0, 0.999592125415802, 0.028559532016515732, 0, 0, -0.028559532016515732, 0.999592125415802, 0, 0, -1.3166402578353882, -0.032314151525497437, 1]
+                                  },
+                                  "t": 1
+                                },
+                                "parentIndex": 50
+                              },
+                              {
+                                "nodeIndex": 52,
+                                "inverseBindMatrix": {
+                                  "$f32": {
+                                    "n": [1, 0, 0, 0, 0, 0.999592125415802, 0.028559517115354538, 0, 0, -0.028559517115354538, 0.999592125415802, 0, 0, -1.3166402578353882, -0.032314132899045944, 1]
+                                  },
+                                  "t": 1
+                                },
+                                "parentIndex": 51
+                              },
+                              {
+                                "nodeIndex": 53,
+                                "inverseBindMatrix": {
+                                  "$f32": {
+                                    "n": [1, 0, 0, 0, 0, 0.999592125415802, 0.028559545055031776, 0, 0, -0.028559545055031776, 0.999592125415802, 0, 0, -1.3166402578353882, -0.03231416642665863, 1]
+                                  },
+                                  "t": 1
+                                },
+                                "parentIndex": 52
+                              },
+                              {
+                                "nodeIndex": 54,
+                                "inverseBindMatrix": {
+                                  "$f32": {
+                                    "n": [0.5070949196815491, 0.8618900179862976, 0.0005289007094688714, 0, -0.00007419051689794287, -0.0005700485198758543, 0.9999998807907104, 0, 0.8618902564048767, -0.5070949792861938, -0.00022514763986691833, 0, -0.061204783618450165, 0.017816411331295967, -1.4422807693481445, 1]
+                                  },
+                                  "t": 1
+                                },
+                                "parentIndex": 53
+                              },
+                              {
+                                "nodeIndex": 55,
+                                "inverseBindMatrix": {
+                                  "$f32": {
+                                    "n": [0.5070949196815491, 0.8618900179862976, 0.0005289007094688714, 0, -0.00007419051689794287, -0.0005700485198758543, 0.9999998807907104, 0, 0.8618902564048767, -0.5070949792861938, -0.00022514763986691833, 0, -0.06120479851961136, 0.01781642436981201, -1.442280650138855, 1]
+                                  },
+                                  "t": 1
+                                },
+                                "parentIndex": 54
+                              },
+                              {
+                                "nodeIndex": 56,
+                                "inverseBindMatrix": {
+                                  "$f32": {
+                                    "n": [-0.6921871900558472, 0.680149257183075, 0.24139970541000366, 0, -0.6873782873153687, -0.7232276797294617, 0.06672877073287964, 0, 0.21997249126434326, -0.11974411457777023, 0.9681288003921509, 0, 1.1054834127426147, 0.9075467586517334, -0.11414880305528641, 1]
+                                  },
+                                  "t": 1
+                                },
+                                "parentIndex": 54
+                              },
+                              {
+                                "nodeIndex": 57,
+                                "inverseBindMatrix": {
+                                  "$f32": {
+                                    "n": [-0.6921871900558472, 0.680149257183075, 0.24139970541000366, 0, -0.6873782873153687, -0.7232276201248169, 0.0667286217212677, 0, 0.2199723869562149, -0.11974422633647919, 0.9681288599967957, 0, 1.1054835319519043, 0.7631591558456421, -0.11414861679077148, 1]
+                                  },
+                                  "t": 1
+                                },
+                                "parentIndex": 56
+                              },
+                              {
+                                "nodeIndex": 58,
+                                "inverseBindMatrix": {
+                                  "$f32": {
+                                    "n": [-0.6921870708465576, 0.636422336101532, -0.34035807847976685, 0, -0.6873786449432373, -0.4376026391983032, 0.5796675682067871, 0, 0.21997177600860596, 0.6351932883262634, 0.7403660416603088, 0, 1.105483889579773, 0.33221235871315, -0.5343619585037231, 1]
+                                  },
+                                  "t": 1
+                                },
+                                "parentIndex": 57
+                              },
+                              {
+                                "nodeIndex": 59,
+                                "inverseBindMatrix": {
+                                  "$f32": {
+                                    "n": [-0.6921871304512024, 0.6364222168922424, -0.3403579592704773, 0, -0.687378466129303, -0.43760254979133606, 0.5796677470207214, 0, 0.2199719101190567, 0.6351933479309082, 0.7403659224510193, 0, 1.105483889579773, 0.21412494778633118, -0.5343621373176575, 1]
+                                  },
+                                  "t": 1
+                                },
+                                "parentIndex": 58
+                              },
+                              {
+                                "nodeIndex": 60,
+                                "inverseBindMatrix": {
+                                  "$f32": {
+                                    "n": [-0.705710768699646, 0.6449204683303833, -0.2933422327041626, 0, -0.6773098707199097, -0.49260851740837097, 0.5464320182800293, 0, 0.20790229737758636, 0.5843066573143005, 0.7844502925872803, 0, 1.10245680809021, 0.15740133821964264, -0.5259985327720642, 1]
+                                  },
+                                  "t": 1
+                                },
+                                "parentIndex": 59
+                              },
+                              {
+                                "nodeIndex": 61,
+                                "inverseBindMatrix": {
+                                  "$f32": {
+                                    "n": [0.47746777534484863, 0.531013011932373, -0.700035572052002, 0, -0.4783279299736023, -0.5112243294715881, -0.7140393257141113, 0, -0.73703932762146, 0.6757773160934448, 0.009905196726322174, 0, 0.35727566480636597, 0.19003720581531525, 1.1618539094924927, 1]
+                                  },
+                                  "t": 1
+                                },
+                                "parentIndex": 60
+                              },
+                              {
+                                "nodeIndex": 62,
+                                "inverseBindMatrix": {
+                                  "$f32": {
+                                    "n": [0.6777441501617432, 0.28828975558280945, -0.6764257550239563, 0, -0.2524907886981964, -0.7727512717247009, -0.5823262333869934, 0, -0.69058758020401, 0.5654594302177429, -0.45093709230422974, 0, -0.008106697350740433, 0.5514081120491028, 1.0861870050430298, 1]
+                                  },
+                                  "t": 1
+                                },
+                                "parentIndex": 61
+                              },
+                              {
+                                "nodeIndex": 63,
+                                "inverseBindMatrix": {
+                                  "$f32": {
+                                    "n": [0.6802951097488403, 0.1703464239835739, -0.7128678560256958, 0, -0.2648816406726837, -0.849738359451294, -0.4558314383029938, 0, -0.6834005117416382, 0.4989255368709564, -0.5329512357711792, 0, 0.0016815903363749385, 0.6727957725524902, 0.9941163063049316, 1]
+                                  },
+                                  "t": 1
+                                },
+                                "parentIndex": 62
+                              },
+                              {
+                                "nodeIndex": 64,
+                                "inverseBindMatrix": {
+                                  "$f32": {
+                                    "n": [0.6774765253067017, 0.020983874797821045, -0.7352449893951416, 0, -0.23559965193271637, -0.9407376050949097, -0.24393710494041443, 0, -0.6967914700508118, 0.33848512172698975, -0.6323837637901306, 0, -0.02324213832616806, 0.8613430857658386, 0.8154692053794861, 1]
+                                  },
+                                  "t": 1
+                                },
+                                "parentIndex": 63
+                              },
+                              {
+                                "nodeIndex": 65,
+                                "inverseBindMatrix": {
+                                  "$f32": {
+                                    "n": [0.6696135997772217, -0.031083010137081146, 0.7420589327812195, 0, 0.6025893092155457, -0.5613269209861755, -0.5672726631164551, 0, 0.4341701865196228, 0.8270102739334106, -0.3571418523788452, 0, -1.0589841604232788, 0.5124684572219849, 0.27096259593963623, 1]
+                                  },
+                                  "t": 1
+                                },
+                                "parentIndex": 61
+                              },
+                              {
+                                "nodeIndex": 66,
+                                "inverseBindMatrix": {
+                                  "$f32": {
+                                    "n": [0.6707799434661865, 0.13313724100589752, 0.7296085953712463, 0, 0.5967782139778137, -0.6809882521629333, -0.4243946373462677, 0, 0.4403521418571472, 0.7200899124145508, -0.5362467169761658, 0, -1.0545686483383179, 0.5200536847114563, 0.15866564214229584, 1]
+                                  },
+                                  "t": 1
+                                },
+                                "parentIndex": 65
+                              },
+                              {
+                                "nodeIndex": 67,
+                                "inverseBindMatrix": {
+                                  "$f32": {
+                                    "n": [0.6683390140533447, 0.1588691622018814, 0.7266935110092163, 0, 0.6081656813621521, -0.6792252659797668, -0.41083747148513794, 0, 0.4283192455768585, 0.7165287733078003, -0.5505715608596802, 0, -1.062721848487854, 0.47956597805023193, 0.1489635854959488, 1]
+                                  },
+                                  "t": 1
+                                },
+                                "parentIndex": 66
+                              },
+                              {
+                                "nodeIndex": 68,
+                                "inverseBindMatrix": {
+                                  "$f32": {
+                                    "n": [0.47746753692626953, 0.5310128927230835, -0.7000356912612915, 0, -0.478328138589859, -0.5112243294715881, -0.7140390872955322, 0, -0.7370392680168152, 0.6757772564888, 0.009905430488288403, 0, 0.3572760224342346, 0.19003726541996002, 1.1618536710739136, 1]
+                                  },
+                                  "t": 1
+                                },
+                                "parentIndex": 61
+                              },
+                              {
+                                "nodeIndex": 69,
+                                "inverseBindMatrix": {
+                                  "$f32": {
+                                    "n": [0.3574669361114502, 0.606616735458374, -0.7100939750671387, 0, -0.3950025737285614, -0.5907747149467468, -0.7035325169563293, 0, -0.8462802171707153, 0.5319785475730896, 0.02843279205262661, 0, 0.32787060737609863, 0.24428223073482513, 1.165278434753418, 1]
+                                  },
+                                  "t": 1
+                                },
+                                "parentIndex": 60
+                              },
+                              {
+                                "nodeIndex": 70,
+                                "inverseBindMatrix": {
+                                  "$f32": {
+                                    "n": [0.438738077878952, 0.337342768907547, -0.8328918814659119, 0, -0.263459712266922, -0.8378432393074036, -0.47812947630882263, 0, -0.8591262698173523, 0.42920705676078796, -0.2787175476551056, 0, 0.1427285075187683, 0.6144672632217407, 1.0454961061477661, 1]
+                                  },
+                                  "t": 1
+                                },
+                                "parentIndex": 69
+                              },
+                              {
+                                "nodeIndex": 71,
+                                "inverseBindMatrix": {
+                                  "$f32": {
+                                    "n": [0.4396723508834839, 0.1274690479040146, -0.8890668749809265, 0, -0.2701573967933655, -0.9252676367759705, -0.26626089215278625, 0, -0.8565647602081299, 0.3572555184364319, -0.3723779320716858, 0, 0.14851748943328857, 0.8001374006271362, 0.8809093832969666, 1]
+                                  },
+                                  "t": 1
+                                },
+                                "parentIndex": 70
+                              },
+                              {
+                                "nodeIndex": 72,
+                                "inverseBindMatrix": {
+                                  "$f32": {
+                                    "n": [0.4384986460208893, 0.025613127276301384, -0.8983667492866516, 0, -0.2536754906177521, -0.9554211497306824, -0.15106043219566345, 0, -0.8621876835823059, 0.29413342475891113, -0.41245344281196594, 0, 0.13396711647510529, 0.8754593729972839, 0.780027449131012, 1]
+                                  },
+                                  "t": 1
+                                },
+                                "parentIndex": 71
+                              },
+                              {
+                                "nodeIndex": 73,
+                                "inverseBindMatrix": {
+                                  "$f32": {
+                                    "n": [0.35746678709983826, 0.606616735458374, -0.7100940942764282, 0, -0.3950030207633972, -0.590774655342102, -0.7035325169563293, 0, -0.8462801575660706, 0.5319787859916687, 0.028433071449398994, 0, 0.3278711438179016, 0.24428220093250275, 1.1652785539627075, 1]
+                                  },
+                                  "t": 1
+                                },
+                                "parentIndex": 69
+                              },
+                              {
+                                "nodeIndex": 74,
+                                "inverseBindMatrix": {
+                                  "$f32": {
+                                    "n": [0.2425851672887802, 0.6481525301933289, -0.7218384146690369, 0, -0.33941370248794556, -0.6403353214263916, -0.6890347003936768, 0, -0.9088183045387268, 0.4121514558792114, 0.06465605646371841, 0, 0.3196151852607727, 0.28948163986206055, 1.158579707145691, 1]
+                                  },
+                                  "t": 1
+                                },
+                                "parentIndex": 60
+                              },
+                              {
+                                "nodeIndex": 75,
+                                "inverseBindMatrix": {
+                                  "$f32": {
+                                    "n": [0.5367292165756226, 0.18741528689861298, -0.8226768970489502, 0, -0.1446811705827713, -0.9401352405548096, -0.30856627225875854, 0, -0.8312575221061707, 0.28464239835739136, -0.4774826467037201, 0, -0.07466766238212585, 0.8395966291427612, 0.88621985912323, 1]
+                                  },
+                                  "t": 1
+                                },
+                                "parentIndex": 74
+                              },
+                              {
+                                "nodeIndex": 76,
+                                "inverseBindMatrix": {
+                                  "$f32": {
+                                    "n": [0.536296010017395, 0.06282320618629456, -0.8416886329650879, 0, -0.1377430558204651, -0.9773421883583069, -0.16071359813213348, 0, -0.8327144384384155, 0.20212683081626892, -0.515491247177124, 0, -0.08124092221260071, 0.9252447485923767, 0.7531296014785767, 1]
+                                  },
+                                  "t": 1
+                                },
+                                "parentIndex": 75
+                              },
+                              {
+                                "nodeIndex": 77,
+                                "inverseBindMatrix": {
+                                  "$f32": {
+                                    "n": [0.5341193675994873, -0.21756280958652496, -0.8169350624084473, 0, -0.15656542778015137, -0.9750593304634094, 0.15730997920036316, 0, -0.8307850360870361, 0.043881479650735855, -0.5548609495162964, 0, -0.06159515678882599, 1.0906267166137695, 0.4296048581600189, 1]
+                                  },
+                                  "t": 1
+                                },
+                                "parentIndex": 76
+                              },
+                              {
+                                "nodeIndex": 78,
+                                "inverseBindMatrix": {
+                                  "$f32": {
+                                    "n": [0.24258506298065186, 0.6481525897979736, -0.7218384146690369, 0, -0.3394138216972351, -0.6403352618217468, -0.6890347003936768, 0, -0.9088183045387268, 0.41215142607688904, 0.06465624272823334, 0, 0.31961536407470703, 0.2894815504550934, 1.158579707145691, 1]
+                                  },
+                                  "t": 1
+                                },
+                                "parentIndex": 74
+                              },
+                              {
+                                "nodeIndex": 79,
+                                "inverseBindMatrix": {
+                                  "$f32": {
+                                    "n": [0.16776476800441742, 0.6725305914878845, -0.7208034992218018, 0, -0.25175929069519043, -0.677693784236908, -0.6909042000770569, 0, -0.9531381726264954, 0.29737842082977295, 0.05562257766723633, 0, 0.25269949436187744, 0.3335866630077362, 1.1562796831130981, 1]
+                                  },
+                                  "t": 1
+                                },
+                                "parentIndex": 60
+                              },
+                              {
+                                "nodeIndex": 80,
+                                "inverseBindMatrix": {
+                                  "$f32": {
+                                    "n": [0.4972403347492218, 0.15681707859039307, -0.853323221206665, 0, -0.07539310306310654, -0.9719998240470886, -0.2225588858127594, 0, -0.8643309473991394, 0.17499993741512299, -0.4714946746826172, 0, -0.14191870391368866, 0.8920431733131409, 0.8016095757484436, 1]
+                                  },
+                                  "t": 1
+                                },
+                                "parentIndex": 79
+                              },
+                              {
+                                "nodeIndex": 81,
+                                "inverseBindMatrix": {
+                                  "$f32": {
+                                    "n": [0.49657732248306274, 0.08131397515535355, -0.8641753196716309, 0, -0.06712228059768677, -0.9890236258506775, -0.13163168728351593, 0, -0.8653932809829712, 0.12337072938680649, -0.48566874861717224, 0, -0.1497555524110794, 0.9362522959709167, 0.7179160118103027, 1]
+                                  },
+                                  "t": 1
+                                },
+                                "parentIndex": 80
+                              },
+                              {
+                                "nodeIndex": 82,
+                                "inverseBindMatrix": {
+                                  "$f32": {
+                                    "n": [0.4962707459926605, -0.08015745878219604, -0.8644594550132751, 0, -0.08792467415332794, -0.995249330997467, 0.04180904105305672, 0, -0.8637040257453918, 0.05525871366262436, -0.5009608864784241, 0, -0.12914294004440308, 1.029500961303711, 0.5479480028152466, 1]
+                                  },
+                                  "t": 1
+                                },
+                                "parentIndex": 81
+                              },
+                              {
+                                "nodeIndex": 83,
+                                "inverseBindMatrix": {
+                                  "$f32": {
+                                    "n": [0.16776485741138458, 0.672530472278595, -0.7208034992218018, 0, -0.2517590820789337, -0.6776937246322632, -0.6909040212631226, 0, -0.9531381130218506, 0.2973782420158386, 0.055622510612010956, 0, 0.25269922614097595, 0.3335866630077362, 1.1562796831130981, 1]
+                                  },
+                                  "t": 1
+                                },
+                                "parentIndex": 79
+                              },
+                              {
+                                "nodeIndex": 84,
+                                "inverseBindMatrix": {
+                                  "$f32": {
+                                    "n": [0.5070949196815491, -0.8618900179862976, -0.0005289007094688714, 0, 0.00007419051689794287, -0.0005700485198758543, 0.9999998807907104, 0, -0.8618902564048767, -0.5070949792861938, -0.00022514763986691833, 0, 0.061204783618450165, 0.017816411331295967, -1.4422807693481445, 1]
+                                  },
+                                  "t": 1
+                                },
+                                "parentIndex": 53
+                              },
+                              {
+                                "nodeIndex": 85,
+                                "inverseBindMatrix": {
+                                  "$f32": {
+                                    "n": [0.5070949196815491, -0.8618900179862976, -0.0005289007094688714, 0, 0.00007419051689794287, -0.0005700485198758543, 0.9999998807907104, 0, -0.8618902564048767, -0.5070949792861938, -0.00022514763986691833, 0, 0.06120479851961136, 0.01781642436981201, -1.442280650138855, 1]
+                                  },
+                                  "t": 1
+                                },
+                                "parentIndex": 84
+                              },
+                              {
+                                "nodeIndex": 86,
+                                "inverseBindMatrix": {
+                                  "$f32": {
+                                    "n": [-0.6921871900558472, -0.680149257183075, -0.24139970541000366, 0, 0.6873782873153687, -0.7232276797294617, 0.06672877073287964, 0, -0.21997249126434326, -0.11974411457777023, 0.9681288003921509, 0, -1.1054834127426147, 0.9075467586517334, -0.11414880305528641, 1]
+                                  },
+                                  "t": 1
+                                },
+                                "parentIndex": 84
+                              },
+                              {
+                                "nodeIndex": 87,
+                                "inverseBindMatrix": {
+                                  "$f32": {
+                                    "n": [-0.6921871900558472, -0.680149257183075, -0.24139970541000366, 0, 0.6873782873153687, -0.7232276201248169, 0.0667286217212677, 0, -0.2199723869562149, -0.11974422633647919, 0.9681288599967957, 0, -1.1054835319519043, 0.7631591558456421, -0.11414861679077148, 1]
+                                  },
+                                  "t": 1
+                                },
+                                "parentIndex": 86
+                              },
+                              {
+                                "nodeIndex": 88,
+                                "inverseBindMatrix": {
+                                  "$f32": {
+                                    "n": [-0.6921870708465576, -0.636422336101532, 0.34035807847976685, 0, 0.6873786449432373, -0.4376026391983032, 0.5796675682067871, 0, -0.21997177600860596, 0.6351932883262634, 0.7403660416603088, 0, -1.105483889579773, 0.33221235871315, -0.5343619585037231, 1]
+                                  },
+                                  "t": 1
+                                },
+                                "parentIndex": 87
+                              },
+                              {
+                                "nodeIndex": 89,
+                                "inverseBindMatrix": {
+                                  "$f32": {
+                                    "n": [-0.6921871304512024, -0.6364222168922424, 0.3403579592704773, 0, 0.687378466129303, -0.43760254979133606, 0.5796677470207214, 0, -0.2199719101190567, 0.6351933479309082, 0.7403659224510193, 0, -1.105483889579773, 0.21412494778633118, -0.5343621373176575, 1]
+                                  },
+                                  "t": 1
+                                },
+                                "parentIndex": 88
+                              },
+                              {
+                                "nodeIndex": 90,
+                                "inverseBindMatrix": {
+                                  "$f32": {
+                                    "n": [-0.705710768699646, -0.6449204683303833, 0.2933422327041626, 0, 0.6773098707199097, -0.49260851740837097, 0.5464320182800293, 0, -0.20790229737758636, 0.5843066573143005, 0.7844502925872803, 0, -1.10245680809021, 0.15740133821964264, -0.5259985327720642, 1]
+                                  },
+                                  "t": 1
+                                },
+                                "parentIndex": 89
+                              },
+                              {
+                                "nodeIndex": 91,
+                                "inverseBindMatrix": {
+                                  "$f32": {
+                                    "n": [0.47746777534484863, -0.531013011932373, 0.700035572052002, 0, 0.4783279299736023, -0.5112243294715881, -0.7140393257141113, 0, 0.73703932762146, 0.6757773160934448, 0.009905196726322174, 0, -0.35727566480636597, 0.19003720581531525, 1.1618539094924927, 1]
+                                  },
+                                  "t": 1
+                                },
+                                "parentIndex": 90
+                              },
+                              {
+                                "nodeIndex": 92,
+                                "inverseBindMatrix": {
+                                  "$f32": {
+                                    "n": [0.6777441501617432, -0.28828975558280945, 0.6764257550239563, 0, 0.2524907886981964, -0.7727512717247009, -0.5823262333869934, 0, 0.69058758020401, 0.5654594302177429, -0.45093709230422974, 0, 0.008106697350740433, 0.5514081120491028, 1.0861870050430298, 1]
+                                  },
+                                  "t": 1
+                                },
+                                "parentIndex": 91
+                              },
+                              {
+                                "nodeIndex": 93,
+                                "inverseBindMatrix": {
+                                  "$f32": {
+                                    "n": [0.680294930934906, -0.1703464835882187, 0.7128680348396301, 0, 0.26488175988197327, -0.849738359451294, -0.4558314383029938, 0, 0.6834006309509277, 0.4989255666732788, -0.5329511165618896, 0, -0.001681852387264371, 0.6727957129478455, 0.9941163659095764, 1]
+                                  },
+                                  "t": 1
+                                },
+                                "parentIndex": 92
+                              },
+                              {
+                                "nodeIndex": 94,
+                                "inverseBindMatrix": {
+                                  "$f32": {
+                                    "n": [0.6774765253067017, -0.020983874797821045, 0.7352449893951416, 0, 0.2355996072292328, -0.9407377243041992, -0.24393707513809204, 0, 0.6967914700508118, 0.33848509192466736, -0.6323838829994202, 0, 0.023242158815264702, 0.8613432049751282, 0.8154690861701965, 1]
+                                  },
+                                  "t": 1
+                                },
+                                "parentIndex": 93
+                              },
+                              {
+                                "nodeIndex": 95,
+                                "inverseBindMatrix": {
+                                  "$f32": {
+                                    "n": [0.6696135997772217, 0.031083010137081146, -0.7420589327812195, 0, -0.6025893092155457, -0.5613269209861755, -0.5672726631164551, 0, -0.4341701865196228, 0.8270102739334106, -0.3571418523788452, 0, 1.0589841604232788, 0.5124684572219849, 0.27096259593963623, 1]
+                                  },
+                                  "t": 1
+                                },
+                                "parentIndex": 91
+                              },
+                              {
+                                "nodeIndex": 96,
+                                "inverseBindMatrix": {
+                                  "$f32": {
+                                    "n": [0.6707799434661865, -0.13313724100589752, -0.7296085953712463, 0, -0.5967782139778137, -0.6809882521629333, -0.4243946373462677, 0, -0.4403521418571472, 0.7200899124145508, -0.5362467169761658, 0, 1.0545686483383179, 0.5200536847114563, 0.15866564214229584, 1]
+                                  },
+                                  "t": 1
+                                },
+                                "parentIndex": 95
+                              },
+                              {
+                                "nodeIndex": 97,
+                                "inverseBindMatrix": {
+                                  "$f32": {
+                                    "n": [0.6683390140533447, -0.1588691622018814, -0.7266935110092163, 0, -0.6081656813621521, -0.6792252659797668, -0.41083747148513794, 0, -0.4283192455768585, 0.7165287733078003, -0.5505715608596802, 0, 1.062721848487854, 0.47956597805023193, 0.1489635854959488, 1]
+                                  },
+                                  "t": 1
+                                },
+                                "parentIndex": 96
+                              },
+                              {
+                                "nodeIndex": 98,
+                                "inverseBindMatrix": {
+                                  "$f32": {
+                                    "n": [0.47746753692626953, -0.5310128927230835, 0.7000356912612915, 0, 0.478328138589859, -0.5112243294715881, -0.7140390872955322, 0, 0.7370392680168152, 0.6757772564888, 0.009905430488288403, 0, -0.3572760224342346, 0.19003726541996002, 1.1618536710739136, 1]
+                                  },
+                                  "t": 1
+                                },
+                                "parentIndex": 91
+                              },
+                              {
+                                "nodeIndex": 99,
+                                "inverseBindMatrix": {
+                                  "$f32": {
+                                    "n": [0.3574669361114502, -0.606616735458374, 0.7100939750671387, 0, 0.3950025737285614, -0.5907747149467468, -0.7035325169563293, 0, 0.8462802171707153, 0.5319785475730896, 0.02843279205262661, 0, -0.32787060737609863, 0.24428223073482513, 1.165278434753418, 1]
+                                  },
+                                  "t": 1
+                                },
+                                "parentIndex": 90
+                              },
+                              {
+                                "nodeIndex": 100,
+                                "inverseBindMatrix": {
+                                  "$f32": {
+                                    "n": [0.438738077878952, -0.337342768907547, 0.8328918814659119, 0, 0.263459712266922, -0.8378432393074036, -0.47812947630882263, 0, 0.8591262698173523, 0.42920705676078796, -0.2787175476551056, 0, -0.1427285075187683, 0.6144672632217407, 1.0454961061477661, 1]
+                                  },
+                                  "t": 1
+                                },
+                                "parentIndex": 99
+                              },
+                              {
+                                "nodeIndex": 101,
+                                "inverseBindMatrix": {
+                                  "$f32": {
+                                    "n": [0.4396724998950958, -0.127469003200531, 0.889066755771637, 0, 0.2701573371887207, -0.9252675771713257, -0.26626086235046387, 0, 0.8565647006034851, 0.3572555184364319, -0.37237802147865295, 0, -0.14851734042167664, 0.8001373410224915, 0.8809093236923218, 1]
+                                  },
+                                  "t": 1
+                                },
+                                "parentIndex": 100
+                              },
+                              {
+                                "nodeIndex": 102,
+                                "inverseBindMatrix": {
+                                  "$f32": {
+                                    "n": [0.438498854637146, -0.025613099336624146, 0.8983666896820068, 0, 0.2536754310131073, -0.9554210305213928, -0.15106044709682465, 0, 0.8621876239776611, 0.29413339495658875, -0.4124535918235779, 0, -0.13396695256233215, 0.8754592537879944, 0.7800275087356567, 1]
+                                  },
+                                  "t": 1
+                                },
+                                "parentIndex": 101
+                              },
+                              {
+                                "nodeIndex": 103,
+                                "inverseBindMatrix": {
+                                  "$f32": {
+                                    "n": [0.35746678709983826, -0.606616735458374, 0.7100940942764282, 0, 0.3950030207633972, -0.590774655342102, -0.7035325169563293, 0, 0.8462801575660706, 0.5319787859916687, 0.028433071449398994, 0, -0.3278711438179016, 0.24428220093250275, 1.1652785539627075, 1]
+                                  },
+                                  "t": 1
+                                },
+                                "parentIndex": 99
+                              },
+                              {
+                                "nodeIndex": 104,
+                                "inverseBindMatrix": {
+                                  "$f32": {
+                                    "n": [0.2425851672887802, -0.6481525301933289, 0.7218384146690369, 0, 0.33941370248794556, -0.6403353214263916, -0.6890347003936768, 0, 0.9088183045387268, 0.4121514558792114, 0.06465605646371841, 0, -0.3196151852607727, 0.28948163986206055, 1.158579707145691, 1]
+                                  },
+                                  "t": 1
+                                },
+                                "parentIndex": 90
+                              },
+                              {
+                                "nodeIndex": 105,
+                                "inverseBindMatrix": {
+                                  "$f32": {
+                                    "n": [0.5367292165756226, -0.18741528689861298, 0.8226768970489502, 0, 0.1446811705827713, -0.9401352405548096, -0.30856627225875854, 0, 0.8312575221061707, 0.28464239835739136, -0.4774826467037201, 0, 0.07466766238212585, 0.8395966291427612, 0.88621985912323, 1]
+                                  },
+                                  "t": 1
+                                },
+                                "parentIndex": 104
+                              },
+                              {
+                                "nodeIndex": 106,
+                                "inverseBindMatrix": {
+                                  "$f32": {
+                                    "n": [0.536296010017395, -0.06282320618629456, 0.8416886329650879, 0, 0.1377430558204651, -0.9773421883583069, -0.16071359813213348, 0, 0.8327144384384155, 0.20212683081626892, -0.515491247177124, 0, 0.08124092221260071, 0.9252447485923767, 0.7531296014785767, 1]
+                                  },
+                                  "t": 1
+                                },
+                                "parentIndex": 105
+                              },
+                              {
+                                "nodeIndex": 107,
+                                "inverseBindMatrix": {
+                                  "$f32": {
+                                    "n": [0.5341193675994873, 0.21756280958652496, 0.8169350624084473, 0, 0.15656542778015137, -0.9750593304634094, 0.15730997920036316, 0, 0.8307850360870361, 0.043881479650735855, -0.5548609495162964, 0, 0.06159515678882599, 1.0906267166137695, 0.4296048581600189, 1]
+                                  },
+                                  "t": 1
+                                },
+                                "parentIndex": 106
+                              },
+                              {
+                                "nodeIndex": 108,
+                                "inverseBindMatrix": {
+                                  "$f32": {
+                                    "n": [0.24258506298065186, -0.6481525897979736, 0.7218384146690369, 0, 0.3394138216972351, -0.6403352618217468, -0.6890347003936768, 0, 0.9088183045387268, 0.41215142607688904, 0.06465624272823334, 0, -0.31961536407470703, 0.2894815504550934, 1.158579707145691, 1]
+                                  },
+                                  "t": 1
+                                },
+                                "parentIndex": 104
+                              },
+                              {
+                                "nodeIndex": 109,
+                                "inverseBindMatrix": {
+                                  "$f32": {
+                                    "n": [0.16776476800441742, -0.6725305914878845, 0.7208034992218018, 0, 0.25175929069519043, -0.677693784236908, -0.6909042000770569, 0, 0.9531381726264954, 0.29737842082977295, 0.05562257766723633, 0, -0.25269949436187744, 0.3335866630077362, 1.1562796831130981, 1]
+                                  },
+                                  "t": 1
+                                },
+                                "parentIndex": 90
+                              },
+                              {
+                                "nodeIndex": 110,
+                                "inverseBindMatrix": {
+                                  "$f32": {
+                                    "n": [0.4972403347492218, -0.15681707859039307, 0.853323221206665, 0, 0.07539310306310654, -0.9719998240470886, -0.2225588858127594, 0, 0.8643309473991394, 0.17499993741512299, -0.4714946746826172, 0, 0.14191870391368866, 0.8920431733131409, 0.8016095757484436, 1]
+                                  },
+                                  "t": 1
+                                },
+                                "parentIndex": 109
+                              },
+                              {
+                                "nodeIndex": 111,
+                                "inverseBindMatrix": {
+                                  "$f32": {
+                                    "n": [0.49657732248306274, -0.08131397515535355, 0.8641753196716309, 0, 0.06712228059768677, -0.9890236258506775, -0.13163168728351593, 0, 0.8653932809829712, 0.12337072938680649, -0.48566874861717224, 0, 0.1497555524110794, 0.9362522959709167, 0.7179160118103027, 1]
+                                  },
+                                  "t": 1
+                                },
+                                "parentIndex": 110
+                              },
+                              {
+                                "nodeIndex": 112,
+                                "inverseBindMatrix": {
+                                  "$f32": {
+                                    "n": [0.4962707459926605, 0.08015745878219604, 0.8644594550132751, 0, 0.08792467415332794, -0.995249330997467, 0.04180904105305672, 0, 0.8637040257453918, 0.05525871366262436, -0.5009608864784241, 0, 0.12914294004440308, 1.029500961303711, 0.5479480028152466, 1]
+                                  },
+                                  "t": 1
+                                },
+                                "parentIndex": 111
+                              },
+                              {
+                                "nodeIndex": 113,
+                                "inverseBindMatrix": {
+                                  "$f32": {
+                                    "n": [0.16776485741138458, -0.672530472278595, 0.7208034992218018, 0, 0.2517590820789337, -0.6776937246322632, -0.6909040212631226, 0, 0.9531381130218506, 0.2973782420158386, 0.055622510612010956, 0, -0.25269922614097595, 0.3335866630077362, 1.1562796831130981, 1]
+                                  },
+                                  "t": 1
+                                },
+                                "parentIndex": 109
+                              },
+                              {
+                                "nodeIndex": 114,
+                                "inverseBindMatrix": {
+                                  "$f32": {
+                                    "n": [-1, -1.7693882383568171e-12, 1.510573781615676e-7, 0, 1.510573781615676e-7, -7.085780566740141e-7, 1, 0, -1.6675227821824623e-12, 1, 6.401211862794298e-7, 0, 0.1063898578286171, 0.043581437319517136, -1.3115448951721191, 1]
+                                  },
+                                  "t": 1
+                                },
+                                "parentIndex": 53
+                              },
+                              {
+                                "nodeIndex": 115,
+                                "inverseBindMatrix": {
+                                  "$f32": {
+                                    "n": [-0.9999998807907104, -1.760336776519822e-12, 1.510573639507129e-7, 0, 1.510573639507129e-7, -5.399906513048336e-7, 1, 0, -1.6712044074995713e-12, 1, 6.40121129436011e-7, 0, 0.1063898429274559, 0.043581243604421616, -1.3115447759628296, 1]
+                                  },
+                                  "t": 1
+                                },
+                                "parentIndex": 114
+                              },
+                              {
+                                "nodeIndex": 116,
+                                "inverseBindMatrix": {
+                                  "$f32": {
+                                    "n": [-1, -1.7693882383568171e-12, 1.510573781615676e-7, 0, 1.510573781615676e-7, -7.085780566740141e-7, 1, 0, -1.6675227821824623e-12, 1, 6.401211862794298e-7, 0, -0.10639025270938873, 0.043581437319517136, -1.3115447759628296, 1]
+                                  },
+                                  "t": 1
+                                },
+                                "parentIndex": 53
+                              },
+                              {
+                                "nodeIndex": 117,
+                                "inverseBindMatrix": {
+                                  "$f32": {
+                                    "n": [-0.9999998807907104, -1.760336776519822e-12, 1.510573639507129e-7, 0, 1.510573639507129e-7, -5.399906513048336e-7, 1, 0, -1.6712044074995713e-12, 1, 6.40121129436011e-7, 0, -0.10639023780822754, 0.043581243604421616, -1.3115447759628296, 1]
+                                  },
+                                  "t": 1
+                                },
+                                "parentIndex": 116
+                              },
+                              {
+                                "nodeIndex": 125,
+                                "inverseBindMatrix": {
+                                  "$f32": {
+                                    "n": [1, 4.788619722972953e-9, 7.659771483758959e-8, 0, 7.659771483758959e-8, -3.029462618542311e-7, -1, 0, -4.788593077620362e-9, 1, -3.029462618542311e-7, 0, -3.941399734120081e-15, -5.137896863516289e-8, 5.4667868454316704e-8, 1]
+                                  },
+                                  "t": 1
+                                },
+                                "parentIndex": 22
+                              },
+                              {
+                                "nodeIndex": 126,
+                                "inverseBindMatrix": {
+                                  "$f32": {
+                                    "n": [1, 4.788567764535401e-9, -1.618208642639729e-7, 0, -1.618208642639729e-7, -3.029462618542311e-7, -1, 0, -4.788624607954262e-9, 1, -3.029462618542311e-7, 0, 9.092433667686872e-15, -5.137896863516289e-8, 5.4667868454316704e-8, 1]
+                                  },
+                                  "t": 1
+                                },
+                                "parentIndex": 125
+                              },
+                              {
+                                "nodeIndex": 127,
+                                "inverseBindMatrix": {
+                                  "$f32": {
+                                    "n": [1, 4.788567764535401e-9, -1.618208642639729e-7, 0, -1.618208642639729e-7, -3.029462618542311e-7, -1, 0, -4.788624607954262e-9, 1, -3.029462618542311e-7, 0, 4.261426767016019e-10, 0.1685582846403122, 0.0028221788816154003, 1]
+                                  },
+                                  "t": 1
+                                },
+                                "parentIndex": 126
+                              },
+                              {
+                                "nodeIndex": 128,
+                                "inverseBindMatrix": {
+                                  "$f32": {
+                                    "n": [1, 4.788567764535401e-9, -1.618208642639729e-7, 0, -1.618208642639729e-7, -3.029462618542311e-7, -1, 0, -4.788624607954262e-9, 1, -3.029462618542311e-7, 0, 4.261426767016019e-10, 0.1685582846403122, 0.0028221788816154003, 1]
+                                  },
+                                  "t": 1
+                                },
+                                "parentIndex": 127
+                              },
+                              {
+                                "nodeIndex": 129,
+                                "inverseBindMatrix": {
+                                  "$f32": {
+                                    "n": [1, 4.788567764535401e-9, -1.618208642639729e-7, 0, -1.618208642639729e-7, -3.029462618542311e-7, -1, 0, -4.788624607954262e-9, 1, -3.029462618542311e-7, 0, 1.4360046016333693e-14, 0.2797018587589264, 3.821360294864462e-8, 1]
+                                  },
+                                  "t": 1
+                                },
+                                "parentIndex": 126
+                              },
+                              {
+                                "nodeIndex": 130,
+                                "inverseBindMatrix": {
+                                  "$f32": {
+                                    "n": [1, 4.788567764535401e-9, -1.618208642639729e-7, 0, -1.618208642639729e-7, -3.029462618542311e-7, -1, 0, -4.788624607954262e-9, 1, -3.029462618542311e-7, 0, 1.4360046016333693e-14, 0.2797018587589264, 3.821360294864462e-8, 1]
+                                  },
+                                  "t": 1
+                                },
+                                "parentIndex": 129
+                              },
+                              {
+                                "nodeIndex": 131,
+                                "inverseBindMatrix": {
+                                  "$f32": {
+                                    "n": [1, 4.788567764535401e-9, -1.618208642639729e-7, 0, -1.618208642639729e-7, -3.029462618542311e-7, -1, 0, -4.788624607954262e-9, 1, -3.029462618542311e-7, 0, -2.175581048646791e-9, -0.08977467566728592, -0.014408211223781109, 1]
+                                  },
+                                  "t": 1
+                                },
+                                "parentIndex": 126
+                              },
+                              {
+                                "nodeIndex": 132,
+                                "inverseBindMatrix": {
+                                  "$f32": {
+                                    "n": [1, 4.788567764535401e-9, -1.618208642639729e-7, 0, -1.618208642639729e-7, -3.029462618542311e-7, -1, 0, -4.788624607954262e-9, 1, -3.029462618542311e-7, 0, -2.175581048646791e-9, -0.08977467566728592, -0.014408211223781109, 1]
+                                  },
+                                  "t": 1
+                                },
+                                "parentIndex": 131
+                              },
+                              {
+                                "nodeIndex": 133,
+                                "inverseBindMatrix": {
+                                  "$f32": {
+                                    "n": [1, 4.7885744258735485e-9, -1.6182087847482762e-7, 0, -1.6182087847482762e-7, -3.0294629027594056e-7, -1, 0, -4.788617946616114e-9, 1, -3.0294629027594056e-7, 0, 7.140410041017731e-9, 0.2028241753578186, 0.04728874936699867, 1]
+                                  },
+                                  "t": 1
+                                },
+                                "parentIndex": 132
+                              },
+                              {
+                                "nodeIndex": 134,
+                                "inverseBindMatrix": {
+                                  "$f32": {
+                                    "n": [1, 4.788567764535401e-9, -1.618208642639729e-7, 0, -1.618208642639729e-7, -3.029462618542311e-7, -1, 0, -4.788624607954262e-9, 1, -3.029462618542311e-7, 0, 7.140408264660891e-9, 0.2028241902589798, 0.04728874936699867, 1]
+                                  },
+                                  "t": 1
+                                },
+                                "parentIndex": 133
+                              },
+                              {
+                                "nodeIndex": 135,
+                                "inverseBindMatrix": {
+                                  "$f32": {
+                                    "n": [1, 4.788619722972953e-9, 7.659771483758959e-8, 0, 7.659771483758959e-8, -3.029462618542311e-7, -1, 0, -4.788593077620362e-9, 1, -3.029462618542311e-7, 0, -1.472073019037623e-9, 0.06326822936534882, 0.016838550567626953, 1]
+                                  },
+                                  "t": 1
+                                },
+                                "parentIndex": 125
+                              },
+                              {
+                                "nodeIndex": 136,
+                                "inverseBindMatrix": {
+                                  "$f32": {
+                                    "n": [1, 4.788567764535401e-9, -1.618208642639729e-7, 0, -1.618208642639729e-7, -3.029462618542311e-7, -1, 0, -4.788624607954262e-9, 1, -3.029462618542311e-7, 0, 2.5425528349387605e-9, 0.06326822191476822, 0.016838550567626953, 1]
+                                  },
+                                  "t": 1
+                                },
+                                "parentIndex": 135
+                              }
+                            ],
+                            "nodeParents": [
+                              [1, 0],
+                              [2, 1],
+                              [3, 2],
+                              [4, 3],
+                              [6, 3],
+                              [7, 3],
+                              [8, 3],
+                              [119, 3],
+                              [5, 4],
+                              [9, 8],
+                              [10, 9],
+                              [12, 9],
+                              [13, 9],
+                              [11, 9],
+                              [14, 10],
+                              [24, 10],
+                              [118, 10],
+                              [15, 14],
+                              [23, 14],
+                              [16, 15],
+                              [22, 15],
+                              [17, 16],
+                              [18, 17],
+                              [19, 18],
+                              [20, 19],
+                              [21, 20],
+                              [25, 24],
+                              [26, 25],
+                              [48, 25],
+                              [27, 26],
+                              [28, 27],
+                              [29, 28],
+                              [30, 29],
+                              [31, 30],
+                              [32, 31],
+                              [34, 31],
+                              [36, 31],
+                              [42, 31],
+                              [33, 32],
+                              [35, 34],
+                              [37, 36],
+                              [38, 37],
+                              [39, 38],
+                              [40, 39],
+                              [41, 40],
+                              [43, 42],
+                              [44, 43],
+                              [45, 44],
+                              [46, 45],
+                              [47, 46],
+                              [49, 48],
+                              [50, 49],
+                              [51, 50],
+                              [52, 51],
+                              [53, 52],
+                              [54, 53],
+                              [84, 53],
+                              [114, 53],
+                              [116, 53],
+                              [55, 54],
+                              [56, 54],
+                              [57, 56],
+                              [58, 57],
+                              [59, 58],
+                              [60, 59],
+                              [61, 60],
+                              [69, 60],
+                              [74, 60],
+                              [79, 60],
+                              [62, 61],
+                              [65, 61],
+                              [68, 61],
+                              [63, 62],
+                              [64, 63],
+                              [66, 65],
+                              [67, 66],
+                              [70, 69],
+                              [73, 69],
+                              [71, 70],
+                              [72, 71],
+                              [75, 74],
+                              [78, 74],
+                              [76, 75],
+                              [77, 76],
+                              [80, 79],
+                              [83, 79],
+                              [81, 80],
+                              [82, 81],
+                              [85, 84],
+                              [86, 84],
+                              [87, 86],
+                              [88, 87],
+                              [89, 88],
+                              [90, 89],
+                              [91, 90],
+                              [99, 90],
+                              [104, 90],
+                              [109, 90],
+                              [92, 91],
+                              [95, 91],
+                              [98, 91],
+                              [93, 92],
+                              [94, 93],
+                              [96, 95],
+                              [97, 96],
+                              [100, 99],
+                              [103, 99],
+                              [101, 100],
+                              [102, 101],
+                              [105, 104],
+                              [108, 104],
+                              [106, 105],
+                              [107, 106],
+                              [110, 109],
+                              [113, 109],
+                              [111, 110],
+                              [112, 111],
+                              [115, 114],
+                              [117, 116],
+                              [120, 119],
+                              [121, 120],
+                              [123, 120],
+                              [124, 120],
+                              [122, 120],
+                              [125, 22],
+                              [126, 125],
+                              [135, 125],
+                              [127, 126],
+                              [129, 126],
+                              [131, 126],
+                              [128, 127],
+                              [130, 129],
+                              [132, 131],
+                              [133, 132],
+                              [134, 133],
+                              [136, 135]
+                            ],
+                            "nodeTransforms": [
+                              [
+                                0,
+                                {
+                                  "$f32": {
+                                    "n": [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1]
+                                  },
+                                  "t": 1
+                                }
+                              ],
+                              [
+                                1,
+                                {
+                                  "$f32": {
+                                    "n": [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1]
+                                  },
+                                  "t": 1
+                                }
+                              ],
+                              [
+                                2,
+                                {
+                                  "$f32": {
+                                    "n": [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1]
+                                  },
+                                  "t": 1
+                                }
+                              ],
+                              [
+                                3,
+                                {
+                                  "$f32": {
+                                    "n": [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1]
+                                  },
+                                  "t": 1
+                                }
+                              ],
+                              [
+                                4,
+                                {
+                                  "$f32": {
+                                    "n": [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1]
+                                  },
+                                  "t": 1
+                                }
+                              ],
+                              [
+                                5,
+                                {
+                                  "$f32": {
+                                    "n": [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1]
+                                  },
+                                  "t": 1
+                                }
+                              ],
+                              [
+                                6,
+                                {
+                                  "$f32": {
+                                    "n": [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1]
+                                  },
+                                  "t": 1
+                                }
+                              ],
+                              [
+                                7,
+                                {
+                                  "$f32": {
+                                    "n": [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1]
+                                  },
+                                  "t": 1
+                                }
+                              ],
+                              [
+                                8,
+                                {
+                                  "$f32": {
+                                    "n": [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1]
+                                  },
+                                  "t": 1
+                                }
+                              ],
+                              [
+                                9,
+                                {
+                                  "$f32": {
+                                    "n": [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1]
+                                  },
+                                  "t": 1
+                                }
+                              ],
+                              [
+                                10,
+                                {
+                                  "$f32": {
+                                    "n": [1, 0, 0, 0, 0, -1.3435885648505064e-7, -0.9999999403953552, 0, 0, 0.9999999403953552, -1.3435885648505064e-7, 0, 0, 0, 0, 1]
+                                  },
+                                  "t": 1
+                                }
+                              ],
+                              [
+                                11,
+                                {
+                                  "$f32": {
+                                    "n": [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1]
+                                  },
+                                  "t": 1
+                                }
+                              ],
+                              [
+                                12,
+                                {
+                                  "$f32": {
+                                    "n": [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1]
+                                  },
+                                  "t": 1
+                                }
+                              ],
+                              [
+                                13,
+                                {
+                                  "$f32": {
+                                    "n": [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1]
+                                  },
+                                  "t": 1
+                                }
+                              ],
+                              [
+                                14,
+                                {
+                                  "$f32": {
+                                    "n": [1, 0, 0, 0, 0, 0.9999999403953552, 6.202441954949924e-15, 0, 0, -6.202441954949924e-15, 0.9999999403953552, 0, 0, 0, 0, 1]
+                                  },
+                                  "t": 1
+                                }
+                              ],
+                              [
+                                15,
+                                {
+                                  "$f32": {
+                                    "n": [1, 0, 0, 0, 0, -0.24963970482349396, 0.9683387875556946, 0, 0, -0.9683387875556946, -0.24963970482349396, 0, 0, 0.04960079863667488, 0.9074602127075195, 1]
+                                  },
+                                  "t": 1
+                                }
+                              ],
+                              [
+                                16,
+                                {
+                                  "$f32": {
+                                    "n": [1, 0, 0, 0, 0, 0.9916855096817017, -0.12868471443653107, 0, 0, 0.12868471443653107, 0.9916855096817017, 0, 0, 0.13677909970283508, 1.283867678836259e-9, 1]
+                                  },
+                                  "t": 1
+                                }
+                              ],
+                              [
+                                17,
+                                {
+                                  "$f32": {
+                                    "n": [1, 0, 0, 0, 0, 0.9879985451698303, -0.15446272492408752, 0, 0, 0.15446272492408752, 0.9879985451698303, 0, 0, 0.12277699261903763, -4.4192636217132986e-9, 1]
+                                  },
+                                  "t": 1
+                                }
+                              ],
+                              [
+                                18,
+                                {
+                                  "$f32": {
+                                    "n": [1, 0, 0, 0, 0, 0.999994695186615, 0.003254292067140341, 0, 0, -0.003254292067140341, 0.999994695186615, 0, 0, 0.15535065531730652, -1.0043996745423556e-9, 1]
+                                  },
+                                  "t": 1
+                                }
+                              ],
+                              [
+                                19,
+                                {
+                                  "$f32": {
+                                    "n": [1, 0, 0, 0, 0, 0.9186036586761475, 0.39517998695373535, 0, 0, -0.39517998695373535, 0.9186036586761475, 0, 0, 0.17304424941539764, -2.9258018230393645e-10, 1]
+                                  },
+                                  "t": 1
+                                }
+                              ],
+                              [
+                                20,
+                                {
+                                  "$f32": {
+                                    "n": [1, 0, 0, 0, 0, 0.9820041656494141, -0.18885959684848785, 0, 0, 0.18885959684848785, 0.9820041656494141, 0, 0, 0.05945213511586189, 1.9458381572690087e-8, 1]
+                                  },
+                                  "t": 1
+                                }
+                              ],
+                              [
+                                21,
+                                {
+                                  "$f32": {
+                                    "n": [1, 0, 0, 0, 0, 0.9824360609054565, -0.1865992248058319, 0, 0, 0.1865992248058319, 0.9824360609054565, 0, 0, 0.05634106695652008, 2.0191667005065028e-8, 1]
+                                  },
+                                  "t": 1
+                                }
+                              ],
+                              [
+                                22,
+                                {
+                                  "$f32": {
+                                    "n": [1, 0, 0, 0, 0, -0.24963952600955963, -0.9683387875556946, 0, 0, 0.9683387875556946, -0.24963952600955963, 0, 0, -0.866346538066864, 0.27456849813461304, 1]
+                                  },
+                                  "t": 1
+                                }
+                              ],
+                              [
+                                23,
+                                {
+                                  "$f32": {
+                                    "n": [1, 0, 0, 0, 0, 0.9999999403953552, 6.202441954949924e-15, 0, 0, -6.202441954949924e-15, 0.9999999403953552, 0, 0, 0, 0, 1]
+                                  },
+                                  "t": 1
+                                }
+                              ],
+                              [
+                                24,
+                                {
+                                  "$f32": {
+                                    "n": [1, 0, 0, 0, 0, 0.9999999403953552, 6.202441954949924e-15, 0, 0, -6.202441954949924e-15, 0.9999999403953552, 0, 0, 0.03252803534269333, 0.9736844897270203, 1]
+                                  },
+                                  "t": 1
+                                }
+                              ],
+                              [
+                                25,
+                                {
+                                  "$f32": {
+                                    "n": [1, 0, 0, 0, 0, 0.9999999403953552, 6.202441954949924e-15, 0, 0, -6.202441954949924e-15, 0.9999999403953552, 0, 0, -7.88856890920897e-9, -5.5234199436426934e-8, 1]
+                                  },
+                                  "t": 1
+                                }
+                              ],
+                              [
+                                26,
+                                {
+                                  "$f32": {
+                                    "n": [1, 0, 0, 0, 0, 0.9999999403953552, 6.202441954949924e-15, 0, 0, -6.202441954949924e-15, 0.9999999403953552, 0, 0, -0.03216862678527832, 0.18806946277618408, 1]
+                                  },
+                                  "t": 1
+                                }
+                              ],
+                              [
+                                27,
+                                {
+                                  "$f32": {
+                                    "n": [1, 0, 0, 0, 0, -0.122953861951828, 0.9924123883247375, 0, 0, -0.9924123883247375, -0.122953861951828, 0, 0, -1.4327198982755363e-8, -1.1916097975017692e-7, 1]
+                                  },
+                                  "t": 1
+                                }
+                              ],
+                              [
+                                28,
+                                {
+                                  "$f32": {
+                                    "n": [1, 0, 0, 0, 0, -0.122953861951828, -0.9924123883247375, 0, 0, 0.9924123883247375, -0.122953861951828, 0, 0, -0.12277687340974808, -7.303695426230661e-9, 1]
+                                  },
+                                  "t": 1
+                                }
+                              ],
+                              [
+                                29,
+                                {
+                                  "$f32": {
+                                    "n": [1, 0, 0, 0, 0, -0.24963970482349396, 0.9683387875556946, 0, 0, -0.9683387875556946, -0.24963970482349396, 0, 0, -1.0267113381701165e-8, -1.1713271419466764e-7, 1]
+                                  },
+                                  "t": 1
+                                }
+                              ],
+                              [
+                                30,
+                                {
+                                  "$f32": {
+                                    "n": [1, 0, 0, 0, 0, 1, -2.4619993155283737e-7, 0, 0, 2.4619993155283737e-7, 1, 0, 0, -0.1367790848016739, 2.0201293082777738e-8, 1]
+                                  },
+                                  "t": 1
+                                }
+                              ],
+                              [
+                                31,
+                                {
+                                  "$f32": {
+                                    "n": [1, 0, 0, 0, 0, 0.9999999403953552, 1.0100561098624894e-7, 0, 0, -1.0100561098624894e-7, 0.9999999403953552, 0, 0, 1.0572897002347759e-9, 9.611020423960781e-9, 1]
+                                  },
+                                  "t": 1
+                                }
+                              ],
+                              [
+                                32,
+                                {
+                                  "$f32": {
+                                    "n": [-0.42177221179008484, -0.05253249406814575, 0.9051786661148071, 0, 0.5363216996192932, 0.7904899716377258, 0.2957781255245209, 0, -0.7310725450515747, 0.6102180480957031, -0.30523234605789185, 0, 0, 5.2953172513525715e-8, 2.313234492845595e-9, 1]
+                                  },
+                                  "t": 1
+                                }
+                              ],
+                              [
+                                33,
+                                {
+                                  "$f32": {
+                                    "n": [1.0000001192092896, 1.4776291834550648e-7, 3.5138704390647035e-8, 0, -1.7031223364938342e-7, 1, -1.8410538871194149e-7, 0, -8.16204988041136e-8, 4.103921469322813e-8, 1.0000001192092896, 0, 1.71344307631216e-8, -9.474633344552785e-8, -8.861972844442789e-8, 1]
+                                  },
+                                  "t": 1
+                                }
+                              ],
+                              [
+                                34,
+                                {
+                                  "$f32": {
+                                    "n": [-0.42177221179008484, 0.05253249406814575, -0.9051786661148071, 0, -0.5363216996192932, 0.7904899716377258, 0.2957781255245209, 0, 0.7310725450515747, 0.6102180480957031, -0.30523234605789185, 0, 0, 5.2953172513525715e-8, 2.313234492845595e-9, 1]
+                                  },
+                                  "t": 1
+                                }
+                              ],
+                              [
+                                35,
+                                {
+                                  "$f32": {
+                                    "n": [1.0000001192092896, -1.4776291834550648e-7, -3.5138704390647035e-8, 0, 1.7031223364938342e-7, 1, -1.8410538871194149e-7, 0, 8.16204988041136e-8, 4.103921469322813e-8, 1.0000001192092896, 0, -1.71344307631216e-8, -9.474633344552785e-8, -8.861972844442789e-8, 1]
+                                  },
+                                  "t": 1
+                                }
+                              ],
+                              [
+                                36,
+                                {
+                                  "$f32": {
+                                    "n": [1, 0, 0, 0, 0, -0.9464234113693237, 0.32292866706848145, 0, 0, -0.32292866706848145, -0.9464234113693237, 0, 0.08805932849645615, 0.0636349618434906, 0.023310814052820206, 1]
+                                  },
+                                  "t": 1
+                                }
+                              ],
+                              [
+                                37,
+                                {
+                                  "$f32": {
+                                    "n": [1, 0, 0, 0, 0, 1, 1.6835484117905253e-9, 0, 0, -1.6835484117905253e-9, 1, 0, 0, 0.24098128080368042, -1.2578729169376857e-8, 1]
+                                  },
+                                  "t": 1
+                                }
+                              ],
+                              [
+                                38,
+                                {
+                                  "$f32": {
+                                    "n": [1, -0.00003838164047920145, 0.00021669249690603465, 0, -1.3002441137666132e-11, 0.9846729636192322, 0.17441017925739288, 0, -0.00022006544168107212, -0.17441017925739288, 0.9846729636192322, 0, -1.4901161193847656e-8, 0.24098128080368042, -8.493511671758824e-9, 1]
+                                  },
+                                  "t": 1
+                                }
+                              ],
+                              [
+                                39,
+                                {
+                                  "$f32": {
+                                    "n": [1, 1.3876925650246896e-11, 2.505659568718954e-10, 0, -1.2830049522793985e-11, 1, -4.4485503281066485e-8, 0, -2.466540860446287e-10, 4.6020854682637946e-8, 1, 0, -1.3477522209370818e-8, 0.204070582985878, 4.244579798751147e-8, 1]
+                                  },
+                                  "t": 1
+                                }
+                              ],
+                              [
+                                40,
+                                {
+                                  "$f32": {
+                                    "n": [0.9999998807907104, 0.0002187837817473337, -0.00011172204540343955, 0, -0.0001972092577489093, 0.4437754452228546, -0.896138072013855, 0, -0.00014648093201685697, 0.896138072013855, 0.443775475025177, 0, 1.4392801395146648e-9, 0.20407067239284515, 4.747306547869812e-8, 1]
+                                  },
+                                  "t": 1
+                                }
+                              ],
+                              [
+                                41,
+                                {
+                                  "$f32": {
+                                    "n": [-0.9999999403953552, -4.636991590700745e-8, 0.00024405319709330797, 0, -0.00012938736472278833, 0.8479979038238525, -0.5299992561340332, 0, -0.0002069320617010817, -0.5299992561340332, -0.8479979634284973, 0, 1.1095272256511635e-8, 0.11613546311855316, -8.310937715805267e-8, 1]
+                                  },
+                                  "t": 1
+                                }
+                              ],
+                              [
+                                42,
+                                {
+                                  "$f32": {
+                                    "n": [1, 0, 0, 0, 0, -0.9464234113693237, 0.32292866706848145, 0, 0, -0.32292866706848145, -0.9464234113693237, 0, -0.08805932849645615, 0.0636349618434906, 0.023310814052820206, 1]
+                                  },
+                                  "t": 1
+                                }
+                              ],
+                              [
+                                43,
+                                {
+                                  "$f32": {
+                                    "n": [1, 0, 0, 0, 0, 1, 1.6835484117905253e-9, 0, 0, -1.6835484117905253e-9, 1, 0, 0, 0.24098128080368042, -1.2578729169376857e-8, 1]
+                                  },
+                                  "t": 1
+                                }
+                              ],
+                              [
+                                44,
+                                {
+                                  "$f32": {
+                                    "n": [1, -0.00003838164047920145, 0.00021669249690603465, 0, -1.3002441137666132e-11, 0.9846729636192322, 0.17441017925739288, 0, -0.00022006544168107212, -0.17441017925739288, 0.9846729636192322, 0, 1.4901161193847656e-8, 0.24098128080368042, -8.493511671758824e-9, 1]
+                                  },
+                                  "t": 1
+                                }
+                              ],
+                              [
+                                45,
+                                {
+                                  "$f32": {
+                                    "n": [1, 1.3876925650246896e-11, 2.505659568718954e-10, 0, -1.2830049522793985e-11, 1, -4.4485503281066485e-8, 0, -2.466540860446287e-10, 4.6020854682637946e-8, 1, 0, 1.1920988640667929e-8, 0.20407061278820038, 4.338167869377685e-8, 1]
+                                  },
+                                  "t": 1
+                                }
+                              ],
+                              [
+                                46,
+                                {
+                                  "$f32": {
+                                    "n": [0.9999998807907104, 0.0002187837817473337, -0.00011172204540343955, 0, -0.0001972092577489093, 0.4437754452228546, -0.896138072013855, 0, -0.00014648093201685697, 0.896138072013855, 0.443775475025177, 0, 4.486193638797431e-9, 0.20407067239284515, 4.724517665977146e-8, 1]
+                                  },
+                                  "t": 1
+                                }
+                              ],
+                              [
+                                47,
+                                {
+                                  "$f32": {
+                                    "n": [-0.9999999403953552, -4.636991590700745e-8, 0.00024405319709330797, 0, -0.00012938736472278833, 0.8479979038238525, -0.5299992561340332, 0, -0.0002069320617010817, -0.5299992561340332, -0.8479979634284973, 0, -3.798176440028556e-9, 0.11613546311855316, -8.462195211222934e-8, 1]
+                                  },
+                                  "t": 1
+                                }
+                              ],
+                              [
+                                48,
+                                {
+                                  "$f32": {
+                                    "n": [1, 0, 0, 0, 0, 0.9999999403953552, 6.202441954949924e-15, 0, 0, -6.202441954949924e-15, 0.9999999403953552, 0, 0, -0.03216862678527832, 0.18806946277618408, 1]
+                                  },
+                                  "t": 1
+                                }
+                              ],
+                              [
+                                49,
+                                {
+                                  "$f32": {
+                                    "n": [1, 0, 0, 0, 0, 0.031812459230422974, 0.9994938373565674, 0, 0, -0.9994938373565674, 0.031812459230422974, 0, 0, -1.4327198982755363e-8, -1.1916097975017692e-7, 1]
+                                  },
+                                  "t": 1
+                                }
+                              ],
+                              [
+                                50,
+                                {
+                                  "$f32": {
+                                    "n": [1, 0, 0, 0, 0, 0.031812626868486404, -0.9994937777519226, 0, 0, 0.9994937777519226, 0.031812626868486404, 0, 0, 0.15535065531730652, -3.693145789185337e-11, 1]
+                                  },
+                                  "t": 1
+                                }
+                              ],
+                              [
+                                51,
+                                {
+                                  "$f32": {
+                                    "n": [1, 0, 0, 0, 0, 0.028559567406773567, 0.9995921850204468, 0, 0, -0.9995921850204468, 0.028559567406773567, 0, 0, 1.0321634213994457e-8, 3.7610977443591764e-8, 1]
+                                  },
+                                  "t": 1
+                                }
+                              ],
+                              [
+                                52,
+                                {
+                                  "$f32": {
+                                    "n": [1, 0, 0, 0, 0, 1, 1.505468816276334e-8, 0, 0, -1.505468816276334e-8, 1, 0, 0, -7.332305429486041e-9, 5.118639401224812e-10, 1]
+                                  },
+                                  "t": 1
+                                }
+                              ],
+                              [
+                                53,
+                                {
+                                  "$f32": {
+                                    "n": [1, 0, 0, 0, 0, 1, -2.776867624731949e-8, 0, 0, 2.776867624731949e-8, 1, 0, 0, -7.3847084003375585e-9, -1.4178442864221097e-9, 1]
+                                  },
+                                  "t": 1
+                                }
+                              ],
+                              [
+                                54,
+                                {
+                                  "$f32": {
+                                    "n": [0.5070949792861938, -0.024689311161637306, 0.8615365028381348, 0, 0.8618900179862976, 0.013912605121731758, -0.5069043040275574, 0, 0.0005289408145472407, 0.9995983242988586, 0.02833450585603714, 0, 0.016443733125925064, 0.1233021691441536, 0.07031351327896118, 1]
+                                  },
+                                  "t": 1
+                                }
+                              ],
+                              [
+                                55,
+                                {
+                                  "$f32": {
+                                    "n": [1, -1.8181117056315088e-8, -9.777918925923945e-12, 0, -2.7237698319027004e-8, 1, -6.965403948067106e-12, 0, -1.4706725420809974e-11, -1.1926622883740023e-11, 1, 0, 1.4124253766567563e-8, -1.4483883425953081e-8, -1.867999657179098e-7, 1]
+                                  },
+                                  "t": 1
+                                }
+                              ],
+                              [
+                                56,
+                                {
+                                  "$f32": {
+                                    "n": [-0.16136150062084198, -0.7077443599700928, -0.6877939105033875, 0, 0.24174761772155762, 0.6473478078842163, -0.7228409647941589, 0, 0.9568284749984741, -0.2829113006591797, 0.06663848459720612, 0, 0.007001218851655722, 0.18042366206645966, -0.01831740327179432, 1]
+                                  },
+                                  "t": 1
+                                }
+                              ],
+                              [
+                                57,
+                                {
+                                  "$f32": {
+                                    "n": [1, 4.765115235727535e-8, -1.1114899933772904e-7, 0, -3.866285425146998e-8, 1, -1.0192157873234464e-7, 0, 1.0715953635553888e-7, 1.1028038926497175e-7, 1, 0, -7.365162701944428e-8, 0.14438751339912415, 1.039899011345824e-8, 1]
+                                  },
+                                  "t": 1
+                                }
+                              ],
+                              [
+                                58,
+                                {
+                                  "$f32": {
+                                    "n": [1, 3.4830389950002427e-7, -5.493433832270966e-7, 0, 1.6843908667851792e-7, 0.6732878088951111, 0.7393804788589478, 0, 6.871148343634559e-7, -0.739380419254303, 0.6732878088951111, 0, -7.821407876917874e-8, 0.14438748359680176, 2.8948779373649813e-8, 1]
+                                  },
+                                  "t": 1
+                                }
+                              ],
+                              [
+                                59,
+                                {
+                                  "$f32": {
+                                    "n": [1, -3.4052774822157517e-8, 2.147102406979684e-7, 0, 3.895830502642639e-8, 1.0000001192092896, 7.042830674208744e-8, 0, -2.2382447184554621e-7, -1.6164143801233877e-7, 1, 0, -1.271608596198348e-7, 0.11808734387159348, -6.312787803608444e-8, 1]
+                                  },
+                                  "t": 1
+                                }
+                              ],
+                              [
+                                60,
+                                {
+                                  "$f32": {
+                                    "n": [0.9997850656509399, -0.02067931741476059, 0.001503378851339221, 0, 0.020733902230858803, 0.9971563220024109, -0.07245241105556488, 0, -8.416217838203011e-7, 0.07246802002191544, 0.997370719909668, 0, 8.951767682674472e-8, 0.11808733642101288, 8.96725111942942e-8, 1]
+                                  },
+                                  "t": 1
+                                }
+                              ],
+                              [
+                                61,
+                                {
+                                  "$f32": {
+                                    "n": [-0.1662101000547409, 0.11290019005537033, -0.9796057939529419, 0, 0.11201132833957672, 0.9891557097434998, 0.09499583393335342, 0, 0.9797077775001526, -0.0939377173781395, -0.1770537793636322, 0, 0.0022759854327887297, 0.03823036700487137, 0.011648681946098804, 1]
+                                  },
+                                  "t": 1
+                                }
+                              ],
+                              [
+                                62,
+                                {
+                                  "$f32": {
+                                    "n": [0.9533646702766418, 0.022286949679255486, -0.3009970486164093, 0, 0.09051171690225601, 0.930259644985199, 0.3555627167224884, 0, 0.28792983293533325, -0.3662247061729431, 0.8848593235015869, 0, 0.002349754562601447, 0.07505369931459427, 0.002230903133749962, 1]
+                                  },
+                                  "t": 1
+                                }
+                              ],
+                              [
+                                63,
+                                {
+                                  "$f32": {
+                                    "n": [0.9998941421508789, 0.014374494552612305, 0.0022490518167614937, 0, -0.014549348503351212, 0.9878677725791931, 0.15461423993110657, 0, 7.402039159387641e-7, -0.15463048219680786, 0.9879723787307739, 0, -1.0559958241174172e-7, 0.04047136753797531, 4.321568880527593e-9, 1]
+                                  },
+                                  "t": 1
+                                }
+                              ],
+                              [
+                                64,
+                                {
+                                  "$f32": {
+                                    "n": [0.9994776248931885, -0.03204330801963806, -0.004201547242701054, 0, 0.032138463109731674, 0.9718344807624817, 0.23346301913261414, 0, -0.003397624706849456, -0.23347613215446472, 0.9723566770553589, 0, 1.3497309936383317e-9, 0.02536071091890335, -2.064286697134321e-8, 1]
+                                  },
+                                  "t": 1
+                                }
+                              ],
+                              [
+                                65,
+                                {
+                                  "$f32": {
+                                    "n": [-0.2885168790817261, 0.34091758728027344, -0.8947252631187439, 0, -0.35588186979293823, 0.8293332457542419, 0.43076035380363464, 0, 0.888879120349884, 0.4426981508731842, -0.11795026063919067, 0, -0.006733911577612162, 0.00610174098983407, 0.025563079863786697, 1]
+                                  },
+                                  "t": 1
+                                }
+                              ],
+                              [
+                                66,
+                                {
+                                  "$f32": {
+                                    "n": [0.9999633431434631, 0.008338206447660923, 0.001954146893694997, 0, -0.00856414157897234, 0.973640501499176, 0.22792747616767883, 0, -0.0000021266712337819627, -0.2279358059167862, 0.9736761450767517, 0, -5.8096773614124686e-8, 0.05108194425702095, -9.050329197179963e-8, 1]
+                                  },
+                                  "t": 1
+                                }
+                              ],
+                              [
+                                67,
+                                {
+                                  "$f32": {
+                                    "n": [0.9998598098754883, -0.01674453727900982, -0.0001611355837667361, 0, 0.01674436777830124, 0.9996611475944519, 0.019935650750994682, 0, -0.00017279035819228739, -0.01993558183312416, 0.9998013377189636, 0, -5.435193273228833e-8, 0.025825098156929016, -5.505360078927879e-8, 1]
+                                  },
+                                  "t": 1
+                                }
+                              ],
+                              [
+                                68,
+                                {
+                                  "$f32": {
+                                    "n": [1, 1.3361468376160701e-8, 3.4294524198230647e-7, 0, -1.0379839210372666e-8, 1.0000001192092896, 2.6913870243561178e-8, 0, -3.120002531886712e-7, -6.64935910776876e-8, 1.0000001192092896, 0, -1.635028645807779e-8, -1.4037295770208402e-9, -1.4122491620582878e-8, 1]
+                                  },
+                                  "t": 1
+                                }
+                              ],
+                              [
+                                69,
+                                {
+                                  "$f32": {
+                                    "n": [-0.16067266464233398, -0.06936783343553543, -0.9845671057701111, 0, 0.08264120668172836, 0.9930790066719055, -0.08345378935337067, 0, 0.9835418462753296, -0.09477456659078598, -0.15382811427116394, 0, -0.011151258833706379, 0.04799222573637962, -0.003549060318619013, 1]
+                                  },
+                                  "t": 1
+                                }
+                              ],
+                              [
+                                70,
+                                {
+                                  "$f32": {
+                                    "n": [0.9879631400108337, -0.035245515406131744, -0.15062019228935242, 0, 0.08830965310335159, 0.9279431700706482, 0.362108439207077, 0, 0.12700416147708893, -0.37105101346969604, 0.9198862910270691, 0, -0.00018564840138424188, 0.06705448031425476, 0.002534868661314249, 1]
+                                  },
+                                  "t": 1
+                                }
+                              ],
+                              [
+                                71,
+                                {
+                                  "$f32": {
+                                    "n": [0.9999738931655884, 0.007026182021945715, 0.0017102734418585896, 0, -0.00723134633153677, 0.9715665578842163, 0.23665638267993927, 0, 0.0000011570338074307074, -0.2366626113653183, 0.9715919494628906, 0, -4.939581188523334e-8, 0.04451536014676094, 2.1669015026759553e-8, 1]
+                                  },
+                                  "t": 1
+                                }
+                              ],
+                              [
+                                72,
+                                {
+                                  "$f32": {
+                                    "n": [0.9998477101325989, -0.017408598214387894, -0.0012510961387306452, 0, 0.01743112877011299, 0.9923658967018127, 0.12209069728851318, 0, -0.0008838397916406393, -0.12209390103816986, 0.9925182461738586, 0, -4.236114747868669e-8, 0.028930164873600006, 7.180212691082488e-8, 1]
+                                  },
+                                  "t": 1
+                                }
+                              ],
+                              [
+                                73,
+                                {
+                                  "$f32": {
+                                    "n": [0.9999998807907104, 2.2622364781454962e-7, 2.867622299618233e-7, 0, -1.8736727724899538e-7, 0.9999998807907104, -6.659853823975936e-8, 0, -4.094364101092651e-7, 3.146170257650738e-8, 0.9999999403953552, 0, 6.751384340475397e-9, -5.9176510802672055e-8, -1.346474789443164e-7, 1]
+                                  },
+                                  "t": 1
+                                }
+                              ],
+                              [
+                                74,
+                                {
+                                  "$f32": {
+                                    "n": [-0.13025206327438354, -0.20738238096237183, -0.969549834728241, 0, 0.06198449805378914, 0.9742644429206848, -0.2167179435491562, 0, 0.9895413517951965, -0.08832500874996185, -0.11404556035995483, 0, -0.020318567752838135, 0.04398379474878311, -0.0212489515542984, 1]
+                                  },
+                                  "t": 1
+                                }
+                              ],
+                              [
+                                75,
+                                {
+                                  "$f32": {
+                                    "n": [0.9347713589668274, 0.0979229062795639, -0.3414872884750366, 0, 0.10587073117494583, 0.8407912254333496, 0.530906081199646, 0, 0.33910733461380005, -0.5324293375015259, 0.7755804657936096, 0, 1.605928900971776e-8, 0.06271734833717346, -1.032610583706628e-7, 1]
+                                  },
+                                  "t": 1
+                                }
+                              ],
+                              [
+                                76,
+                                {
+                                  "$f32": {
+                                    "n": [0.99997478723526, -0.007018683478236198, -0.0010887206299230456, 0, 0.007102618925273418, 0.9881419539451599, 0.1533796191215515, 0, -6.306914883680292e-7, -0.15338347852230072, 0.988166868686676, 0, 2.8827164655353954e-8, 0.04027086868882179, -1.5580845058593695e-8, 1]
+                                  },
+                                  "t": 1
+                                }
+                              ],
+                              [
+                                77,
+                                {
+                                  "$f32": {
+                                    "n": [0.9998185634613037, 0.018649142235517502, 0.0038624072913080454, 0, -0.018911147490143776, 0.9481683373451233, 0.31720495223999023, 0, 0.0022533524315804243, -0.31722044944763184, 0.9483490586280823, 0, 1.2894254552975326e-8, 0.02857511304318905, -6.31272811801864e-8, 1]
+                                  },
+                                  "t": 1
+                                }
+                              ],
+                              [
+                                78,
+                                {
+                                  "$f32": {
+                                    "n": [1, -4.106454554175798e-8, 1.6704179017779097e-7, 0, -2.0121330379652136e-8, 1, -9.183140292634562e-8, 0, -1.5603772851591202e-7, 7.78319417804596e-8, 1, 0, 1.411481420632299e-8, 5.756301213466486e-9, 8.143193674925442e-9, 1]
+                                  },
+                                  "t": 1
+                                }
+                              ],
+                              [
+                                79,
+                                {
+                                  "$f32": {
+                                    "n": [-0.14603406190872192, -0.3247111737728119, -0.9344712495803833, 0, 0.04622224345803261, 0.9413264393806458, -0.334316611289978, 0, 0.9881989359855652, -0.09201499074697495, -0.12245676666498184, 0, -0.01869390346109867, 0.03183678537607193, -0.03674028441309929, 1]
+                                  },
+                                  "t": 1
+                                }
+                              ],
+                              [
+                                80,
+                                {
+                                  "$f32": {
+                                    "n": [0.9262270331382751, 0.12846945226192474, -0.35439953207969666, 0, 0.1042192205786705, 0.8162235021591187, 0.5682582855224609, 0, 0.36227306723594666, -0.5632714629173279, 0.7426193952560425, 0, 0.000778808316681534, 0.07523603737354279, 0.003782042069360614, 1]
+                                  },
+                                  "t": 1
+                                }
+                              ],
+                              [
+                                81,
+                                {
+                                  "$f32": {
+                                    "n": [0.9999650120735168, -0.008329115808010101, -0.0007740023429505527, 0, 0.008365010842680931, 0.9956720471382141, 0.09256023913621902, 0, -2.0113787968512042e-7, -0.09256348013877869, 0.9957068562507629, 0, -9.457592042849683e-9, 0.025048432871699333, 3.1827909197090776e-9, 1]
+                                  },
+                                  "t": 1
+                                }
+                              ],
+                              [
+                                82,
+                                {
+                                  "$f32": {
+                                    "n": [0.999782145023346, 0.020757529884576797, 0.0021828217431902885, 0, -0.02082148753106594, 0.9846245050430298, 0.17343901097774506, 0, 0.001450957264751196, -0.1734466850757599, 0.9848421812057495, 0, -5.935910252219401e-8, 0.020300868898630142, -5.7181573254183604e-8, 1]
+                                  },
+                                  "t": 1
+                                }
+                              ],
+                              [
+                                83,
+                                {
+                                  "$f32": {
+                                    "n": [1.0000001192092896, -1.4042167606476141e-7, -2.8424500086998705e-8, 0, 6.75117348691856e-8, 1.0000001192092896, 1.0838230934950843e-7, 0, 2.019055216351262e-7, -3.888629862558446e-8, 1.0000001192092896, 0, -5.553791204704339e-9, 2.2962284518257547e-8, -1.4578365892248257e-7, 1]
+                                  },
+                                  "t": 1
+                                }
+                              ],
+                              [
+                                84,
+                                {
+                                  "$f32": {
+                                    "n": [0.5070949792861938, 0.024689311161637306, -0.8615365028381348, 0, -0.8618900179862976, 0.013912605121731758, -0.5069043040275574, 0, -0.0005289408145472407, 0.9995983242988586, 0.02833450585603714, 0, -0.016443733125925064, 0.1233021691441536, 0.07031351327896118, 1]
+                                  },
+                                  "t": 1
+                                }
+                              ],
+                              [
+                                85,
+                                {
+                                  "$f32": {
+                                    "n": [1, 1.8181117056315088e-8, 9.777918925923945e-12, 0, 2.7237698319027004e-8, 1, -6.965403948067106e-12, 0, 1.4706725420809974e-11, -1.1926622883740023e-11, 1, 0, -1.4124253766567563e-8, -1.4483883425953081e-8, -1.867999657179098e-7, 1]
+                                  },
+                                  "t": 1
+                                }
+                              ],
+                              [
+                                86,
+                                {
+                                  "$f32": {
+                                    "n": [-0.16136150062084198, 0.7077443599700928, 0.6877939105033875, 0, -0.24174761772155762, 0.6473478078842163, -0.7228409647941589, 0, -0.9568284749984741, -0.2829113006591797, 0.06663848459720612, 0, -0.007001218851655722, 0.18042366206645966, -0.01831740327179432, 1]
+                                  },
+                                  "t": 1
+                                }
+                              ],
+                              [
+                                87,
+                                {
+                                  "$f32": {
+                                    "n": [1, -4.765115235727535e-8, 1.1114899933772904e-7, 0, 3.866285425146998e-8, 1, -1.0192157873234464e-7, 0, -1.0715953635553888e-7, 1.1028038926497175e-7, 1, 0, 7.365162701944428e-8, 0.14438751339912415, 1.039899011345824e-8, 1]
+                                  },
+                                  "t": 1
+                                }
+                              ],
+                              [
+                                88,
+                                {
+                                  "$f32": {
+                                    "n": [1, -3.4830389950002427e-7, 5.493433832270966e-7, 0, -1.6843908667851792e-7, 0.6732878088951111, 0.7393804788589478, 0, -6.871148343634559e-7, -0.739380419254303, 0.6732878088951111, 0, 7.821407876917874e-8, 0.14438748359680176, 2.8948779373649813e-8, 1]
+                                  },
+                                  "t": 1
+                                }
+                              ],
+                              [
+                                89,
+                                {
+                                  "$f32": {
+                                    "n": [1, 3.4052774822157517e-8, -2.147102406979684e-7, 0, -3.895830502642639e-8, 1.0000001192092896, 7.042830674208744e-8, 0, 2.2382447184554621e-7, -1.6164143801233877e-7, 1, 0, 1.271608596198348e-7, 0.11808734387159348, -6.312787803608444e-8, 1]
+                                  },
+                                  "t": 1
+                                }
+                              ],
+                              [
+                                90,
+                                {
+                                  "$f32": {
+                                    "n": [0.9997850656509399, 0.02067931741476059, -0.001503378851339221, 0, -0.020733902230858803, 0.9971563220024109, -0.07245241105556488, 0, 8.416217838203011e-7, 0.07246802002191544, 0.997370719909668, 0, -8.951767682674472e-8, 0.11808733642101288, 8.96725111942942e-8, 1]
+                                  },
+                                  "t": 1
+                                }
+                              ],
+                              [
+                                91,
+                                {
+                                  "$f32": {
+                                    "n": [-0.1662101000547409, -0.11290019005537033, 0.9796057939529419, 0, -0.11201132833957672, 0.9891557097434998, 0.09499583393335342, 0, -0.9797077775001526, -0.0939377173781395, -0.1770537793636322, 0, -0.0022759854327887297, 0.03823036700487137, 0.011648681946098804, 1]
+                                  },
+                                  "t": 1
+                                }
+                              ],
+                              [
+                                92,
+                                {
+                                  "$f32": {
+                                    "n": [0.9533646702766418, -0.022286949679255486, 0.3009970486164093, 0, -0.09051171690225601, 0.930259644985199, 0.3555627167224884, 0, -0.28792983293533325, -0.3662247061729431, 0.8848593235015869, 0, -0.002349754562601447, 0.07505369931459427, 0.002230903133749962, 1]
+                                  },
+                                  "t": 1
+                                }
+                              ],
+                              [
+                                93,
+                                {
+                                  "$f32": {
+                                    "n": [0.9998941421508789, -0.014374461956322193, -0.0022492383141070604, 0, 0.014549353159964085, 0.9878677725791931, 0.15461419522762299, 0, -4.797119572685915e-7, -0.15463042259216309, 0.9879723191261292, 0, 1.0559958241174172e-7, 0.04047136753797531, 4.321568880527593e-9, 1]
+                                  },
+                                  "t": 1
+                                }
+                              ],
+                              [
+                                94,
+                                {
+                                  "$f32": {
+                                    "n": [0.9994776844978333, 0.03204331547021866, 0.004201814066618681, 0, -0.032138559967279434, 0.9718344211578369, 0.2334630936384201, 0, 0.003397360211238265, -0.23347622156143188, 0.9723566770553589, 0, 1.801912574705966e-8, 0.02536063641309738, 8.164386144926539e-8, 1]
+                                  },
+                                  "t": 1
+                                }
+                              ],
+                              [
+                                95,
+                                {
+                                  "$f32": {
+                                    "n": [-0.2885168790817261, -0.34091758728027344, 0.8947252631187439, 0, 0.35588186979293823, 0.8293332457542419, 0.43076035380363464, 0, -0.888879120349884, 0.4426981508731842, -0.11795026063919067, 0, 0.006733911577612162, 0.00610174098983407, 0.025563079863786697, 1]
+                                  },
+                                  "t": 1
+                                }
+                              ],
+                              [
+                                96,
+                                {
+                                  "$f32": {
+                                    "n": [0.9999633431434631, -0.008338206447660923, -0.001954146893694997, 0, 0.00856414157897234, 0.973640501499176, 0.22792747616767883, 0, 0.0000021266712337819627, -0.2279358059167862, 0.9736761450767517, 0, 5.8096773614124686e-8, 0.05108194425702095, -9.050329197179963e-8, 1]
+                                  },
+                                  "t": 1
+                                }
+                              ],
+                              [
+                                97,
+                                {
+                                  "$f32": {
+                                    "n": [0.9998598098754883, 0.01674453727900982, 0.0001611355837667361, 0, -0.01674436777830124, 0.9996611475944519, 0.019935650750994682, 0, 0.00017279035819228739, -0.01993558183312416, 0.9998013377189636, 0, 5.435193273228833e-8, 0.025825098156929016, -5.505360078927879e-8, 1]
+                                  },
+                                  "t": 1
+                                }
+                              ],
+                              [
+                                98,
+                                {
+                                  "$f32": {
+                                    "n": [1, -1.3361468376160701e-8, -3.4294524198230647e-7, 0, 1.0379839210372666e-8, 1.0000001192092896, 2.6913870243561178e-8, 0, 3.120002531886712e-7, -6.64935910776876e-8, 1.0000001192092896, 0, 1.635028645807779e-8, -1.4037295770208402e-9, -1.4122491620582878e-8, 1]
+                                  },
+                                  "t": 1
+                                }
+                              ],
+                              [
+                                99,
+                                {
+                                  "$f32": {
+                                    "n": [-0.16067266464233398, 0.06936783343553543, 0.9845671057701111, 0, -0.08264120668172836, 0.9930790066719055, -0.08345378935337067, 0, -0.9835418462753296, -0.09477456659078598, -0.15382811427116394, 0, 0.011151258833706379, 0.04799222573637962, -0.003549060318619013, 1]
+                                  },
+                                  "t": 1
+                                }
+                              ],
+                              [
+                                100,
+                                {
+                                  "$f32": {
+                                    "n": [0.9879631400108337, 0.035245515406131744, 0.15062019228935242, 0, -0.08830965310335159, 0.9279431700706482, 0.362108439207077, 0, -0.12700416147708893, -0.37105101346969604, 0.9198862910270691, 0, 0.00018564840138424188, 0.06705448031425476, 0.002534868661314249, 1]
+                                  },
+                                  "t": 1
+                                }
+                              ],
+                              [
+                                101,
+                                {
+                                  "$f32": {
+                                    "n": [0.9999738931655884, -0.007026248145848513, -0.00171015749219805, 0, 0.007231343537569046, 0.9715665578842163, 0.23665644228458405, 0, -0.0000013185092484491179, -0.23666265606880188, 0.9715920090675354, 0, 4.939581188523334e-8, 0.04451536014676094, 2.1669015026759553e-8, 1]
+                                  },
+                                  "t": 1
+                                }
+                              ],
+                              [
+                                102,
+                                {
+                                  "$f32": {
+                                    "n": [0.9998477101325989, 0.017408620566129684, 0.0012511368840932846, 0, -0.017431121319532394, 0.9923659563064575, 0.12209068983793259, 0, 0.0008837943314574659, -0.12209390848875046, 0.9925181865692139, 0, 5.427961013992899e-8, 0.028930164873600006, 2.4252724273310378e-8, 1]
+                                  },
+                                  "t": 1
+                                }
+                              ],
+                              [
+                                103,
+                                {
+                                  "$f32": {
+                                    "n": [0.9999998807907104, -2.2622364781454962e-7, -2.867622299618233e-7, 0, 1.8736727724899538e-7, 0.9999998807907104, -6.659853823975936e-8, 0, 4.094364101092651e-7, 3.146170257650738e-8, 0.9999999403953552, 0, -6.751384340475397e-9, -5.9176510802672055e-8, -1.346474789443164e-7, 1]
+                                  },
+                                  "t": 1
+                                }
+                              ],
+                              [
+                                104,
+                                {
+                                  "$f32": {
+                                    "n": [-0.13025206327438354, 0.20738238096237183, 0.969549834728241, 0, -0.06198449805378914, 0.9742644429206848, -0.2167179435491562, 0, -0.9895413517951965, -0.08832500874996185, -0.11404556035995483, 0, 0.020318567752838135, 0.04398379474878311, -0.0212489515542984, 1]
+                                  },
+                                  "t": 1
+                                }
+                              ],
+                              [
+                                105,
+                                {
+                                  "$f32": {
+                                    "n": [0.9347713589668274, -0.0979229062795639, 0.3414872884750366, 0, -0.10587073117494583, 0.8407912254333496, 0.530906081199646, 0, -0.33910733461380005, -0.5324293375015259, 0.7755804657936096, 0, -1.605928900971776e-8, 0.06271734833717346, -1.032610583706628e-7, 1]
+                                  },
+                                  "t": 1
+                                }
+                              ],
+                              [
+                                106,
+                                {
+                                  "$f32": {
+                                    "n": [0.99997478723526, 0.007018683478236198, 0.0010887206299230456, 0, -0.007102618925273418, 0.9881419539451599, 0.1533796191215515, 0, 6.306914883680292e-7, -0.15338347852230072, 0.988166868686676, 0, -2.8827164655353954e-8, 0.04027086868882179, -1.5580845058593695e-8, 1]
+                                  },
+                                  "t": 1
+                                }
+                              ],
+                              [
+                                107,
+                                {
+                                  "$f32": {
+                                    "n": [0.9998185634613037, -0.018649142235517502, -0.0038624072913080454, 0, 0.018911147490143776, 0.9481683373451233, 0.31720495223999023, 0, -0.0022533524315804243, -0.31722044944763184, 0.9483490586280823, 0, -1.2894254552975326e-8, 0.02857511304318905, -6.31272811801864e-8, 1]
+                                  },
+                                  "t": 1
+                                }
+                              ],
+                              [
+                                108,
+                                {
+                                  "$f32": {
+                                    "n": [1, 4.106454554175798e-8, -1.6704179017779097e-7, 0, 2.0121330379652136e-8, 1, -9.183140292634562e-8, 0, 1.5603772851591202e-7, 7.78319417804596e-8, 1, 0, -1.411481420632299e-8, 5.756301213466486e-9, 8.143193674925442e-9, 1]
+                                  },
+                                  "t": 1
+                                }
+                              ],
+                              [
+                                109,
+                                {
+                                  "$f32": {
+                                    "n": [-0.14603406190872192, 0.3247111737728119, 0.9344712495803833, 0, -0.04622224345803261, 0.9413264393806458, -0.334316611289978, 0, -0.9881989359855652, -0.09201499074697495, -0.12245676666498184, 0, 0.01869390346109867, 0.03183678537607193, -0.03674028441309929, 1]
+                                  },
+                                  "t": 1
+                                }
+                              ],
+                              [
+                                110,
+                                {
+                                  "$f32": {
+                                    "n": [0.9262270331382751, -0.12846945226192474, 0.35439953207969666, 0, -0.1042192205786705, 0.8162235021591187, 0.5682582855224609, 0, -0.36227306723594666, -0.5632714629173279, 0.7426193952560425, 0, -0.000778808316681534, 0.07523603737354279, 0.003782042069360614, 1]
+                                  },
+                                  "t": 1
+                                }
+                              ],
+                              [
+                                111,
+                                {
+                                  "$f32": {
+                                    "n": [0.9999650120735168, 0.008329115808010101, 0.0007740023429505527, 0, -0.008365010842680931, 0.9956720471382141, 0.09256023913621902, 0, 2.0113787968512042e-7, -0.09256348013877869, 0.9957068562507629, 0, 9.457592042849683e-9, 0.025048432871699333, 3.1827909197090776e-9, 1]
+                                  },
+                                  "t": 1
+                                }
+                              ],
+                              [
+                                112,
+                                {
+                                  "$f32": {
+                                    "n": [0.999782145023346, -0.020757529884576797, -0.0021828217431902885, 0, 0.02082148753106594, 0.9846245050430298, 0.17343901097774506, 0, -0.001450957264751196, -0.1734466850757599, 0.9848421812057495, 0, 5.935910252219401e-8, 0.020300868898630142, -5.7181573254183604e-8, 1]
+                                  },
+                                  "t": 1
+                                }
+                              ],
+                              [
+                                113,
+                                {
+                                  "$f32": {
+                                    "n": [1.0000001192092896, 1.4042167606476141e-7, 2.8424500086998705e-8, 0, -6.75117348691856e-8, 1.0000001192092896, 1.0838230934950843e-7, 0, -2.019055216351262e-7, -3.888629862558446e-8, 1.0000001192092896, 0, 5.553791204704339e-9, 2.2962284518257547e-8, -1.4578365892248257e-7, 1]
+                                  },
+                                  "t": 1
+                                }
+                              ],
+                              [
+                                114,
+                                {
+                                  "$f32": {
+                                    "n": [-0.9999999403953552, 1.5099580252808664e-7, 4.312467716260926e-9, 0, -1.7642175697760165e-12, -0.028560183942317963, 0.9995920658111572, 0, 1.510573639507129e-7, 0.9995920658111572, 0.028560250997543335, 0, 0.10639005154371262, -0.004385788459330797, -0.038419775664806366, 1]
+                                  },
+                                  "t": 1
+                                }
+                              ],
+                              [
+                                115,
+                                {
+                                  "$f32": {
+                                    "n": [1.0000001192092896, -1.6414861549012005e-14, -1.8008516769821292e-14, 0, 3.681826910950474e-15, 1, 5.684315119839668e-14, 0, -9.004466877438401e-19, -1.685874053691805e-7, 1, 0, 4.4034922375146834e-9, -2.7811784875098056e-8, -1.3103510809742147e-7, 1]
+                                  },
+                                  "t": 1
+                                }
+                              ],
+                              [
+                                116,
+                                {
+                                  "$f32": {
+                                    "n": [-0.9999999403953552, 1.5099580252808664e-7, 4.312467716260926e-9, 0, -1.7642175697760165e-12, -0.028560183942317963, 0.9995920658111572, 0, 1.510573639507129e-7, 0.9995920658111572, 0.028560250997543335, 0, -0.10639005154371262, -0.004385788459330797, -0.038419775664806366, 1]
+                                  },
+                                  "t": 1
+                                }
+                              ],
+                              [
+                                117,
+                                {
+                                  "$f32": {
+                                    "n": [1.0000001192092896, -1.6414861549012005e-14, -1.8008516769821292e-14, 0, 3.681826910950474e-15, 1, 5.684315119839668e-14, 0, -9.004466877438401e-19, -1.685874053691805e-7, 1, 0, -3.0470881373645398e-9, -2.7811408287448103e-8, -4.396782671278743e-8, 1]
+                                  },
+                                  "t": 1
+                                }
+                              ],
+                              [
+                                118,
+                                {
+                                  "$f32": {
+                                    "n": [5.960464477539063e-8, -4.4951903532819415e-8, 1, 0, -2.9802318834981634e-8, -1, -7.475422592051473e-8, 0, 1, 1.2012619563894593e-14, -8.940696716308594e-8, 0, 0, -0.791721761226654, 1.6006128787994385, 1]
+                                  },
+                                  "t": 1
+                                }
+                              ],
+                              [
+                                119,
+                                {
+                                  "$f32": {
+                                    "n": [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1]
+                                  },
+                                  "t": 1
+                                }
+                              ],
+                              [
+                                120,
+                                {
+                                  "$f32": {
+                                    "n": [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1]
+                                  },
+                                  "t": 1
+                                }
+                              ],
+                              [
+                                121,
+                                {
+                                  "$f32": {
+                                    "n": [1, 0, 0, 0, 0, -1.3435885648505064e-7, -0.9999999403953552, 0, 0, 0.9999999403953552, -1.3435885648505064e-7, 0, 0, 0, 0, 1]
+                                  },
+                                  "t": 1
+                                }
+                              ],
+                              [
+                                122,
+                                {
+                                  "$f32": {
+                                    "n": [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1]
+                                  },
+                                  "t": 1
+                                }
+                              ],
+                              [
+                                123,
+                                {
+                                  "$f32": {
+                                    "n": [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1]
+                                  },
+                                  "t": 1
+                                }
+                              ],
+                              [
+                                124,
+                                {
+                                  "$f32": {
+                                    "n": [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1]
+                                  },
+                                  "t": 1
+                                }
+                              ],
+                              [
+                                125,
+                                {
+                                  "$f32": {
+                                    "n": [1, 4.7885992948693e-9, 7.659771483758959e-8, 0, 4.7886161702592744e-9, -1, -2.687177129701013e-7, 0, 7.659771483758959e-8, 2.687177129701013e-7, -1, 0, 0, -1.6815127603511735e-15, 1.7586278045395075e-15, 1]
+                                  },
+                                  "t": 1
+                                }
+                              ],
+                              [
+                                126,
+                                {
+                                  "$f32": {
+                                    "n": [1, 5.213164901390725e-14, 2.384185791015625e-7, 0, -4.05244719346113e-14, 1, 3.667939594022003e-16, 0, -2.384185791015625e-7, -7.748985626749401e-16, 1, 0, -8.154031716735676e-23, 1.2021463223138638e-15, -1.3542171119497438e-15, 1]
+                                  },
+                                  "t": 1
+                                }
+                              ],
+                              [
+                                127,
+                                {
+                                  "$f32": {
+                                    "n": [1, 1.7321283787846567e-16, 1.4506935293672981e-15, 0, 1.7321283787846567e-16, 1, -7.748914687740068e-16, 0, 1.4506959645870215e-15, -7.748901982245859e-16, 1, 0, -4.261336283839512e-10, -0.16855834424495697, -0.0028221241664141417, 1]
+                                  },
+                                  "t": 1
+                                }
+                              ],
+                              [
+                                128,
+                                {
+                                  "$f32": {
+                                    "n": [1, 1.7321283787846567e-16, 1.4506935293672981e-15, 0, 1.7321283787846567e-16, 1, -7.748914687740068e-16, 0, 1.4506959645870215e-15, -7.748901982245859e-16, 1, 0, -3.8466370099386095e-17, -8.549839725091601e-10, 7.419140302111771e-11, 1]
+                                  },
+                                  "t": 1
+                                }
+                              ],
+                              [
+                                129,
+                                {
+                                  "$f32": {
+                                    "n": [1, 1.7321283787846567e-16, 1.4506935293672981e-15, 0, 1.7321283787846567e-16, 1, -7.748914687740068e-16, 0, 1.4506959645870215e-15, -7.748901982245859e-16, 1, 0, -5.316060092130925e-15, -0.27970191836357117, 1.6454265505672083e-8, 1]
+                                  },
+                                  "t": 1
+                                }
+                              ],
+                              [
+                                130,
+                                {
+                                  "$f32": {
+                                    "n": [1, 1.7321283787846567e-16, 1.4506935293672981e-15, 0, 1.7321283787846567e-16, 1, -7.748914687740068e-16, 0, 1.4506959645870215e-15, -7.748901982245859e-16, 1, 0, -4.8447710396879714e-17, -3.7247982476174e-14, -7.705430663205992e-16, 1]
+                                  },
+                                  "t": 1
+                                }
+                              ],
+                              [
+                                131,
+                                {
+                                  "$f32": {
+                                    "n": [1, 1.7321283787846567e-16, 1.4506935293672981e-15, 0, 1.7321283787846567e-16, 1, -7.748914687740068e-16, 0, 1.4506959645870215e-15, -7.748901982245859e-16, 1, 0, 2.1755901524755927e-9, 0.08977462351322174, 0.014408265240490437, 1]
+                                  },
+                                  "t": 1
+                                }
+                              ],
+                              [
+                                132,
+                                {
+                                  "$f32": {
+                                    "n": [1, 1.7321283787846567e-16, 1.4506935293672981e-15, 0, 1.7321283787846567e-16, 1, -7.748914687740068e-16, 0, 1.4506959645870215e-15, -7.748901982245859e-16, 1, 0, -6.557400852375732e-17, -3.0856586175076473e-9, -1.8854552641389688e-10, 1]
+                                  },
+                                  "t": 1
+                                }
+                              ],
+                              [
+                                133,
+                                {
+                                  "$f32": {
+                                    "n": [1, -6.488125415751592e-15, 1.4506955410705479e-15, 0, -6.646790356881847e-15, 0.9999999403953552, 1.728211486678316e-14, 0, -8.19457959063026e-15, -1.8831893780924674e-14, 0.9999999403953552, 0, -9.315989757396892e-9, -0.2925988435745239, -0.06169695779681206, 1]
+                                  },
+                                  "t": 1
+                                }
+                              ],
+                              [
+                                134,
+                                {
+                                  "$f32": {
+                                    "n": [1, 6.8345555384314964e-15, -1.276016086819735e-14, 0, 6.834555114915023e-15, 1, -2.9196602275606554e-14, 0, 1.5661549409239604e-14, 2.7646818279267356e-14, 1, 0, -5.641938230895125e-16, -1.4325968855644078e-8, 1.8401867807327221e-9, 1]
+                                  },
+                                  "t": 1
+                                }
+                              ],
+                              [
+                                135,
+                                {
+                                  "$f32": {
+                                    "n": [1, -1.1235246182706013e-16, 1.450687494257549e-15, 0, -1.1235246182706013e-16, 1, 3.667970298966341e-16, 0, 1.4506863295872465e-15, 3.667973475339893e-16, 1, 0, 1.4720690222347343e-9, -0.063268281519413, -0.016838494688272476, 1]
+                                  },
+                                  "t": 1
+                                }
+                              ],
+                              [
+                                136,
+                                {
+                                  "$f32": {
+                                    "n": [1, 5.213164901390725e-14, 2.384185791015625e-7, 0, -4.05244719346113e-14, 1, 3.667939594022003e-16, 0, -2.384185791015625e-7, -7.748985626749401e-16, 1, 0, -4.5090991618804827e-17, 9.799979494573563e-9, 5.404175440482106e-10, 1]
+                                  },
+                                  "t": 1
+                                }
+                              ]
+                            ],
+                            "nodeNames": [
+                              [
+                                0,
+                                "Sketchfab_model"
+                              ],
+                              [
+                                1,
+                                "fbx_merge.fbx"
+                              ],
+                              [
+                                2,
+                                "Object_2"
+                              ],
+                              [
+                                3,
+                                "RootNode"
+                              ],
+                              [
+                                4,
+                                "Camera"
+                              ],
+                              [
+                                5,
+                                "Object_5"
+                              ],
+                              [
+                                6,
+                                "SKM_Comando"
+                              ],
+                              [
+                                7,
+                                "SKM_Saps-12.002"
+                              ],
+                              [
+                                8,
+                                "SK_Comando"
+                              ],
+                              [
+                                9,
+                                "Object_9"
+                              ],
+                              [
+                                10,
+                                "_rootJoint"
+                              ],
+                              [
+                                11,
+                                "Object_11"
+                              ],
+                              [
+                                12,
+                                "Object_12"
+                              ],
+                              [
+                                13,
+                                "Object_13"
+                              ],
+                              [
+                                14,
+                                "root_01"
+                              ],
+                              [
+                                15,
+                                "DEF-spine_00"
+                              ],
+                              [
+                                16,
+                                "DEF-spine.001_02"
+                              ],
+                              [
+                                17,
+                                "DEF-spine.002_03"
+                              ],
+                              [
+                                18,
+                                "DEF-spine.003_04"
+                              ],
+                              [
+                                19,
+                                "DEF-spine.004_05"
+                              ],
+                              [
+                                20,
+                                "DEF-spine.005_06"
+                              ],
+                              [
+                                21,
+                                "DEF-spine.006_07"
+                              ],
+                              [
+                                22,
+                                "CB_Weapon_08"
+                              ],
+                              [
+                                23,
+                                "DEF-Weapon_09"
+                              ],
+                              [
+                                24,
+                                "MCH-torso.parent_010"
+                              ],
+                              [
+                                25,
+                                "torso_011"
+                              ],
+                              [
+                                26,
+                                "MCH-spine.001_012"
+                              ],
+                              [
+                                27,
+                                "spine_fk.001_013"
+                              ],
+                              [
+                                28,
+                                "MCH-spine_014"
+                              ],
+                              [
+                                29,
+                                "spine_fk_015"
+                              ],
+                              [
+                                30,
+                                "tweak_spine_016"
+                              ],
+                              [
+                                31,
+                                "ORG-spine_017"
+                              ],
+                              [
+                                32,
+                                "ORG-pelvis.L_018"
+                              ],
+                              [
+                                33,
+                                "DEF-pelvis.L_019"
+                              ],
+                              [
+                                34,
+                                "ORG-pelvis.R_020"
+                              ],
+                              [
+                                35,
+                                "DEF-pelvis.R_021"
+                              ],
+                              [
+                                36,
+                                "DEF-thigh.L_022"
+                              ],
+                              [
+                                37,
+                                "DEF-thigh.L.001_023"
+                              ],
+                              [
+                                38,
+                                "DEF-shin.L_024"
+                              ],
+                              [
+                                39,
+                                "DEF-shin.L.001_025"
+                              ],
+                              [
+                                40,
+                                "DEF-foot.L_026"
+                              ],
+                              [
+                                41,
+                                "DEF-toe.L_027"
+                              ],
+                              [
+                                42,
+                                "DEF-thigh.R_028"
+                              ],
+                              [
+                                43,
+                                "DEF-thigh.R.001_029"
+                              ],
+                              [
+                                44,
+                                "DEF-shin.R_030"
+                              ],
+                              [
+                                45,
+                                "DEF-shin.R.001_031"
+                              ],
+                              [
+                                46,
+                                "DEF-foot.R_032"
+                              ],
+                              [
+                                47,
+                                "DEF-toe.R_033"
+                              ],
+                              [
+                                48,
+                                "MCH-spine.002_034"
+                              ],
+                              [
+                                49,
+                                "spine_fk.002_035"
+                              ],
+                              [
+                                50,
+                                "MCH-spine.003_036"
+                              ],
+                              [
+                                51,
+                                "spine_fk.003_037"
+                              ],
+                              [
+                                52,
+                                "tweak_spine.003_038"
+                              ],
+                              [
+                                53,
+                                "ORG-spine.003_039"
+                              ],
+                              [
+                                54,
+                                "ORG-shoulder.L_040"
+                              ],
+                              [
+                                55,
+                                "DEF-shoulder.L_041"
+                              ],
+                              [
+                                56,
+                                "DEF-upper_arm.L_042"
+                              ],
+                              [
+                                57,
+                                "DEF-upper_arm.L.001_043"
+                              ],
+                              [
+                                58,
+                                "DEF-forearm.L_044"
+                              ],
+                              [
+                                59,
+                                "DEF-forearm.L.001_045"
+                              ],
+                              [
+                                60,
+                                "DEF-hand.L_046"
+                              ],
+                              [
+                                61,
+                                "ORG-palm.01.L_047"
+                              ],
+                              [
+                                62,
+                                "DEF-f_index.01.L_048"
+                              ],
+                              [
+                                63,
+                                "DEF-f_index.02.L_049"
+                              ],
+                              [
+                                64,
+                                "DEF-f_index.03.L_050"
+                              ],
+                              [
+                                65,
+                                "DEF-thumb.01.L_051"
+                              ],
+                              [
+                                66,
+                                "DEF-thumb.02.L_052"
+                              ],
+                              [
+                                67,
+                                "DEF-thumb.03.L_053"
+                              ],
+                              [
+                                68,
+                                "DEF-palm.01.L_054"
+                              ],
+                              [
+                                69,
+                                "ORG-palm.02.L_055"
+                              ],
+                              [
+                                70,
+                                "DEF-f_middle.01.L_056"
+                              ],
+                              [
+                                71,
+                                "DEF-f_middle.02.L_057"
+                              ],
+                              [
+                                72,
+                                "DEF-f_middle.03.L_058"
+                              ],
+                              [
+                                73,
+                                "DEF-palm.02.L_059"
+                              ],
+                              [
+                                74,
+                                "ORG-palm.03.L_060"
+                              ],
+                              [
+                                75,
+                                "DEF-f_ring.01.L_061"
+                              ],
+                              [
+                                76,
+                                "DEF-f_ring.02.L_062"
+                              ],
+                              [
+                                77,
+                                "DEF-f_ring.03.L_063"
+                              ],
+                              [
+                                78,
+                                "DEF-palm.03.L_064"
+                              ],
+                              [
+                                79,
+                                "ORG-palm.04.L_065"
+                              ],
+                              [
+                                80,
+                                "DEF-f_pinky.01.L_066"
+                              ],
+                              [
+                                81,
+                                "DEF-f_pinky.02.L_067"
+                              ],
+                              [
+                                82,
+                                "DEF-f_pinky.03.L_068"
+                              ],
+                              [
+                                83,
+                                "DEF-palm.04.L_069"
+                              ],
+                              [
+                                84,
+                                "ORG-shoulder.R_070"
+                              ],
+                              [
+                                85,
+                                "DEF-shoulder.R_071"
+                              ],
+                              [
+                                86,
+                                "DEF-upper_arm.R_072"
+                              ],
+                              [
+                                87,
+                                "DEF-upper_arm.R.001_073"
+                              ],
+                              [
+                                88,
+                                "DEF-forearm.R_074"
+                              ],
+                              [
+                                89,
+                                "DEF-forearm.R.001_075"
+                              ],
+                              [
+                                90,
+                                "DEF-hand.R_076"
+                              ],
+                              [
+                                91,
+                                "ORG-palm.01.R_077"
+                              ],
+                              [
+                                92,
+                                "DEF-f_index.01.R_078"
+                              ],
+                              [
+                                93,
+                                "DEF-f_index.02.R_079"
+                              ],
+                              [
+                                94,
+                                "DEF-f_index.03.R_080"
+                              ],
+                              [
+                                95,
+                                "DEF-thumb.01.R_081"
+                              ],
+                              [
+                                96,
+                                "DEF-thumb.02.R_082"
+                              ],
+                              [
+                                97,
+                                "DEF-thumb.03.R_083"
+                              ],
+                              [
+                                98,
+                                "DEF-palm.01.R_084"
+                              ],
+                              [
+                                99,
+                                "ORG-palm.02.R_085"
+                              ],
+                              [
+                                100,
+                                "DEF-f_middle.01.R_086"
+                              ],
+                              [
+                                101,
+                                "DEF-f_middle.02.R_087"
+                              ],
+                              [
+                                102,
+                                "DEF-f_middle.03.R_088"
+                              ],
+                              [
+                                103,
+                                "DEF-palm.02.R_089"
+                              ],
+                              [
+                                104,
+                                "ORG-palm.03.R_090"
+                              ],
+                              [
+                                105,
+                                "DEF-f_ring.01.R_091"
+                              ],
+                              [
+                                106,
+                                "DEF-f_ring.02.R_092"
+                              ],
+                              [
+                                107,
+                                "DEF-f_ring.03.R_093"
+                              ],
+                              [
+                                108,
+                                "DEF-palm.03.R_094"
+                              ],
+                              [
+                                109,
+                                "ORG-palm.04.R_095"
+                              ],
+                              [
+                                110,
+                                "DEF-f_pinky.01.R_096"
+                              ],
+                              [
+                                111,
+                                "DEF-f_pinky.02.R_097"
+                              ],
+                              [
+                                112,
+                                "DEF-f_pinky.03.R_098"
+                              ],
+                              [
+                                113,
+                                "DEF-palm.04.R_099"
+                              ],
+                              [
+                                114,
+                                "ORG-breast.L_0100"
+                              ],
+                              [
+                                115,
+                                "DEF-breast.L_0101"
+                              ],
+                              [
+                                116,
+                                "ORG-breast.R_0102"
+                              ],
+                              [
+                                117,
+                                "DEF-breast.R_0103"
+                              ],
+                              [
+                                118,
+                                "CB-Head_0104"
+                              ],
+                              [
+                                119,
+                                "SK_Spas-12.001"
+                              ],
+                              [
+                                120,
+                                "Object_120"
+                              ],
+                              [
+                                121,
+                                "_rootJoint"
+                              ],
+                              [
+                                122,
+                                "Object_122"
+                              ],
+                              [
+                                123,
+                                "Object_123"
+                              ],
+                              [
+                                124,
+                                "Object_124"
+                              ],
+                              [
+                                125,
+                                "CTRL-Root_0105"
+                              ],
+                              [
+                                126,
+                                "Root_0106"
+                              ],
+                              [
+                                127,
+                                "CTRL-bedroom_0107"
+                              ],
+                              [
+                                128,
+                                "DEF-bedroom_0108"
+                              ],
+                              [
+                                129,
+                                "CTRL-trigger_0109"
+                              ],
+                              [
+                                130,
+                                "DEF-trigger_0110"
+                              ],
+                              [
+                                131,
+                                "CTRL-Guardians_0111"
+                              ],
+                              [
+                                132,
+                                "DEF-Guardians_0112"
+                              ],
+                              [
+                                133,
+                                "CTRL-Bolt_0113"
+                              ],
+                              [
+                                134,
+                                "DEF-Bolt_0114"
+                              ],
+                              [
+                                135,
+                                "CTRL-case_0115"
+                              ],
+                              [
+                                136,
+                                "DEF-case_0116"
+                              ]
+                            ],
+                            "ikRig": null
+                          },
+                          "jointIndices": {
+                            "$idx": {
+                              "h": "f8f53df4f18b5a544c720a7233fb8d21acb4864e35c366eb8659cde763ad107a",
+                              "l": 349656,
+                              "bits": 16
+                            },
+                            "t": 1
+                          },
+                          "jointWeights": {
+                            "$f32": {
+                              "h": "e4ff2b663c3df81039da21f8dedd7898af1aa2107695daaf114d0f602c2cc009",
+                              "l": 699312
+                            },
+                            "t": 1
+                          },
+                          "animations": null,
+                          "materials": [
+                            {
+                              "type": "pbr",
+                              "baseColor": [1, 1, 1],
+                              "metallic": 1,
+                              "roughness": 1,
+                              "opacity": 1,
+                              "emissiveFactor": [0, 0, 0],
+                              "alphaCutoff": 0,
+                              "displacementScale": 0.05,
+                              "textures": {
+                                "baseColorTexture": "bfe26f23a11f08b30d55461597fe5db9",
+                                "metallicMap": "c8ebe6c572daca1039bcb5bdeddf809e",
+                                "roughnessMap": "c8ebe6c572daca1039bcb5bdeddf809e",
+                                "normalMap": "0bc7237186ef110c6e79c1099c119b9d",
+                                "occlusionMap": "c8ebe6c572daca1039bcb5bdeddf809e"
+                              },
+                              "config": {
+                                "side": "double",
+                                "wireframe": false,
+                                "transparent": false,
+                                "castShadow": false,
+                                "probeable": true
+                              }
+                            },
+                            {
+                              "type": "pbr",
+                              "baseColor": [1, 1, 1],
+                              "metallic": 0,
+                              "roughness": 1,
+                              "opacity": 1,
+                              "emissiveFactor": [0, 0, 0],
+                              "alphaCutoff": 0,
+                              "displacementScale": 0.05,
+                              "textures": {
+                                "baseColorTexture": "b4f73847aa3e807b48bbd4925d476e35",
+                                "metallicMap": "7ac965cf02b314f7fb6b87d1826219b4",
+                                "roughnessMap": "7ac965cf02b314f7fb6b87d1826219b4",
+                                "normalMap": "939dbd96cf76e31508f1f694ab848686",
+                                "occlusionMap": "7ac965cf02b314f7fb6b87d1826219b4"
+                              },
+                              "config": {
+                                "side": "double",
+                                "wireframe": false,
+                                "transparent": false,
+                                "castShadow": false,
+                                "probeable": true
+                              }
+                            },
+                            {
+                              "type": "pbr",
+                              "baseColor": [1, 1, 1],
+                              "metallic": 1,
+                              "roughness": 1,
+                              "opacity": 1,
+                              "emissiveFactor": [0, 0, 0],
+                              "alphaCutoff": 0,
+                              "displacementScale": 0.05,
+                              "textures": {
+                                "baseColorTexture": "8fae4bbf0bb540d033cde134e7299c49",
+                                "metallicMap": "78dc0596f88aae25df5ee2a3065d03e3",
+                                "roughnessMap": "78dc0596f88aae25df5ee2a3065d03e3",
+                                "normalMap": "fd5ede29ea9b1f683d7f1a33cecaaab6",
+                                "occlusionMap": "78dc0596f88aae25df5ee2a3065d03e3"
+                              },
+                              "config": {
+                                "side": "double",
+                                "wireframe": false,
+                                "transparent": false,
+                                "castShadow": false,
+                                "probeable": true
+                              }
+                            },
+                            {
+                              "type": "pbr",
+                              "baseColor": [1, 1, 1],
+                              "metallic": 1,
+                              "roughness": 1,
+                              "opacity": 1,
+                              "emissiveFactor": [0, 0, 0],
+                              "alphaCutoff": 0,
+                              "displacementScale": 0.05,
+                              "textures": {
+                                "baseColorTexture": "b4a0c77634c13ece38081fec5660bd9a",
+                                "metallicMap": "4e405ac3b2e7d201f0f8314a138ba332",
+                                "roughnessMap": "4e405ac3b2e7d201f0f8314a138ba332",
+                                "normalMap": "06490e0130fb6196e5b7c24d41d915a9",
+                                "occlusionMap": "4e405ac3b2e7d201f0f8314a138ba332"
+                              },
+                              "config": {
+                                "side": "double",
+                                "wireframe": false,
+                                "transparent": false,
+                                "castShadow": true,
+                                "probeable": true
+                              }
+                            }
+                          ],
+                          "submeshes": [
+                            {
+                              "start": 0,
+                              "count": 37980
+                            },
+                            {
+                              "start": 37980,
+                              "count": 28236
+                            },
+                            {
+                              "start": 66216,
+                              "count": 1716
+                            },
+                            {
+                              "start": 67932,
+                              "count": 97392
+                            }
+                          ]
+                        },
+                        "animationMappings": [],
+                        "stateMachine": {
+                          "parameters": [
+                            {
+                              "name": "Moving",
+                              "type": "bool",
+                              "default": false
+                            },
+                            {
+                              "name": "Sprinting",
+                              "type": "bool",
+                              "default": false
+                            },
+                            {
+                              "name": "Aim",
+                              "type": "bool",
+                              "default": false
+                            },
+                            {
+                              "name": "Equip",
+                              "type": "trigger",
+                              "default": false
+                            },
+                            {
+                              "name": "Fire",
+                              "type": "trigger",
+                              "default": false
+                            },
+                            {
+                              "name": "Reload",
+                              "type": "trigger",
+                              "default": false
+                            },
+                            {
+                              "name": "ReloadStart",
+                              "type": "trigger",
+                              "default": false
+                            },
+                            {
+                              "name": "ReloadEnd",
+                              "type": "trigger",
+                              "default": false
+                            },
+                            {
+                              "name": "Pump",
+                              "type": "trigger",
+                              "default": false
+                            }
+                          ],
+                          "states": [
+                            {
+                              "name": "Idle",
+                              "clipName": "Idle",
+                              "loop": true,
+                              "speed": 1,
+                              "isEntry": true,
+                              "x": 40,
+                              "y": 40
+                            },
+                            {
+                              "name": "IdleAim",
+                              "clipName": "Idle",
+                              "loop": true,
+                              "speed": 1,
+                              "isEntry": false,
+                              "x": 270,
+                              "y": 40
+                            },
+                            {
+                              "name": "Walk",
+                              "clipName": "Walk",
+                              "loop": true,
+                              "speed": 1,
+                              "isEntry": false,
+                              "x": 500,
+                              "y": 40
+                            },
+                            {
+                              "name": "WalkAim",
+                              "clipName": "Walk",
+                              "loop": true,
+                              "speed": 1,
+                              "isEntry": false,
+                              "x": 40,
+                              "y": 180
+                            },
+                            {
+                              "name": "Run",
+                              "clipName": "Run",
+                              "loop": true,
+                              "speed": 1,
+                              "isEntry": false,
+                              "x": 270,
+                              "y": 180
+                            }
+                          ],
+                          "transitions": [
+                            {
+                              "from": "Idle",
+                              "to": "IdleAim",
+                              "conditions": [],
+                              "minDwell": 0.04,
+                              "hasExitTime": false,
+                              "exitTime": 1,
+                              "condition": {
+                                "op": "and",
+                                "children": [
+                                  {
+                                    "param": "Moving",
+                                    "op": "false"
+                                  },
+                                  {
+                                    "param": "Aim",
+                                    "op": "true"
+                                  }
+                                ]
+                              },
+                              "blendTime": 0.16
+                            },
+                            {
+                              "from": "Idle",
+                              "to": "Walk",
+                              "conditions": [],
+                              "minDwell": 0.04,
+                              "hasExitTime": false,
+                              "exitTime": 1,
+                              "condition": {
+                                "op": "and",
+                                "children": [
+                                  {
+                                    "param": "Moving",
+                                    "op": "true"
+                                  },
+                                  {
+                                    "param": "Sprinting",
+                                    "op": "false"
+                                  },
+                                  {
+                                    "param": "Aim",
+                                    "op": "false"
+                                  }
+                                ]
+                              },
+                              "blendTime": 0.16
+                            },
+                            {
+                              "from": "Idle",
+                              "to": "WalkAim",
+                              "conditions": [],
+                              "minDwell": 0.04,
+                              "hasExitTime": false,
+                              "exitTime": 1,
+                              "condition": {
+                                "op": "and",
+                                "children": [
+                                  {
+                                    "param": "Moving",
+                                    "op": "true"
+                                  },
+                                  {
+                                    "param": "Aim",
+                                    "op": "true"
+                                  }
+                                ]
+                              },
+                              "blendTime": 0.16
+                            },
+                            {
+                              "from": "Idle",
+                              "to": "Run",
+                              "conditions": [],
+                              "minDwell": 0.04,
+                              "hasExitTime": false,
+                              "exitTime": 1,
+                              "condition": {
+                                "op": "and",
+                                "children": [
+                                  {
+                                    "param": "Moving",
+                                    "op": "true"
+                                  },
+                                  {
+                                    "param": "Sprinting",
+                                    "op": "true"
+                                  },
+                                  {
+                                    "param": "Aim",
+                                    "op": "false"
+                                  }
+                                ]
+                              },
+                              "blendTime": 0.16
+                            },
+                            {
+                              "from": "IdleAim",
+                              "to": "Idle",
+                              "conditions": [],
+                              "minDwell": 0.04,
+                              "hasExitTime": false,
+                              "exitTime": 1,
+                              "condition": {
+                                "op": "and",
+                                "children": [
+                                  {
+                                    "param": "Moving",
+                                    "op": "false"
+                                  },
+                                  {
+                                    "param": "Aim",
+                                    "op": "false"
+                                  }
+                                ]
+                              },
+                              "blendTime": 0.16
+                            },
+                            {
+                              "from": "IdleAim",
+                              "to": "Walk",
+                              "conditions": [],
+                              "minDwell": 0.04,
+                              "hasExitTime": false,
+                              "exitTime": 1,
+                              "condition": {
+                                "op": "and",
+                                "children": [
+                                  {
+                                    "param": "Moving",
+                                    "op": "true"
+                                  },
+                                  {
+                                    "param": "Sprinting",
+                                    "op": "false"
+                                  },
+                                  {
+                                    "param": "Aim",
+                                    "op": "false"
+                                  }
+                                ]
+                              },
+                              "blendTime": 0.16
+                            },
+                            {
+                              "from": "IdleAim",
+                              "to": "WalkAim",
+                              "conditions": [],
+                              "minDwell": 0.04,
+                              "hasExitTime": false,
+                              "exitTime": 1,
+                              "condition": {
+                                "op": "and",
+                                "children": [
+                                  {
+                                    "param": "Moving",
+                                    "op": "true"
+                                  },
+                                  {
+                                    "param": "Aim",
+                                    "op": "true"
+                                  }
+                                ]
+                              },
+                              "blendTime": 0.16
+                            },
+                            {
+                              "from": "IdleAim",
+                              "to": "Run",
+                              "conditions": [],
+                              "minDwell": 0.04,
+                              "hasExitTime": false,
+                              "exitTime": 1,
+                              "condition": {
+                                "op": "and",
+                                "children": [
+                                  {
+                                    "param": "Moving",
+                                    "op": "true"
+                                  },
+                                  {
+                                    "param": "Sprinting",
+                                    "op": "true"
+                                  },
+                                  {
+                                    "param": "Aim",
+                                    "op": "false"
+                                  }
+                                ]
+                              },
+                              "blendTime": 0.16
+                            },
+                            {
+                              "from": "Walk",
+                              "to": "Idle",
+                              "conditions": [],
+                              "minDwell": 0.04,
+                              "hasExitTime": false,
+                              "exitTime": 1,
+                              "condition": {
+                                "op": "and",
+                                "children": [
+                                  {
+                                    "param": "Moving",
+                                    "op": "false"
+                                  },
+                                  {
+                                    "param": "Aim",
+                                    "op": "false"
+                                  }
+                                ]
+                              },
+                              "blendTime": 0.16
+                            },
+                            {
+                              "from": "Walk",
+                              "to": "IdleAim",
+                              "conditions": [],
+                              "minDwell": 0.04,
+                              "hasExitTime": false,
+                              "exitTime": 1,
+                              "condition": {
+                                "op": "and",
+                                "children": [
+                                  {
+                                    "param": "Moving",
+                                    "op": "false"
+                                  },
+                                  {
+                                    "param": "Aim",
+                                    "op": "true"
+                                  }
+                                ]
+                              },
+                              "blendTime": 0.16
+                            },
+                            {
+                              "from": "Walk",
+                              "to": "WalkAim",
+                              "conditions": [],
+                              "minDwell": 0.04,
+                              "hasExitTime": false,
+                              "exitTime": 1,
+                              "condition": {
+                                "op": "and",
+                                "children": [
+                                  {
+                                    "param": "Moving",
+                                    "op": "true"
+                                  },
+                                  {
+                                    "param": "Aim",
+                                    "op": "true"
+                                  }
+                                ]
+                              },
+                              "blendTime": 0.16
+                            },
+                            {
+                              "from": "Walk",
+                              "to": "Run",
+                              "conditions": [],
+                              "minDwell": 0.04,
+                              "hasExitTime": false,
+                              "exitTime": 1,
+                              "condition": {
+                                "op": "and",
+                                "children": [
+                                  {
+                                    "param": "Moving",
+                                    "op": "true"
+                                  },
+                                  {
+                                    "param": "Sprinting",
+                                    "op": "true"
+                                  },
+                                  {
+                                    "param": "Aim",
+                                    "op": "false"
+                                  }
+                                ]
+                              },
+                              "blendTime": 0.16
+                            },
+                            {
+                              "from": "WalkAim",
+                              "to": "Idle",
+                              "conditions": [],
+                              "minDwell": 0.04,
+                              "hasExitTime": false,
+                              "exitTime": 1,
+                              "condition": {
+                                "op": "and",
+                                "children": [
+                                  {
+                                    "param": "Moving",
+                                    "op": "false"
+                                  },
+                                  {
+                                    "param": "Aim",
+                                    "op": "false"
+                                  }
+                                ]
+                              },
+                              "blendTime": 0.16
+                            },
+                            {
+                              "from": "WalkAim",
+                              "to": "IdleAim",
+                              "conditions": [],
+                              "minDwell": 0.04,
+                              "hasExitTime": false,
+                              "exitTime": 1,
+                              "condition": {
+                                "op": "and",
+                                "children": [
+                                  {
+                                    "param": "Moving",
+                                    "op": "false"
+                                  },
+                                  {
+                                    "param": "Aim",
+                                    "op": "true"
+                                  }
+                                ]
+                              },
+                              "blendTime": 0.16
+                            },
+                            {
+                              "from": "WalkAim",
+                              "to": "Walk",
+                              "conditions": [],
+                              "minDwell": 0.04,
+                              "hasExitTime": false,
+                              "exitTime": 1,
+                              "condition": {
+                                "op": "and",
+                                "children": [
+                                  {
+                                    "param": "Moving",
+                                    "op": "true"
+                                  },
+                                  {
+                                    "param": "Sprinting",
+                                    "op": "false"
+                                  },
+                                  {
+                                    "param": "Aim",
+                                    "op": "false"
+                                  }
+                                ]
+                              },
+                              "blendTime": 0.16
+                            },
+                            {
+                              "from": "WalkAim",
+                              "to": "Run",
+                              "conditions": [],
+                              "minDwell": 0.04,
+                              "hasExitTime": false,
+                              "exitTime": 1,
+                              "condition": {
+                                "op": "and",
+                                "children": [
+                                  {
+                                    "param": "Moving",
+                                    "op": "true"
+                                  },
+                                  {
+                                    "param": "Sprinting",
+                                    "op": "true"
+                                  },
+                                  {
+                                    "param": "Aim",
+                                    "op": "false"
+                                  }
+                                ]
+                              },
+                              "blendTime": 0.16
+                            },
+                            {
+                              "from": "Run",
+                              "to": "Idle",
+                              "conditions": [],
+                              "minDwell": 0.04,
+                              "hasExitTime": false,
+                              "exitTime": 1,
+                              "condition": {
+                                "op": "and",
+                                "children": [
+                                  {
+                                    "param": "Moving",
+                                    "op": "false"
+                                  },
+                                  {
+                                    "param": "Aim",
+                                    "op": "false"
+                                  }
+                                ]
+                              },
+                              "blendTime": 0.16
+                            },
+                            {
+                              "from": "Run",
+                              "to": "IdleAim",
+                              "conditions": [],
+                              "minDwell": 0.04,
+                              "hasExitTime": false,
+                              "exitTime": 1,
+                              "condition": {
+                                "op": "and",
+                                "children": [
+                                  {
+                                    "param": "Moving",
+                                    "op": "false"
+                                  },
+                                  {
+                                    "param": "Aim",
+                                    "op": "true"
+                                  }
+                                ]
+                              },
+                              "blendTime": 0.16
+                            },
+                            {
+                              "from": "Run",
+                              "to": "Walk",
+                              "conditions": [],
+                              "minDwell": 0.04,
+                              "hasExitTime": false,
+                              "exitTime": 1,
+                              "condition": {
+                                "op": "and",
+                                "children": [
+                                  {
+                                    "param": "Moving",
+                                    "op": "true"
+                                  },
+                                  {
+                                    "param": "Sprinting",
+                                    "op": "false"
+                                  },
+                                  {
+                                    "param": "Aim",
+                                    "op": "false"
+                                  }
+                                ]
+                              },
+                              "blendTime": 0.16
+                            },
+                            {
+                              "from": "Run",
+                              "to": "WalkAim",
+                              "conditions": [],
+                              "minDwell": 0.04,
+                              "hasExitTime": false,
+                              "exitTime": 1,
+                              "condition": {
+                                "op": "and",
+                                "children": [
+                                  {
+                                    "param": "Moving",
+                                    "op": "true"
+                                  },
+                                  {
+                                    "param": "Aim",
+                                    "op": "true"
+                                  }
+                                ]
+                              },
+                              "blendTime": 0.16
+                            }
+                          ],
+                          "layers": [
+                            {
+                              "name": "Actions",
+                              "blend": "override",
+                              "weight": 1,
+                              "states": [
+                                {
+                                  "name": "Off",
+                                  "clipName": "",
+                                  "loop": true,
+                                  "speed": 1,
+                                  "isEntry": true,
+                                  "x": 40,
+                                  "y": 40
+                                },
+                                {
+                                  "name": "Equip",
+                                  "clipName": "Equip",
+                                  "loop": false,
+                                  "speed": 1,
+                                  "isEntry": false,
+                                  "ikWeight": 0,
+                                  "triggers": [
+                                    {
+                                      "trigger": "Equip",
+                                      "blendTime": 0.06
+                                    }
+                                  ],
+                                  "x": 300,
+                                  "y": 40
+                                },
+                                {
+                                  "name": "Fire",
+                                  "clipName": "Fire",
+                                  "loop": false,
+                                  "speed": 1,
+                                  "isEntry": false,
+                                  "ikWeight": 0,
+                                  "triggers": [
+                                    {
+                                      "trigger": "Fire",
+                                      "blendTime": 0.06
+                                    }
+                                  ],
+                                  "x": 500,
+                                  "y": 40
+                                },
+                                {
+                                  "name": "Reload",
+                                  "clipName": "Reload",
+                                  "loop": false,
+                                  "speed": 1,
+                                  "isEntry": false,
+                                  "ikWeight": 0,
+                                  "triggers": [
+                                    {
+                                      "trigger": "Reload",
+                                      "blendTime": 0.06
+                                    }
+                                  ],
+                                  "x": 700,
+                                  "y": 40
+                                },
+                                {
+                                  "name": "ReloadStart",
+                                  "clipName": "ReloadStart",
+                                  "loop": false,
+                                  "speed": 1,
+                                  "isEntry": false,
+                                  "ikWeight": 0,
+                                  "triggers": [
+                                    {
+                                      "trigger": "ReloadStart",
+                                      "blendTime": 0.06
+                                    }
+                                  ],
+                                  "x": 900,
+                                  "y": 40
+                                },
+                                {
+                                  "name": "ReloadEnd",
+                                  "clipName": "ReloadEnd",
+                                  "loop": false,
+                                  "speed": 1,
+                                  "isEntry": false,
+                                  "ikWeight": 0,
+                                  "triggers": [
+                                    {
+                                      "trigger": "ReloadEnd",
+                                      "blendTime": 0.06
+                                    }
+                                  ],
+                                  "x": 300,
+                                  "y": 160
+                                },
+                                {
+                                  "name": "Pump",
+                                  "clipName": "Pump",
+                                  "loop": false,
+                                  "speed": 1,
+                                  "isEntry": false,
+                                  "ikWeight": 0,
+                                  "triggers": [
+                                    {
+                                      "trigger": "Pump",
+                                      "blendTime": 0.06
+                                    }
+                                  ],
+                                  "x": 500,
+                                  "y": 160
+                                }
+                              ],
+                              "transitions": [
+                                {
+                                  "from": "Equip",
+                                  "to": "Off",
+                                  "conditions": [],
+                                  "minDwell": 0,
+                                  "hasExitTime": true,
+                                  "exitTime": 0.846,
+                                  "blendTime": 0.18
+                                },
+                                {
+                                  "from": "Fire",
+                                  "to": "Off",
+                                  "conditions": [],
+                                  "minDwell": 0,
+                                  "hasExitTime": true,
+                                  "exitTime": 0.889,
+                                  "blendTime": 0.18
+                                },
+                                {
+                                  "from": "Reload",
+                                  "to": "Off",
+                                  "conditions": [],
+                                  "minDwell": 0,
+                                  "hasExitTime": true,
+                                  "exitTime": 0.892,
+                                  "blendTime": 0.18
+                                },
+                                {
+                                  "from": "ReloadStart",
+                                  "to": "Off",
+                                  "conditions": [],
+                                  "minDwell": 0,
+                                  "hasExitTime": true,
+                                  "exitTime": 0.82,
+                                  "blendTime": 0.18
+                                },
+                                {
+                                  "from": "ReloadEnd",
+                                  "to": "Off",
+                                  "conditions": [],
+                                  "minDwell": 0,
+                                  "hasExitTime": true,
+                                  "exitTime": 0.804,
+                                  "blendTime": 0.18
+                                },
+                                {
+                                  "from": "Pump",
+                                  "to": "Off",
+                                  "conditions": [],
+                                  "minDwell": 0,
+                                  "hasExitTime": true,
+                                  "exitTime": 0.856,
+                                  "blendTime": 0.18
+                                }
+                              ]
+                            }
+                          ],
+                          "events": [],
+                          "eventActions": [
+                            {
+                              "event": "shot",
+                              "actions": [
+                                {
+                                  "kind": "sound",
+                                  "target": "Sounds/ShotShotgun"
+                                },
+                                {
+                                  "kind": "spawn",
+                                  "template": "Muzzle Flash",
+                                  "at": "Muzzle",
+                                  "rotation": "camera",
+                                  "follow": true
+                                }
+                              ]
+                            }
+                          ],
+                          "controllerId": "b919f12894e4635ae9a56e37a7f28777"
+                        },
+                        "ragdoll": null
+                      }
+                    ],
+                    "variables": {},
+                    "spawnOnStart": true
+                  }
+                ],
+                "variables": {},
+                "spawnOnStart": true,
+                "camera": {
+                  "type": "perspective",
+                  "fov": 60,
+                  "near": 0.05,
+                  "far": 2000,
+                  "left": -1,
+                  "right": 1,
+                  "bottom": -1,
+                  "top": 1,
+                  "viewmodelFov": 58
+                },
+                "active": true,
+                "screenMaterials": []
+              }
+            ],
+            "variables": {
+              "__scriptId": {
+                "type": "string",
+                "value": "fe5e8d17ed7d4f9c554e56a29bd70869",
+                "access": "public"
+              }
+            },
+            "spawnOnStart": true,
+            "followId": "@path:Character/Mannequin",
+            "lookAtId": null,
+            "cameraNodeId": null,
+            "followOffset": [0, 1.5, 0],
+            "followSpace": "world",
+            "followDamping": [0.07999999821186066, 0.18000000715255737, 0.14000000059604645],
+            "followDampingSpace": "rig",
+            "aimMode": "orbit",
+            "lookAtOffset": [0, 1.600000023841858, 0],
+            "aimDamping": 0.05,
+            "yaw": 0,
+            "pitch": 12,
+            "yawSensitivity": 0.2,
+            "pitchSensitivity": 0.2,
+            "invertPitch": false,
+            "yawMin": null,
+            "yawMax": null,
+            "pitchMin": -55,
+            "pitchMax": 70,
+            "armLength": 1.9,
+            "socketOffset": [-0.5, 0.10000000149011612, 0],
+            "fovEnabled": false,
+            "fov": 60,
+            "fovDamping": 0.2,
+            "collisionEnabled": true,
+            "collisionRadius": 0.2,
+            "collisionMinRatio": 0.05,
+            "collisionPullTime": 0,
+            "collisionReturnTime": 0.35,
+            "collisionIgnoreIds": [],
+            "collisionLayers": -77,
+            "seeThroughLayers": 4,
+            "ditherRadius": 1,
+            "ditherStrength": 0.85,
+            "shakePositionAmplitude": [0.15000000596046448, 0.15000000596046448, 0.05000000074505806],
+            "shakeRotationAmplitude": [1.5, 1.5, 2.5],
+            "shakeFrequency": 22,
+            "shakeDecay": 1.4,
+            "scriptVars": {
+              "thirdPersonArm": 3.4,
+              "shoulderArm": 1.9,
+              "shoulderOffset": 0.5,
+              "aimArm": 1.25,
+              "aimShoulderOffset": 0.6,
+              "pivotHeight": 1.45
+            }
+          }
+        },
+        {
+          "parent": "Character",
+          "index": 4,
+          "node": {
+            "name": "HUD",
+            "type": "uiRoot",
+            "position": [0, 0, 0],
+            "rotation": [0, 0, 0],
+            "scale": [1, 1, 1],
+            "children": [
+              {
+                "name": "Crosshair",
+                "type": "uiPanel",
+                "position": [0, 0, 0],
+                "rotation": [0, 0, 0],
+                "scale": [1, 1, 1],
+                "children": [
+                  {
+                    "name": "Crosshair Dot",
+                    "type": "uiPanel",
+                    "position": [0, 0, 0],
+                    "rotation": [0, 0, 0],
+                    "scale": [1, 1, 1],
+                    "children": [],
+                    "variables": {},
+                    "spawnOnStart": true,
+                    "visible": true,
+                    "ui": {
+                      "anchorMin": [0.5, 0.5],
+                      "anchorMax": [0.5, 0.5],
+                      "offsetMin": [-1.5, -1.5],
+                      "offsetMax": [1.5, 1.5],
+                      "pivot": [0, 0],
+                      "rotationDeg": 0,
+                      "scale2d": [1, 1],
+                      "opacity": 1,
+                      "tint": [1, 1, 1, 0.9],
+                      "zOrder": 0,
+                      "interactive": false,
+                      "clip": false,
+                      "sizing": "fixed",
+                      "padding": [0, 0, 0, 0],
+                      "borderRadius": 1.5,
+                      "borderWidth": 0,
+                      "borderColor": [0, 0, 0, 1]
+                    }
+                  },
+                  {
+                    "name": "Crosshair Top",
+                    "type": "uiPanel",
+                    "position": [0, 0, 0],
+                    "rotation": [0, 0, 0],
+                    "scale": [1, 1, 1],
+                    "children": [],
+                    "variables": {},
+                    "spawnOnStart": true,
+                    "visible": true,
+                    "ui": {
+                      "anchorMin": [0.5, 0.5],
+                      "anchorMax": [0.5, 0.5],
+                      "offsetMin": [-1, -15],
+                      "offsetMax": [1, -8],
+                      "pivot": [0, 0],
+                      "rotationDeg": 0,
+                      "scale2d": [1, 1],
+                      "opacity": 1,
+                      "tint": [1, 1, 1, 0.9],
+                      "zOrder": 0,
+                      "interactive": false,
+                      "clip": false,
+                      "sizing": "fixed",
+                      "padding": [0, 0, 0, 0],
+                      "borderRadius": 0,
+                      "borderWidth": 0,
+                      "borderColor": [0, 0, 0, 1]
+                    }
+                  },
+                  {
+                    "name": "Crosshair Bottom",
+                    "type": "uiPanel",
+                    "position": [0, 0, 0],
+                    "rotation": [0, 0, 0],
+                    "scale": [1, 1, 1],
+                    "children": [],
+                    "variables": {},
+                    "spawnOnStart": true,
+                    "visible": true,
+                    "ui": {
+                      "anchorMin": [0.5, 0.5],
+                      "anchorMax": [0.5, 0.5],
+                      "offsetMin": [-1, 8],
+                      "offsetMax": [1, 15],
+                      "pivot": [0, 0],
+                      "rotationDeg": 0,
+                      "scale2d": [1, 1],
+                      "opacity": 1,
+                      "tint": [1, 1, 1, 0.9],
+                      "zOrder": 0,
+                      "interactive": false,
+                      "clip": false,
+                      "sizing": "fixed",
+                      "padding": [0, 0, 0, 0],
+                      "borderRadius": 0,
+                      "borderWidth": 0,
+                      "borderColor": [0, 0, 0, 1]
+                    }
+                  },
+                  {
+                    "name": "Crosshair Left",
+                    "type": "uiPanel",
+                    "position": [0, 0, 0],
+                    "rotation": [0, 0, 0],
+                    "scale": [1, 1, 1],
+                    "children": [],
+                    "variables": {},
+                    "spawnOnStart": true,
+                    "visible": true,
+                    "ui": {
+                      "anchorMin": [0.5, 0.5],
+                      "anchorMax": [0.5, 0.5],
+                      "offsetMin": [-15, -1],
+                      "offsetMax": [-8, 1],
+                      "pivot": [0, 0],
+                      "rotationDeg": 0,
+                      "scale2d": [1, 1],
+                      "opacity": 1,
+                      "tint": [1, 1, 1, 0.9],
+                      "zOrder": 0,
+                      "interactive": false,
+                      "clip": false,
+                      "sizing": "fixed",
+                      "padding": [0, 0, 0, 0],
+                      "borderRadius": 0,
+                      "borderWidth": 0,
+                      "borderColor": [0, 0, 0, 1]
+                    }
+                  },
+                  {
+                    "name": "Crosshair Right",
+                    "type": "uiPanel",
+                    "position": [0, 0, 0],
+                    "rotation": [0, 0, 0],
+                    "scale": [1, 1, 1],
+                    "children": [],
+                    "variables": {},
+                    "spawnOnStart": true,
+                    "visible": true,
+                    "ui": {
+                      "anchorMin": [0.5, 0.5],
+                      "anchorMax": [0.5, 0.5],
+                      "offsetMin": [8, -1],
+                      "offsetMax": [15, 1],
+                      "pivot": [0, 0],
+                      "rotationDeg": 0,
+                      "scale2d": [1, 1],
+                      "opacity": 1,
+                      "tint": [1, 1, 1, 0.9],
+                      "zOrder": 0,
+                      "interactive": false,
+                      "clip": false,
+                      "sizing": "fixed",
+                      "padding": [0, 0, 0, 0],
+                      "borderRadius": 0,
+                      "borderWidth": 0,
+                      "borderColor": [0, 0, 0, 1]
+                    }
+                  }
+                ],
+                "variables": {},
+                "spawnOnStart": true,
+                "visible": true,
+                "ui": {
+                  "anchorMin": [0.5, 0.5],
+                  "anchorMax": [0.5, 0.5],
+                  "offsetMin": [-40, -40],
+                  "offsetMax": [40, 40],
+                  "pivot": [0, 0],
+                  "rotationDeg": 0,
+                  "scale2d": [1, 1],
+                  "opacity": 0,
+                  "tint": [0, 0, 0, 0],
+                  "zOrder": 0,
+                  "interactive": false,
+                  "clip": false,
+                  "sizing": "fixed",
+                  "padding": [0, 0, 0, 0],
+                  "borderRadius": 0,
+                  "borderWidth": 0,
+                  "borderColor": [0, 0, 0, 1]
+                }
+              },
+              {
+                "name": "Ammunition",
+                "type": "uiPanel",
+                "position": [0, 0, 0],
+                "rotation": [0, 0, 0],
+                "scale": [1, 1, 1],
+                "children": [
+                  {
+                    "name": "Ammo",
+                    "type": "uiText",
+                    "position": [0, 0, 0],
+                    "rotation": [0, 0, 0],
+                    "scale": [1, 1, 1],
+                    "children": [],
+                    "variables": {},
+                    "spawnOnStart": true,
+                    "visible": true,
+                    "ui": {
+                      "anchorMin": [0, 0],
+                      "anchorMax": [0, 0],
+                      "offsetMin": [18, 8],
+                      "offsetMax": [170, 76],
+                      "pivot": [0, 0],
+                      "rotationDeg": 0,
+                      "scale2d": [1, 1],
+                      "opacity": 1,
+                      "tint": [1, 1, 1, 1],
+                      "zOrder": 0,
+                      "interactive": false,
+                      "clip": false,
+                      "sizing": "fixed",
+                      "padding": [0, 0, 0, 0],
+                      "borderRadius": 0,
+                      "borderWidth": 0,
+                      "borderColor": [0, 0, 0, 1],
+                      "text": "0",
+                      "fontSize": 56,
+                      "fontFamily": "",
+                      "fontWeight": 700,
+                      "align": "right",
+                      "vAlign": "top",
+                      "wrap": false,
+                      "lineHeight": 1.2
+                    }
+                  },
+                  {
+                    "name": "Reserve",
+                    "type": "uiText",
+                    "position": [0, 0, 0],
+                    "rotation": [0, 0, 0],
+                    "scale": [1, 1, 1],
+                    "children": [],
+                    "variables": {},
+                    "spawnOnStart": true,
+                    "visible": true,
+                    "ui": {
+                      "anchorMin": [0, 0],
+                      "anchorMax": [0, 0],
+                      "offsetMin": [178, 34],
+                      "offsetMax": [300, 70],
+                      "pivot": [0, 0],
+                      "rotationDeg": 0,
+                      "scale2d": [1, 1],
+                      "opacity": 1,
+                      "tint": [1, 1, 1, 1],
+                      "zOrder": 0,
+                      "interactive": false,
+                      "clip": false,
+                      "sizing": "fixed",
+                      "padding": [0, 0, 0, 0],
+                      "borderRadius": 0,
+                      "borderWidth": 0,
+                      "borderColor": [0, 0, 0, 1],
+                      "text": "/ 0",
+                      "fontSize": 28,
+                      "fontFamily": "",
+                      "fontWeight": 400,
+                      "align": "left",
+                      "vAlign": "top",
+                      "wrap": false,
+                      "lineHeight": 1.2
+                    }
+                  },
+                  {
+                    "name": "Weapon Name",
+                    "type": "uiText",
+                    "position": [0, 0, 0],
+                    "rotation": [0, 0, 0],
+                    "scale": [1, 1, 1],
+                    "children": [],
+                    "variables": {},
+                    "spawnOnStart": true,
+                    "visible": true,
+                    "ui": {
+                      "anchorMin": [0, 0],
+                      "anchorMax": [0, 0],
+                      "offsetMin": [18, 74],
+                      "offsetMax": [300, 102],
+                      "pivot": [0, 0],
+                      "rotationDeg": 0,
+                      "scale2d": [1, 1],
+                      "opacity": 1,
+                      "tint": [1, 1, 1, 1],
+                      "zOrder": 0,
+                      "interactive": false,
+                      "clip": false,
+                      "sizing": "fixed",
+                      "padding": [0, 0, 0, 0],
+                      "borderRadius": 0,
+                      "borderWidth": 0,
+                      "borderColor": [0, 0, 0, 1],
+                      "text": "",
+                      "fontSize": 22,
+                      "fontFamily": "",
+                      "fontWeight": 400,
+                      "align": "right",
+                      "vAlign": "top",
+                      "wrap": false,
+                      "lineHeight": 1.2
+                    }
+                  }
+                ],
+                "variables": {},
+                "spawnOnStart": true,
+                "visible": false,
+                "ui": {
+                  "anchorMin": [1, 1],
+                  "anchorMax": [1, 1],
+                  "offsetMin": [-340, -132],
+                  "offsetMax": [-24, -24],
+                  "pivot": [0, 0],
+                  "rotationDeg": 0,
+                  "scale2d": [1, 1],
+                  "opacity": 1,
+                  "tint": [0, 0, 0, 0.4],
+                  "zOrder": 0,
+                  "interactive": false,
+                  "clip": false,
+                  "sizing": "fixed",
+                  "padding": [0, 0, 0, 0],
+                  "borderRadius": 10,
+                  "borderWidth": 0,
+                  "borderColor": [0, 0, 0, 1]
+                }
+              },
+              {
+                "name": "Reloading",
+                "type": "uiText",
+                "position": [0, 0, 0],
+                "rotation": [0, 0, 0],
+                "scale": [1, 1, 1],
+                "children": [],
+                "variables": {},
+                "spawnOnStart": true,
+                "visible": false,
+                "ui": {
+                  "anchorMin": [0.5, 0.5],
+                  "anchorMax": [0.5, 0.5],
+                  "offsetMin": [-200, 70],
+                  "offsetMax": [200, 104],
+                  "pivot": [0, 0],
+                  "rotationDeg": 0,
+                  "scale2d": [1, 1],
+                  "opacity": 1,
+                  "tint": [1, 1, 1, 1],
+                  "zOrder": 0,
+                  "interactive": false,
+                  "clip": false,
+                  "sizing": "fixed",
+                  "padding": [0, 0, 0, 0],
+                  "borderRadius": 0,
+                  "borderWidth": 0,
+                  "borderColor": [0, 0, 0, 1],
+                  "text": "Reloading",
+                  "fontSize": 26,
+                  "fontFamily": "",
+                  "fontWeight": 600,
+                  "align": "center",
+                  "vAlign": "top",
+                  "wrap": false,
+                  "lineHeight": 1.2
+                }
+              }
+            ],
+            "variables": {},
+            "spawnOnStart": true,
+            "visible": true,
+            "ui": {
+              "anchorMin": [0, 0],
+              "anchorMax": [0, 0],
+              "offsetMin": [0, 0],
+              "offsetMax": [100, 100],
+              "pivot": [0, 0],
+              "rotationDeg": 0,
+              "scale2d": [1, 1],
+              "opacity": 1,
+              "tint": [1, 1, 1, 1],
+              "zOrder": 0,
+              "interactive": false,
+              "clip": false,
+              "sizing": "fixed",
+              "padding": [0, 0, 0, 0],
+              "borderRadius": 0,
+              "borderWidth": 0,
+              "borderColor": [0, 0, 0, 1],
+              "space": "screen",
+              "referenceResolution": [1920, 1080],
+              "scaleMode": "scaleWithScreen",
+              "matchWidthOrHeight": 0.5,
+              "referenceDpr": 1,
+              "uiTargetId": null,
+              "referenceDistance": 10,
+              "minScale": 0.1,
+              "maxScale": 4,
+              "billboard": true,
+              "clampToScreen": false,
+              "hideBehindCamera": true
+            }
+          }
+        },
+        {
+          "parent": "Character",
+          "index": 5,
+          "node": {
+            "name": "Player Controller",
+            "type": "controller",
+            "position": [0, 0, 0],
+            "rotation": [0, 0, 0],
+            "scale": [1, 1, 1],
+            "children": [],
+            "variables": {},
+            "spawnOnStart": true,
+            "possessedId": "@path:Character",
+            "aimSourceId": "@path:Character/Camera Rig",
+            "navMeshId": null,
+            "controlSource": "player",
+            "moveAction": "Move",
+            "lookAction": "Look",
+            "jumpAction": "Jump",
+            "sprintAction": "Sprint",
+            "crouchAction": "Crouch",
+            "crouchToggle": true,
+            "aimSource": "node",
+            "driveAimTarget": true,
+            "goal": "idle",
+            "targetKey": "target",
+            "goalPoint": [0, 0, 0],
+            "steering": {
+              "maxSpeed": 3,
+              "arriveRadius": 0.4,
+              "slowRadius": 2.5,
+              "standoff": 2,
+              "wanderRadius": 1.2,
+              "wanderDistance": 2.5,
+              "wanderJitter": 90,
+              "separationRadius": 1.5,
+              "avoidDistance": 0,
+              "avoidStrength": 1.5
+            },
+            "routeName": "",
+            "flockRadius": 6,
+            "separationWeight": 1.5,
+            "alignmentWeight": 1,
+            "cohesionWeight": 0.8,
+            "perception": {
+              "fieldOfView": 120,
+              "range": 20,
+              "memorySpan": 5,
+              "reactionTime": 0.25
+            },
+            "eyeHeight": 1.6,
+            "autoAcquire": true,
+            "repath": {
+              "interval": 0.5,
+              "targetDrift": 1.5
+            },
+            "waypointRadius": 0.5,
+            "whiskerCount": 3,
+            "whiskerSpread": 60,
+            "brain": "machine"
+          }
+        }
+      ],
+      "removed": [],
+      "scripts": {}
+    }
   }
 }

@@ -24,6 +24,7 @@ import { registerTemplates, clearTemplates } from '@engine/core/scene/templates'
 import { warmCopyJson } from '@engine/core/scene/spawnWarmup';
 import { spawnableSubtrees, unplacedTemplates } from '@editor/features/publish/spawnables';
 import { Events } from '@engine/core/events';
+import { useProjectScripts } from 'cleo/testing';
 
 // The Sandbox example: a mannequin with ALS-style locomotion built from the engine's own tools.
 // Almost everything that can go wrong with it is silent: a parameter bound to a field that does not exist reads
@@ -35,6 +36,9 @@ import { Events } from '@engine/core/events';
 const PROJECT = EXAMPLE;
 const present = dataReady();
 const sandbox = present ? await readThisExample() : null;
+// The class scripts import each other (SandboxPlayer and the NPCs build on '@/Characters/Mannequin/Scripts/SandboxCharacter'):
+// every script of the project registered as a module, as Play registers them.
+if (present) useProjectScripts(EXAMPLE);
 const read = (...parts: string[]) => sandbox!.read(...parts);
 const library = (name: string): any[] => read('libraries', `${name}.json`) ?? [];
 const allNodes = (root: any): any[] => { const out: any[] = []; const walk = (n: any) => { out.push(n); (n.children ?? []).forEach(walk); }; walk(root); return out; };
@@ -70,7 +74,10 @@ describe.skipIf(!present)('the Sandbox example project', { timeout: 300_000 }, (
     const sceneFile = () => read('scenes', `${read('manifest.json').mainSceneId}.json`);
     const nodes = () => allNodes(sceneFile().scene);
     const named = (name: string) => nodes().find(n => n.name === name);
-    const rig = () => library('rigs')[0];
+    /** The player's Character: the Player template's, placed as "Player Collider" (every NPC has a Character too). */
+    const playerJson = () => named('Player Collider').children.find((c: any) => c.type === 'character');
+    /** The Mannequin's rig (the get-up clips came with rigs of their own). */
+    const rig = () => library('rigs').find((r: any) => r.name === 'Mannequin');
     const machine = () => named('Mannequin').stateMachine;
 
     // ----- the bundle -------------------------------------------------------------------------------
@@ -244,7 +251,7 @@ describe.skipIf(!present)('the Sandbox example project', { timeout: 300_000 }, (
     }
 
     /** The stair paces the build fitted (SandboxPlayer's public attributes): horizontal m/s. */
-    const pace = (name: 'stairUpWalkSpeed' | 'stairUpRunSpeed' | 'stairDownWalkSpeed' | 'stairDownRunSpeed') => named('Player').scriptVars[name] as number;
+    const pace = (name: 'stairUpWalkSpeed' | 'stairUpRunSpeed' | 'stairDownWalkSpeed' | 'stairDownRunSpeed') => playerJson().scriptVars[name] as number;
     /** Whether the Stairs blend space has clips for going down (clips.ts stairCheck passed them). */
     const downInBlend = () => (machine().states.find((s: any) => s.name === 'Stairs')?.field?.samples ?? []).some((s: any) => s.x < 0);
     /** The blend space's heaviest clip this frame. */
@@ -358,7 +365,7 @@ describe.skipIf(!present)('the Sandbox example project', { timeout: 300_000 }, (
         for (const [gait, back, latest] of [['jog', 3, 0.8], ['sprint', 7, 1.6]] as const) for (const f of FLIGHTS) {
             const c = flight(f, { gait, back });
             console.log(`stairs ${f.name} ${gait} up: ${c.topSpeed.toFixed(2)} m/s at most, slowing from ${c.brakeAt.toFixed(2)} m short of the first riser, ${c.atFirstRiser.toFixed(2)} m/s at it, ${c.mean.toFixed(2)} on the flight`);
-            expect(c.topSpeed, `${f.name} ${gait}: up to speed`).toBeGreaterThan((gait === 'sprint' ? named('Player').runSpeed : named('Player').walkSpeed) * 0.95);
+            expect(c.topSpeed, `${f.name} ${gait}: up to speed`).toBeGreaterThan((gait === 'sprint' ? playerJson().runSpeed : playerJson().walkSpeed) * 0.95);
             expect(c.brakeAt, `${f.name} ${gait}: slows from`).toBeGreaterThan(0);
             expect(c.brakeAt, `${f.name} ${gait}: slows from`).toBeLessThan(latest);
             expect(c.atFirstRiser, f.name).toBeLessThan(pace('stairUpRunSpeed') * 1.15);
@@ -504,7 +511,7 @@ describe.skipIf(!present)('the Sandbox example project', { timeout: 300_000 }, (
         console.log(`bumps: capsule at most ${highest.toFixed(3)} m up, slowest ${slowest.toFixed(2)} m/s, ${onBumps.length} of ${over.length} foot rays on a bump, highest ${Math.max(...onBumps.map(h => h.y)).toFixed(2)} m`);
         // The capsule stays on the ground at full pace: the bumps are not in its way.
         expect(highest).toBeLessThan(0.03);
-        expect(slowest).toBeGreaterThan(named('Player').walkSpeed * 0.9);
+        expect(slowest).toBeGreaterThan(playerJson().walkSpeed * 0.9);
         // The feet are: a good share of their rays over the strip land on a bump, above the ground.
         expect(onBumps.length).toBeGreaterThan(over.length * 0.3);
         expect(onBumps.every(h => h.y > 0)).toBe(true);
@@ -578,7 +585,11 @@ describe.skipIf(!present)('the Sandbox example project', { timeout: 300_000 }, (
     it('names only clips its skeleton owns, and links every parameter to something that exists', () => {
         const own = library('animations').filter(a => a.rigId === rig().id)
         const clipNames = new Set(own.map(a => a.clips[0].name));
-        expect(new Set(rig().animationIds)).toEqual(new Set(own.map(a => a.id)));
+        // Its own clips, and the get-up clips its reactions play: imported with skeletons of their own (Mixamo's)
+        // and linked to it, retargeted onto the Mannequin when they play.
+        const linked = library('animations').filter(a => rig().animationIds.includes(a.id) && a.rigId !== rig().id);
+        expect(linked.map(a => a.name).sort()).toEqual(['Getting Up', 'Stand Up']);
+        expect(new Set(rig().animationIds)).toEqual(new Set([...own, ...linked].map(a => a.id)));
         const sm = machine();
         for (const s of sm.states) {
             if (s.field) for (const sample of s.field.samples) expect(clipNames.has(sample.clipName), sample.clipName).toBe(true);
@@ -630,7 +641,13 @@ describe.skipIf(!present)('the Sandbox example project', { timeout: 300_000 }, (
         for (const [name, node] of [['SandboxPlayer', 'Player'], ['SandboxCamera', 'Camera Rig'], ['SandboxCar', 'Car'], ['SandboxCarCamera', 'Car Camera Rig'], ['SandboxGameManager', 'Game Manager']]) {
             const script = library('scripts').find(s => s.name === name);
             // The node runs the script's own .ts (a reader puts the source back on it, as Play does).
-            expect(named(node).script, node).toBe(script.source);
+            expect((node === 'Player' ? playerJson() : named(node)).script, node).toBe(script.source);
+        }
+        // And every NPC its kind's.
+        const kinds = new Map(library('templates').map((t: any) => [t.id, t.name]));
+        for (const npc of named('NPCs').children) {
+            const want = ({ Civilian: 'SandboxCivilian', Enemy: 'SandboxEnemy' } as Record<string, string>)[kinds.get(npc.variables.__templateId.value) as string];
+            expect(npc.children[0].script, npc.name).toBe(library('scripts').find(s => s.name === want).source);
         }
         const actions = read('libraries', 'inputMap.json').maps.find((m: any) => m.name === 'Gameplay').actions.map((a: any) => a.name);
         for (const a of ['Move', 'Look', 'Jump', 'Sprint', 'Walk', 'Interact', 'Drive', 'Day', 'Sunset', 'Night', 'Reload', 'Crouch', 'View']) expect(actions).toContain(a);
@@ -668,14 +685,15 @@ describe.skipIf(!present)('the Sandbox example project', { timeout: 300_000 }, (
     function play(at?: [number, number, number], ikRig: Record<string, unknown> = {}, character: Record<string, unknown> = {}, yaw?: number, editMachine?: (sm: any) => void) {
         const file = sceneFile();
         const scene = new Scene();
-        const tree = withoutModels(file.scene);
+        // The player alone: the NPCs walk, look round and fight on their own (npcs.test.ts plays them).
+        const tree = withoutModels({ ...file.scene, children: file.scene.children.filter((c: any) => c.name !== 'NPCs') });
         if (at) tree.children.find((c: any) => c.name === 'Player Collider').position = at;
         // Facing `yaw` (degrees), the body and the camera behind it.
         if (yaw !== undefined) {
             tree.children.find((c: any) => c.name === 'Player Collider').rotation = [0, yaw, 0];
             for (const n of allNodes(tree)) if (n.type === 'cameraRig') n.yaw = yaw;
         }
-        Object.assign(allNodes(tree).find((n: any) => n.name === 'Player'), character);
+        Object.assign(tree.children.find((c: any) => c.name === 'Player Collider').children.find((c: any) => c.type === 'character'), character);
         scene.parse({ ...file, scene: tree }, true);
         const physics = new PhysicsSystem({ gravity: [0, -9.82, 0], backend: TEST_PHYSICS } as any);
         physics.initialize();
@@ -703,8 +721,8 @@ describe.skipIf(!present)('the Sandbox example project', { timeout: 300_000 }, (
         // Where a ModelNode keeps it, for the scripts that fire its triggers (SandboxPlayer getting into the car).
         (model as any).animator = animator;
         scene.start();
-        const player = scene.findNode('Player') as CharacterNode & Record<string, any>;
         const collider = scene.findNode('Player Collider') as Node;
+        const player = collider.children.find((c: any) => c.nodeType === 'character') as CharacterNode & Record<string, any>;
         const rigs = player.children.filter((c: any) => c.nodeType === 'cameraRig') as CameraRigNode[];
         const trace: string[] = [];
         /** Every state the machine was in, in order, with how long it stayed. */
@@ -784,8 +802,8 @@ describe.skipIf(!present)('the Sandbox example project', { timeout: 300_000 }, (
 
     for (const gait of ['walk', 'jog', 'sprint'] as const) {
         it(`${gait}s in eight directions in the locomotion blend, facing the camera`, () => {
-            const jog = named('Player').walkSpeed, sprint = named('Player').runSpeed;
-            const walk = jog * named('Player').scriptVars.walkScale;
+            const jog = playerJson().walkSpeed, sprint = playerJson().runSpeed;
+            const walk = jog * playerJson().scriptVars.walkScale;
             for (const [name, x, y, dir] of DIRECTIONS) {
                 // In the open, clear of the course.
                 const p = play(OPEN);
@@ -912,7 +930,7 @@ describe.skipIf(!present)('the Sandbox example project', { timeout: 300_000 }, (
         let apex = 0;
         input.tap('Jump');
         p.run(2.5, () => { apex = Math.max(apex, p.collider.worldPosition[1]); });
-        const jumpSpeed = named('Player').jumpSpeed;
+        const jumpSpeed = playerJson().jumpSpeed;
         expect(apex).toBeGreaterThan(jumpSpeed * jumpSpeed / (2 * 9.82) * 0.9);
         expect(apex).toBeLessThan(jumpSpeed * jumpSpeed / (2 * 9.82) * 1.1);
         expect(p.trace).toEqual(['Idle', 'JumpStand', 'JumpLand', 'Idle']);
@@ -1020,7 +1038,7 @@ describe.skipIf(!present)('the Sandbox example project', { timeout: 300_000 }, (
         const p = play(OPEN);
         p.run(0.5);
         const base = p.player.acceleration;
-        const takeoff = named('Player').scriptVars.sprintTakeoff;
+        const takeoff = playerJson().scriptVars.sprintTakeoff;
         expect(takeoff).toBeLessThan(base * 0.7);
         input.press('Sprint');
         input.setMove(0, 1);
@@ -1410,7 +1428,7 @@ describe.skipIf(!present)('the Sandbox example project', { timeout: 300_000 }, (
         const unplaced = unplacedTemplates(library('templates'), placed);
         const names = unplaced.map(t => t.name);
         for (const name of ['Muzzle Flash', 'Bullet Impact', 'Bullet Hole', 'Tracer']) expect(names, name).toContain(name);
-        for (const name of ['Player', 'Environment', 'Course']) expect(names, name).not.toContain(name);
+        for (const name of ['Player', 'Civilian', 'Enemy', 'Environment', 'Course']) expect(names, name).not.toContain(name);
         const subtrees = spawnableSubtrees(unplaced, library('materials')) as any[];
         const flash = warmCopyJson(subtrees.find(s => s.name === 'Muzzle Flash'));
         const inside = allNodes(flash);
@@ -1426,7 +1444,7 @@ describe.skipIf(!present)('the Sandbox example project', { timeout: 300_000 }, (
     it('is a Player template, placed once, with the attributes each character sets public', () => {
         const templates = library('templates');
         // A folder lists its templates in explorer order, not in the order the generator made them.
-        for (const name of ['Player', 'Environment', 'Course', 'Car']) expect(templates.some((t: any) => t.name === name), name).toBe(true);
+        for (const name of ['Player', 'Sandbox Character', 'Civilian', 'Enemy', 'Environment', 'Course', 'Car']) expect(templates.some((t: any) => t.name === name), name).toBe(true);
         const template = templates.find((t: any) => t.name === 'Player');
         // The scene lists the templates placed in it, as the editor saves it; the ones scripts spawn by name (the
         // shot's effects) are not placed, and a published game bakes every template in the library anyway.
@@ -1463,14 +1481,118 @@ describe.skipIf(!present)('the Sandbox example project', { timeout: 300_000 }, (
         expect(publics('SandboxPlayer')).toEqual(['backDiagonalScale', 'backScale', 'enterTrigger', 'exitTrigger', 'eyeCrouch', 'eyeStand', 'runFootSpeed', 'runFootWeight', 'runTurnSpeed', 'sprintTakeoff',
             'stairDownRunSpeed', 'stairDownWalkSpeed', 'stairUpRunSpeed', 'stairUpWalkSpeed', 'stairsLayer', 'turnDelay', 'walkBackDiagonalScale', 'walkFootSpeed', 'walkScale']);
         expect(publics('SandboxCamera')).toEqual(['aimArm', 'aimShoulderOffset', 'crouchDrop', 'pivotHeight', 'shoulderArm', 'shoulderOffset', 'thirdPersonArm']);
-        // The template keeps its nodes' sources the way the editor saves a template: out of the nodes, in its
-        // `scripts` map by node id, each node linked to its script asset by `__scriptId`. They are the scene's.
+        // The template links its nodes to their script assets by `__scriptId` (what Play bakes them from), the scene's
+        // own; a copy of a source it keeps in its `scripts` map (by node id, the editor's format) is the current one.
         const character = inside.find((n: any) => n.type === 'character');
         const cameraRig = inside.find((n: any) => n.type === 'cameraRig');
-        expect(template.scripts[character.id]).toBe(named('Player').script);
-        expect(template.scripts[cameraRig.id]).toBe(named('Camera Rig').script);
-        expect(character.variables.__scriptId.value).toBe(named('Player').variables.__scriptId.value);
+        expect(character.variables.__scriptId.value).toBe(library('scripts').find(s => s.name === 'SandboxPlayer').id);
+        for (const [id, source] of Object.entries(template.scripts ?? {})) {
+            const n = inside.find((x: any) => x.id === id);
+            expect(n, id).toBeTruthy();
+            expect(source, n.name).toBe(library('scripts').find(s => s.id === n.variables.__scriptId.value).source);
+        }
+        expect(character.variables.__scriptId.value).toBe(playerJson().variables.__scriptId.value);
         expect(cameraRig.variables.__scriptId.value).toBe(named('Camera Rig').variables.__scriptId.value);
+    });
+
+    it('builds the Player, the Civilian and the Enemy on one Sandbox Character: the same body, model, rig, animations and reactions', () => {
+        const templates = new Map(library('templates').map((t: any) => [t.name, t]));
+        const base = templates.get('Sandbox Character');
+        expect(base.variant).toBeUndefined();
+        for (const name of ['Player', 'Civilian', 'Enemy']) expect(templates.get(name).variant?.baseTemplateId, name).toBe(base.id);
+        // The body: the capsule, the Character, the Mannequin, the weapons and their sounds. A civilian carries none;
+        // an enemy all of them; each NPC has its AI Controller.
+        const types = (t: any) => allNodes(t.nodeJson).map((n: any) => n.type);
+        const weapon = ['node', 'node', 'model', 'node'];
+        const body = ['collider', 'character', 'model', 'node', ...weapon, ...weapon, ...weapon, 'node', 'sound', 'sound', 'sound'];
+        expect(types(base)).toEqual(body);
+        expect(types(templates.get('Civilian'))).toEqual(['collider', 'character', 'model', 'controller']);
+        expect(types(templates.get('Enemy'))).toEqual([...body, 'controller']);
+        // SandboxCharacter on the base's Character, each variant's a class of its own built on it.
+        const characterOf = (t: any) => allNodes(t.nodeJson).find((n: any) => n.type === 'character');
+        const scriptOf = (t: any) => library('scripts').find(s => s.id === characterOf(t).variables.__scriptId.value)?.name;
+        expect(['Sandbox Character', 'Player', 'Civilian', 'Enemy'].map(n => scriptOf(templates.get(n)))).toEqual(['SandboxCharacter', 'SandboxPlayer', 'SandboxCivilian', 'SandboxEnemy']);
+        const source = (name: string) => library('scripts').find(s => s.name === name).source as string;
+        expect(source('SandboxPlayer')).toMatch(/import SandboxCharacterNode from '@\/Characters\/Mannequin\/Scripts\/SandboxCharacter'[\s\S]*class SandboxPlayerNode extends SandboxCharacterNode/);
+        expect(source('SandboxNpc')).toMatch(/import SandboxCharacterNode from '@\/Characters\/Mannequin\/Scripts\/SandboxCharacter'[\s\S]*class SandboxNpcNode extends SandboxCharacterNode/);
+        for (const name of ['SandboxCivilian', 'SandboxEnemy']) expect(source(name), name).toMatch(/import SandboxNpcNode from '@\/Characters\/NPCs\/Scripts\/SandboxNpc'[\s\S]*extends SandboxNpcNode/);
+        // The player's model, machine and reactions everywhere: its rig's reaction set on every skin, getting up on
+        // the Mixamo get-up clips.
+        const mannequin = (t: any) => allNodes(t.nodeJson).find((n: any) => n.name === 'Mannequin');
+        const player = mannequin(templates.get('Player'));
+        for (const name of ['Player', 'Sandbox Character', 'Civilian', 'Enemy']) {
+            const m = mannequin(templates.get(name));
+            expect(m.variables.__modelId.value, name).toBe(player.variables.__modelId.value);
+            expect(JSON.stringify(m.stateMachine), name).toBe(JSON.stringify(player.stateMachine));
+            const sets = m.model.skin.reactionSets;
+            const set = sets?.sets?.find((s: any) => s.id === sets.defaultSet);
+            expect(set?.behaviours?.getUp?.clips, name).toEqual({ faceDown: 'Getting Up', faceUp: 'Stand Up' });
+        }
+        for (const clip of ['Getting Up', 'Stand Up']) expect(library('animations').some((a: any) => a.name === clip), clip).toBe(true);
+        // Blue and red: each its own copy of the Mannequin's material, its textures kept, both links to it agreeing.
+        const materials = new Map(library('materials').map((m: any) => [m.id, m]));
+        const own = (name: string) => materials.get(mannequin(templates.get(name)).variables.__materialId.value) as any;
+        const [civ, enemy, plain] = [own('Civilian'), own('Enemy'), own('Player')];
+        expect([civ.name, enemy.name, plain.name]).toEqual(['Mannequin Civilian', 'Mannequin Enemy', 'Mannequin']);
+        expect(civ.material.baseColor[2]).toBeGreaterThan(civ.material.baseColor[0] * 3);
+        expect(enemy.material.baseColor[0]).toBeGreaterThan(enemy.material.baseColor[2] * 5);
+        for (const m of [civ, enemy]) expect(m.material.textures, m.name).toEqual(plain.material.textures);
+        for (const name of ['Civilian', 'Enemy']) {
+            const v = mannequin(templates.get(name)).variables;
+            expect(JSON.parse(v.__materialIds.value), name).toEqual([v.__materialId.value]);
+        }
+        // The brains: an AI Controller each, possessing its Character, seeing as far and as wide as its script.
+        for (const [name, range, fov] of [['Civilian', 16, 150], ['Enemy', 24, 120]] as const) {
+            const t = templates.get(name);
+            const ctrl = allNodes(t.nodeJson).find((n: any) => n.type === 'controller');
+            const character = characterOf(t);
+            expect([ctrl.name, ctrl.controlSource, ctrl.brain, ctrl.autoAcquire, ctrl.possessedId], name).toEqual(['AI Controller', 'ai', 'none', false, character.id]);
+            expect([ctrl.perception.range, ctrl.perception.fieldOfView], name).toEqual([range, fov]);
+            expect([character.scriptVars.sightRange, character.scriptVars.sightAngle], name).toEqual([range, fov]);
+        }
+        // An enemy carries the rifle, and its shots sound where it is.
+        expect(characterOf(templates.get('Enemy')).scriptVars.preferredWeapon).toBe(2);
+        for (const cue of allNodes(templates.get('Enemy').nodeJson).filter((n: any) => n.type === 'sound'))
+            expect([cue.sound.mode, cue.sound.refDistance, cue.sound.maxDistance], cue.name).toEqual(['spatial', 4, 90]);
+    });
+
+    it("places six civilians and four enemies in pairs, away from the start, on a nav mesh with the enemies' patrol routes", () => {
+        const kinds = new Map(library('templates').map((t: any) => [t.id, t.name]));
+        const npcs = named('NPCs').children;
+        const kind = (n: any) => kinds.get(n.variables?.__templateId?.value);
+        expect(npcs.filter((n: any) => kind(n) === 'Civilian')).toHaveLength(6);
+        expect(npcs.filter((n: any) => kind(n) === 'Enemy')).toHaveLength(4);
+        const planar = (a: number[], b: number[]) => Math.hypot(a[0] - b[0], a[2] - b[2]);
+        const start = named('Player Collider').position;
+        for (const n of npcs) expect(planar(n.position, start), n.name).toBeGreaterThan(8);
+        // Two and two: each enemy has its partner within a few metres.
+        const enemies = npcs.filter((n: any) => kind(n) === 'Enemy');
+        for (const e of enemies) expect(enemies.some((o: any) => o !== e && planar(o.position, e.position) < 4), e.name).toBe(true);
+        // What there is to look at, and to hide behind.
+        const points = named('NPC Points').children.map((c: any) => c.name);
+        expect(points.filter((n: string) => n.startsWith('Look Point')).length).toBeGreaterThanOrEqual(10);
+        expect(points.filter((n: string) => n.startsWith('Cover Point')).length).toBeGreaterThanOrEqual(12);
+        // The nav mesh: baked, every NPC and every route point on it, every leg of a route walkable.
+        const nav = named('NavMesh');
+        expect(nav.type).toBe('navMesh');
+        expect(nav.routes.map((r: any) => [r.name, r.loop])).toEqual([['Patrol Pillars', true], ['Patrol Crates', true]]);
+        const scene = new Scene();
+        scene.parse({ ...sceneFile(), scene: withoutModels(sceneFile().scene) }, true);
+        const mesh = (scene.findNode('NavMesh') as any).mesh;
+        expect(mesh).toBeTruthy();
+        for (const n of npcs) expect(mesh.locate([n.position[0], 0.5, n.position[2]], true), n.name).toBeTruthy();
+        for (const r of nav.routes) {
+            r.points.forEach((a: number[], i: number) => {
+                expect(mesh.locate([a[0], 0.5, a[2]], true), `${r.name} ${i}`).toBeTruthy();
+                const b = r.points[(i + 1) % r.points.length];
+                expect(mesh.findPath(a, b, [])?.length, `${r.name} ${i} to ${(i + 1) % r.points.length}`).toBeGreaterThan(0);
+            });
+        }
+        // Each pair patrols its own: the nearest route is the one by it.
+        const nearest = (p: number[]) => nav.routes.map((r: any) => [r.name, Math.min(...r.points.map((q: number[]) => planar(p, q)))])
+            .sort((x: any, y: any) => x[1] - y[1])[0][0];
+        expect(enemies.map((e: any) => [e.name, nearest(e.position)])).toEqual([
+            ['Enemy Pillars 1', 'Patrol Pillars'], ['Enemy Pillars 2', 'Patrol Pillars'], ['Enemy Crates 1', 'Patrol Crates'], ['Enemy Crates 2', 'Patrol Crates']]);
     });
 
     it('keeps its sky and its course in templates of their own', () => {
@@ -1482,8 +1604,9 @@ describe.skipIf(!present)('the Sandbox example project', { timeout: 300_000 }, (
         expect(course.type).toBe('collider');
         expect(allNodes(course).filter((n: any) => n.type === 'collider').reduce((k: number, n: any) => k + n.collider.shapes.length, 0)).toBeGreaterThan(40);
         // The scene's top level is the placements: the sky, the ocean, the GI over the floor and the light probe over it
-        // all, the Game Manager and its HUD, the player, the car, the props and the course.
-        expect(sceneFile().scene.children.map((c: any) => c.name)).toEqual(['Environment', 'Ocean', 'GI Volume', 'Light Probe', 'Game Manager', 'HUD', 'Player Collider', 'Car', 'Props', 'Static Collision']);
+        // all, the Game Manager and its HUD, the player, the car, the props, the course, and the NPCs: the people, what
+        // they look at and hide behind, and the nav mesh they walk.
+        expect(sceneFile().scene.children.map((c: any) => c.name)).toEqual(['Environment', 'Ocean', 'GI Volume', 'Light Probe', 'Game Manager', 'HUD', 'Player Collider', 'Car', 'Props', 'Static Collision', 'NPCs', 'NPC Points', 'NavMesh']);
         // And the running scene still finds its sun, sky and sky light inside the Environment.
         const scene = new Scene();
         scene.parse({ ...sceneFile(), scene: withoutModels(sceneFile().scene) }, true);
@@ -1557,7 +1680,7 @@ describe.skipIf(!present)('the Sandbox example project', { timeout: 300_000 }, (
         p.run(0.5);
         input.setMove(0, 1);
         p.run(1.5);
-        const jog = named('Player').walkSpeed;
+        const jog = playerJson().walkSpeed;
         // Off a ledge 3.6 m up, running: lifted with its speed kept.
         const at = p.collider.worldPosition;
         p.collider.setWorldPosition([at[0], at[1] + 3.6, at[2]]);
@@ -2283,8 +2406,8 @@ describe.skipIf(!present)('the Sandbox example project', { timeout: 300_000 }, (
 
     for (const [weapon, set] of [[2, 'Rifle'], [1, 'Pistol']] as const) {
         it(`walks and jogs in eight directions on the ${set.toLowerCase()}'s own clips, facing the camera, its feet holding`, () => {
-            const jog = named('Player').walkSpeed;
-            const walk = jog * named('Player').scriptVars.walkScale;
+            const jog = playerJson().walkSpeed;
+            const walk = jog * playerJson().scriptVars.walkScale;
             const lines: string[] = [];
             for (const gait of ['walk', 'jog'] as const) for (const [name, x, y, dir] of DIRECTIONS) {
                 const p = play(OPEN);
@@ -2444,7 +2567,7 @@ describe.skipIf(!present)('the Sandbox example project', { timeout: 300_000 }, (
         expect(named('Pistol Grip').scriptVars.auto).toBe(false);
         // The crosshair, the ammunition and the reload are the Player's own: a screen canvas in the Player template
         // (every copy has its own), the crosshair hidden until a weapon is out. The scene's HUD keeps the controls.
-        const playerHud = named('Player Collider').children.find((c: any) => c.name === 'Player')
+        const playerHud = playerJson()
             .children.find((c: any) => c.name === 'HUD');
         expect(playerHud?.type).toBe('uiRoot');
         expect(playerHud.children.map((c: any) => c.name)).toEqual(['Crosshair', 'Ammunition', 'Reloading']);
@@ -2890,7 +3013,7 @@ describe.skipIf(!present)('the Sandbox example project', { timeout: 300_000 }, (
             expect(pr.variables?.__templateId, `${pr.name} is a template instance`).toBeDefined();
         }
         const effects = ['Muzzle Flash', 'Bullet Impact', 'Bullet Hole', 'Tracer'];
-        const made = ['Player', 'Environment', 'Course', 'Car'];
+        const made = ['Player', 'Sandbox Character', 'Civilian', 'Enemy', 'Environment', 'Course', 'Car'];
         const kinds = library('templates').map((t: any) => t.name).filter((n: string) => !effects.includes(n) && !made.includes(n)).sort();
         expect(kinds).toEqual(['Ball', 'Barrel', 'Big Ball', 'Crate', 'Large Crate', 'Plank', 'Small Crate']);
         // Placed at rest: two seconds with nobody near them moves nothing more than a barrel lying on its side rolling

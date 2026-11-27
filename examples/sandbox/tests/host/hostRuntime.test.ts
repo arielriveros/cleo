@@ -29,7 +29,7 @@ describe('HostRuntime on the Sandbox', () => {
         expect(mannequin.animator).toBeTruthy();
         expect(mannequin.model.animations.length).toBeGreaterThan(40);
         // The Player's class script is attached (its fields are the node's own).
-        const player = [...r.scene.nodes].find((n: any) => n.name === 'Player') as any;
+        const player = [...r.scene.nodes].find((n: any) => n.nodeType === 'character' && n.team === 'player') as any;
         expect(typeof player.walkScale).toBe('number');
         expect(player.hasMoveInput).toBe(false);
         const crate = [...r.scene.nodes].find((n: any) => n.name === 'Crate') as any;

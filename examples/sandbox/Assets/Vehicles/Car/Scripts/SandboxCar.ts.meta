@@ -73,6 +73,53 @@
         }
       },
       {
+        "name": "knockSpeed",
+        "type": {
+          "kind": "number"
+        },
+        "access": "private",
+        "default": 2.5,
+        "hidden": false,
+        "attribute": {
+          "group": "Impacts",
+          "min": 0,
+          "max": 20,
+          "step": 0.1,
+          "tooltip": "A character hit closing faster than this (m/s) is knocked down; slower, it is only pushed by the body."
+        }
+      },
+      {
+        "name": "warnSpeed",
+        "type": {
+          "kind": "number"
+        },
+        "access": "private",
+        "default": 3,
+        "hidden": false,
+        "attribute": {
+          "group": "Impacts",
+          "min": 0,
+          "max": 20,
+          "step": 0.1,
+          "tooltip": "Faster than this (m/s) the car warns who is ahead of it, as far as it goes in `warnSeconds`."
+        }
+      },
+      {
+        "name": "warnSeconds",
+        "type": {
+          "kind": "number"
+        },
+        "access": "private",
+        "default": 2,
+        "hidden": false,
+        "attribute": {
+          "group": "Impacts",
+          "min": 0,
+          "max": 5,
+          "step": 0.05
+        }
+      },
+      {
         "name": "_vehicle",
         "type": {
           "kind": "node",
@@ -258,6 +305,15 @@
       },
       {
         "name": "_driver",
+        "type": {
+          "kind": "number"
+        },
+        "access": "private",
+        "default": 0,
+        "hidden": true
+      },
+      {
+        "name": "_warnWait",
         "type": {
           "kind": "number"
         },
