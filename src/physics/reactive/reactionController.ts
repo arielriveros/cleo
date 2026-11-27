@@ -187,11 +187,17 @@ export class ReactionController {
     public get stateTime(): number { return this._stateTime; }
     /** A reaction has the body (anything but plain animation). */
     public get reacting(): boolean { return this._state !== 'animated'; }
-    /** Off its feet: falling, tumbling, down, getting up or dead. */
-    public get isDown(): boolean { return ['falling', 'tumble', 'down', 'getUp', 'dead'].includes(this._state); }
+    /**
+     * Off its feet: falling, tumbling, down, getting up (to the end of its get-up clip and the blend back onto the
+     * animation: the recovery that follows it) or dead.
+     */
+    public get isDown(): boolean {
+        return this._offFeet() || (this._state === 'recover' && this._recoverFromGetUp);
+    }
     /**
      * The character keeps its control: on its feet, flinching or staggering (its Collider live, its legs on its
-     * animation); a script goes on moving, aiming and firing it. False only off its feet ({@link isDown}).
+     * animation); a script goes on moving, aiming and firing it. False off its feet ({@link isDown}), the whole
+     * get-up included: a brain or a stick that took over before the clip had finished walked the body out of it.
      */
     public get hasControl(): boolean { return !this.isDown; }
     /** On its feet with a reaction running: the legs on the animation, the upper body following it. */
@@ -353,6 +359,12 @@ export class ReactionController {
         return !!this._physics.capabilities?.kinematicParts;
     }
 
+    /** On the ground or on its way to it: falling, tumbling, down, getting up, dead. */
+    private _offFeet(): boolean {
+        const s = this._state;
+        return s === 'falling' || s === 'tumble' || s === 'down' || s === 'getUp' || s === 'dead';
+    }
+
     /** On its feet: plain animation, a flinch, a stagger, or a recovery from them (not from a get-up). */
     private _onFeetState(): boolean {
         const s = this._state;
@@ -479,7 +491,7 @@ export class ReactionController {
     public knockOut(seconds = 4): void {
         if (!this._ensure()) return;
         this._unconsciousUntil = this._time + seconds;
-        this._go(this.isDown ? this._state : 'falling');
+        this._go(this._offFeet() ? this._state : 'falling');
     }
 
     /** Dies: falls limp and never gets up. */

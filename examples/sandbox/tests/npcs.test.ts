@@ -459,6 +459,31 @@ describe.skipIf(!present)(`the Sandbox's NPCs (${TEST_PHYSICS})`, { timeout: 300
         expect(leap, 'the farthest a foot moved in a tick').toBeLessThan(0.2);
     });
 
+    // Mixamo's get-up runs eight seconds. The brain took the NPC back the moment the reaction left getUp (the clip's last
+    // quarter second and the blend still to play), and a long reaction tripped the stuck rescue in the middle of the
+    // clip: either way it walked off while it still climbed up.
+    it('knocked down, an enemy stays put until its get-up is over, even when that takes past its stuck rescue', async () => {
+        // The player in its sight: up, it would go after it at once.
+        const p = await play({ npcs: { 'Enemy Pillars 1': true }, player: { at: [6, 0.02, -15], yaw: 90 } });
+        const en = p.npc('Enemy Pillars 1');
+        // A rescue sooner than its fall, its lying and its clip take.
+        en.stuckSeconds = 5;
+        await p.run(1.5);
+        en.reactions.push([0, 0.4, 3.5]);
+        const { trail, note } = reactionTrail(en);
+        let movedRising = 0, brainWhileRising = new Set<string>();
+        await p.run(14, undefined, () => {
+            note();
+            if (/getUp|recover/.test(en.reactions.state)) {
+                movedRising = Math.max(movedRising, Math.hypot(en.velocity[0], en.velocity[2]));
+                brainWhileRising.add(en.state);
+            }
+        });
+        expect(trail.join('>')).toMatch(/getUp>recover>animated/);
+        expect(movedRising, 'moving while it got up').toBeLessThan(0.2);
+        expect([...brainWhileRising]).toEqual(['knocked']);
+    });
+
     it('knocked down and shot again while it gets up, a civilian goes back down and gets up again', async () => {
         const p = await play({ npcs: { 'Civilian 1': { at: [32, 0, -24], yaw: 180 } }, player: { at: [32, 0.02, -34], yaw: 0 } });
         const civ = p.npc('Civilian 1');

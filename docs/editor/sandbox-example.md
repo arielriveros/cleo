@@ -665,7 +665,7 @@ The player in sight sends an enemy that is going about its patrol (patrol, look,
 - **Knock-downs.** One round is a flinch. Hits add up (**Stagger Shock**, **Knockdown Shock**, fading by half every
   **Shock Half Life**): past the first it staggers, past the second, or hit in the legs running, it falls.
 - **It never dies.** Its health is kept full, a body lying longer than **Down Seconds** is got up, and one reacting
-  longer than **Stuck Seconds** is put back on its feet. While it is off its feet the brain is **knocked**; a flinch
+  longer than **Stuck Seconds** is put back on its feet (a get-up under way does not count: its clip plays out). While it is off its feet the brain is **knocked**; a flinch
   or a stagger it stays up through keeps the brain where it was (it goes on patrolling, fighting or fleeing).
 
 `SandboxCivilian.ts` (blue) waits at a **Look Point**, its head sweeping round what is there, then walks 10 to 40 m

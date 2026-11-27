@@ -47,7 +47,7 @@ it, a powered ragdoll is made from the pose it holds, and the reaction moves thr
 | falling | Off its feet: it braces, covers its head, lands on bent knees or flails on a long drop. |
 | tumble | Rolling down stairs, a slope or away from a vehicle: curled up, head covered. |
 | down | Lying on the ground. It may writhe for a while if it was hurt. |
-| getUp | Getting up, face up or face down, on a get-up clip or pulled up by its strings. A hit or a shove knocks it back down. |
+| getUp | Getting up, face up or face down, on a get-up clip or pulled up by its strings. A hit or a shove knocks it back down. It has no control until the get-up is over (its clip and the blend after it). |
 | recover | Back on its feet: the skin blends from the body to the animation (on its feet, once the upper body follows the animation closely). |
 | dead | Killed: limp, and stays down. |
 

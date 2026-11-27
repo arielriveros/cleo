@@ -458,6 +458,21 @@ describe.each(BACKENDS)('reactions that look right on %s', backend => {
         expect(turned).toBeLessThan(20);
     });
 
+    it('has no control until its get-up is over: through the clip and the blend back onto the animation', () => {
+        const s = person(0);
+        const seen: string[] = [];
+        let early = false;
+        for (let f = 0; f < 900 && !(seen.includes('recover') && s.r.state === 'animated'); f++) {
+            if (f === 3) s.r.trip();
+            step(s);
+            const tag = `${s.r.state}:${s.r.hasControl}`;
+            if (seen[seen.length - 1] !== tag) seen.push(tag);
+            if (s.r.state !== 'animated' && s.r.hasControl) early = true;
+        }
+        expect(seen.join('>')).toMatch(/getUp:false>recover:false>animated:true$/);
+        expect(early).toBe(false);
+    });
+
     it('is knocked back down by a hit while it gets up', () => {
         const s = person();
         let after = '';

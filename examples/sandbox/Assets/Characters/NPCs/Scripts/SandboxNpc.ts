@@ -514,14 +514,19 @@ export default class SandboxNpcNode extends SandboxCharacterNode {
         return false
     }
 
-    /** It never dies: health kept full, a body down too long got up, one reacting too long put back on its feet. */
+    /**
+     * It never dies: health kept full, a body down too long got up, one reacting too long put back on its feet. A
+     * get-up under way is no reaction stuck: its clip (eight seconds of Mixamo's) is let finish, or the NPC was put
+     * back on its feet, and moving, while it still climbed up.
+     */
     private _keepAlive(delta: number): void {
         const reactions = this.reactions
         if (!reactions) return
         reactions.health = 1
         if (!reactions.alive) { reactions.reset(); return }
         this._downFor = reactions.state === 'down' ? this._downFor + delta : 0
-        this._reactingFor = reactions.reacting ? this._reactingFor + delta : 0
+        const rising = reactions.state === 'getUp' || reactions.state === 'recover'
+        this._reactingFor = reactions.reacting && !rising ? this._reactingFor + delta : 0
         if (this._downFor > this.downSeconds) { this._downFor = 0; reactions.getUp() }
         if (this._reactingFor > this.stuckSeconds) { this._reactingFor = 0; reactions.reset() }
     }

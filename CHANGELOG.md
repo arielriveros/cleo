@@ -95,6 +95,10 @@ in a hand. Turn-in-place picks the right clip when the camera swings behind.
   without. Opening a template brings them up to its model's, and saving it keeps them.
 - **Fix: linking a material to a model with a one-entry material list left the list naming the old material.** The
   node then matched the old material's edits and missed its own.
+- **Fix: an enemy could start moving before its get-up had finished.** Its control came back the moment the reaction
+  left getUp, with the clip's last moments and the blend onto the animation still to play; `isDown` (and
+  `hasControl`) now cover the whole get-up. The Sandbox's NPCs no longer count a get-up under way toward their stuck
+  rescue, which put them back on their feet, and moving, in the middle of Mixamo's eight-second clip.
 - **Fix: a character reacting on its feet had its legs snap and leap.** Its legs, kinematic on the animation, counted
   as ground to every ground-only ray (`groundOnly` passes kinematic bodies): foot placement stood each foot on its own
   shin, 60 cm up, again and again. A ragdoll's parts are never ground now. Shoved (a stagger), its feet are no longer

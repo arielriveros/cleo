@@ -16,7 +16,9 @@ const reactions = this.scene.physics.reactionsFor(node)   // a Character, its mo
 ```
 
 While a character is on its feet (`reactions.hasControl`: flinching or staggering, not `isDown`) it keeps its
-Collider and its control: a script goes on moving, aiming and firing it. `reactions.busyHands = { L, R }` tells it
+Collider and its control: a script goes on moving, aiming and firing it. Off its feet `isDown` is true and
+`hasControl` false, until a get-up is quite over: its clip played out and the skin back on the animation (the
+`recover` that follows `getUp`), so a brain or a stick does not walk the body out of it. `reactions.busyHands = { L, R }` tells it
 which hands hold something and must not leave it for a wound (null, the default: both while the animator's
 support-hand IK holds a weapon in two hands).
 
