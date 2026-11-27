@@ -95,6 +95,11 @@ in a hand. Turn-in-place picks the right clip when the camera swings behind.
   without. Opening a template brings them up to its model's, and saving it keeps them.
 - **Fix: linking a material to a model with a one-entry material list left the list naming the old material.** The
   node then matched the old material's edits and missed its own.
+- **Fix: a character reacting on its feet had its legs snap and leap.** Its legs, kinematic on the animation, counted
+  as ground to every ground-only ray (`groundOnly` passes kinematic bodies): foot placement stood each foot on its own
+  shin, 60 cm up, again and again. A ragdoll's parts are never ground now. Shoved (a stagger), its feet are no longer
+  held planted while the capsule slides under them (`Animator.footLockSuppressed`), so they do not stretch behind and
+  snap; and shoves add up to two Stumble speeds at most, not a sprint.
 - **Fix: with the physics worker, a character shot on its feet stretched its upper body away from its hips without
   end.** Its hips, kinematic on the animation, were sped toward the animation from a pose the worker had not caught
   up to yet, faster every frame; and a part made kinematic before the worker copied it was copied without its mass,

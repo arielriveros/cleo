@@ -112,6 +112,10 @@ function clampLength(v: number[], max: number): number[] {
     if (!Number.isFinite(n)) return [0, 0, 0];
     return n > max ? [v[0] * max / n, v[1] * max / n, v[2] * max / n] : v;
 }
+/** The fastest shoves add up to, in Stumble speeds. */
+const MAX_KNOCK_SPEEDS = 2;
+/** A shove faster than this (m/s) lets the feet go (Animator.footLockSuppressed): they cannot stay planted. */
+const KNOCK_UNLOCKS_FEET = 0.15;
 /** A part of the body that is the animation's while the character stands (kinematic on it). */
 const LOWER = (region: string) => region === 'pelvis' || region === 'legs' || region === 'feet';
 
@@ -379,9 +383,15 @@ export class ReactionController {
 
     private _knock(v: ArrayLike<number>, halfLife: number): void {
         this._knockHalfLife = Math.max(0.05, halfLife);
-        this._knockV[0] += v[0]; this._knockV[2] += v[2];
+        // Shoves add up, to a stumble's pace at most: a burst stacked them past a run, the legs flailing at it.
+        const k = this._knockV, max = MAX_KNOCK_SPEEDS * Math.max(0.1, this.set.thresholds.stumbleSpeed);
+        let nx = k[0] + v[0], nz = k[2] + v[2];
+        const n = Math.hypot(nx, nz);
+        if (n > max) { nx *= max / n; nz *= max / n; }
+        const dx = nx - k[0], dz = nz - k[2];
+        k[0] = nx; k[2] = nz;
         const character = this._character() as { knockback?: (v: ArrayLike<number>, halfLife?: number) => void } | null;
-        if (character && typeof character.knockback === 'function') character.knockback([v[0], 0, v[2]], this._knockHalfLife);
+        if (character && typeof character.knockback === 'function' && (dx !== 0 || dz !== 0)) character.knockback([dx, 0, dz], this._knockHalfLife);
     }
 
     /**
@@ -1036,6 +1046,8 @@ export class ReactionController {
             const standing = this._standingState();
             animator.ikSuppressed = !standing;
             animator.handIkSuppressed = !standing;
+            // Shoved, the capsule slides under the feet: they follow the animation rather than stay planted.
+            animator.footLockSuppressed = standing && Math.hypot(this._knockV[0], this._knockV[2]) > KNOCK_UNLOCKS_FEET;
         }
     }
 

@@ -134,7 +134,9 @@ export interface PhysicsRaycastOptions {
   /**
    * Only what a character can stand on: DYNAMIC bodies (other characters' capsules, ragdoll limbs, loose
    * props) are dropped before any shape is tested, which is most of what a short downward ray costs.
-   * Static and kinematic bodies — level geometry, moving platforms — still count.
+   * Static and kinematic bodies — level geometry, moving platforms — still count, but not a ragdoll's parts
+   * however they move: a character reacting on its feet has its legs kinematic on its animation, and a foot's IK
+   * ray that met its own shin stood the foot on it.
    */
   groundOnly?: boolean;
 }
@@ -1567,6 +1569,7 @@ export class PhysicsSystem {
       if (!body) return;
       if (nearest !== null && hit.distance >= nearest.distance) return;
       if (skipRayHit(body as unknown as RayHitBody, opts as RayFilter<RayHitBody>)) return;
+      if (opts.groundOnly && this._ragdollParts.has(body)) return;
 
       const owner = (body as any).owner instanceof Node ? (body as any).owner as Node : null;
       const p = hit.point, n = hit.normal;

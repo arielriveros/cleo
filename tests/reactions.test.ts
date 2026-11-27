@@ -678,6 +678,26 @@ describe('physical animation on its feet (jolt)', () => {
         expect(lowest).toBeLessThan(0.4);
     });
 
+    it('keeps its kinematic legs out of ground rays (a foot IK ray finds the floor, not its shin), and lets its feet go shoved', () => {
+        const s = person();
+        s.r.hit({ part: 'Chest', direction: [0, 0, -1], impulse: 40 });
+        for (let f = 0; f < 4; f++) step(s);
+        const b = s.r.body!;
+        expect(s.r.standing).toBe(true);
+        const foot = s.r.ragdoll!.parts[b.legs.L!.end].body, shin = s.r.ragdoll!.parts[b.legs.L!.mid].body;
+        expect((foot as any).isKinematic).toBe(true);
+        for (const part of [foot, shin]) {
+            const at = part.position;
+            const hit = s.physics.raycast([at.x, at.y + 0.6, at.z] as any, [at.x, -1, at.z] as any, { groundOnly: true });
+            expect(hit?.point[1] ?? NaN).toBeCloseTo(0, 2);
+            // Any other ray still strikes the limb (a bullet).
+            expect(s.physics.raycast([at.x, at.y + 0.6, at.z] as any, [at.x, -1, at.z] as any)?.body).not.toBeUndefined();
+        }
+        // Shoved (a stagger): no foot locking while the capsule slides under the feet.
+        expect(s.r.state).toBe('stagger');
+        expect(s.node.animator!.footLockSuppressed).toBe(true);
+    });
+
     it("lets a hand on a weapon stay there: a busy hand never reaches for a wound", () => {
         const s = person();
         s.r.busyHands = { L: true, R: true };

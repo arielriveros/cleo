@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { mat4, vec3 } from 'gl-matrix';
 import { EXAMPLE, dataReady } from '@tools/exampleKit/testKit';
 import { TEST_PHYSICS } from '@engine-tests/helpers/testPhysics';
 import { HostRuntime } from '@host/hostRuntime';
@@ -425,6 +426,37 @@ describe.skipIf(!present)(`the Sandbox's NPCs (${TEST_PHYSICS})`, { timeout: 300
         expect(report.searchesMax, 'path searches within pathsPerFrame').toBeLessThanOrEqual(SANDBOX_AI_DETAIL.pathsPerFrame);
         expect(report.raysP95, 'rays a tick').toBeLessThan(150);
         if (physics.capabilities?.islandIterations) expect(report.iterationsMax, 'the world keeps its own iterations').toBeLessThanOrEqual(10);
+    });
+
+    // On its feet a reacting body's legs are kinematic on the animation, and a foot's IK ray took its own shin for the
+    // ground (a kinematic body is ground): shot, both feet leapt 60 cm onto its legs, again and again. Its feet stay on
+    // the ground now, foot placement and all, the shove letting them go rather than holding them to snap.
+    it('shot standing, a civilian keeps its feet on the ground: no foot leaps onto its own legs', async () => {
+        const p = await play({ npcs: { 'Civilian 1': { at: [32, 0, -28], yaw: 180 } }, player: { at: [32, 0.02, -34], yaw: 0 } });
+        const civ = p.npc('Civilian 1');
+        const model = civ.children.find((c: any) => c.nodeType === 'model');
+        const skin = model.model.skin;
+        const joint = (re: RegExp) => skin.joints.findIndex((j: any) => re.test(skin.nodeNames.get(j.nodeIndex) ?? ''));
+        const feet = [joint(/LeftFoot$/), joint(/RightFoot$/)];
+        expect(feet.every(i => i >= 0)).toBe(true);
+        const bindAt = feet.map(i => mat4.getTranslation(vec3.create(), mat4.invert(mat4.create(), skin.joints[i].inverseBindMatrix)!));
+        const drawn = () => feet.map((i, k) => {
+            const at = vec3.transformMat4(vec3.create(), bindAt[k], model.animator.getFinalBoneMatrices()[i]);
+            return vec3.transformMat4(at, at, model.worldTransform);
+        });
+        await p.run(1.5);
+        const standing = Math.max(...drawn().map(v => v[1] - civ.worldPosition[1]));
+        let prev: vec3[] | null = null, highest = 0, leap = 0;
+        shoot(p, [civ.worldPosition[0], civ.worldPosition[1] + 1.3, civ.worldPosition[2]]);
+        await p.run(0.35, undefined, () => {
+            const now = drawn();
+            for (const v of now) highest = Math.max(highest, v[1] - civ.worldPosition[1]);
+            if (prev) leap = Math.max(leap, ...now.map((v, k) => vec3.distance(v, prev![k])));
+            prev = now;
+        });
+        expect(civ.reactions.state, 'still on its feet').not.toMatch(/falling|tumble|down/);
+        expect(highest - standing, 'how far a foot rose').toBeLessThan(0.15);
+        expect(leap, 'the farthest a foot moved in a tick').toBeLessThan(0.2);
     });
 
     it('knocked down and shot again while it gets up, a civilian goes back down and gets up again', async () => {

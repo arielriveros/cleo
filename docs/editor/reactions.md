@@ -59,7 +59,7 @@ and of PuppetMaster, on Jolt's ragdoll tools:
 
 - **The legs and hips are the animation's.** They are kinematic bodies moved every step to where the animation
   has them (`PhysicsBody.setType`, Jolt's kinematic motion), so they push what they meet and nothing pushes them,
-  and foot placement and foot locking stay on. Nothing of the reaction fights the legs.
+  and foot placement stays on (its rays pass through the character's own body). Foot locking does too, except while a stagger's shove slides the character: then the feet follow the animation rather than stay planted. Nothing of the reaction fights the legs.
 - **The upper body follows the animation on firm muscles** (**Tracking**, 6 Hz by default), with the animation's
   own motion: each muscle is given the speed its target turns at, and Jolt's motors drive position and velocity
   together, so a swinging arm or an aim is followed within a few degrees instead of trailed. A hit is a kick to

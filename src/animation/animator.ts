@@ -1214,6 +1214,12 @@ export class Animator {
     /** No support-hand IK while bodies carry the arms: a hand pinned to a weapon fights the arm's reaction. */
     public handIkSuppressed = false;
     /**
+     * No foot LOCKING (placement stays): a body shoved across the ground (a reaction's stagger) slides under feet
+     * that cannot be planted; held, each foot stretched behind until it strayed past its lock and snapped. Feet
+     * already held let go over the rig's lockRelease and plant again once it is off.
+     */
+    public footLockSuppressed = false;
+    /**
      * The hand a layer's support-hand IK holds on a weapon in the other (more than half on, before any suppression),
      * or null: what tells a character's reactions its hands are busy.
      */
@@ -3372,7 +3378,7 @@ export class Animator {
             // lowest such point, as swing release measures the ankles.
             let lowest = Infinity;
             for (let i = 0; i < planCount; i++) lowest = Math.min(lowest, vec3.dot(this._lockedPoint(plans[i], globalTransforms, IK_LOCK_POINT), up));
-            const allowed = this._stateFootLock();
+            const allowed = this._stateFootLock() && !this.footLockSuppressed;
             for (let i = 0; i < planCount; i++) {
                 this._lockFoot(plans[i], lowest, origin, nodeWorld, worldToModel, up, upWorld, tuning, dt, globalTransforms, allowed);
             }
@@ -5441,6 +5447,7 @@ export class Animator {
         this._physicsMapping = null;
         this.ikSuppressed = false;
         this.handIkSuppressed = false;
+        this.footLockSuppressed = false;
         // Skinning matrices back to the animation's, now.
         if (this._targetBones.length === this._finalBoneMatrices.length) {
             for (let j = 0; j < this._finalBoneMatrices.length; j++) {
