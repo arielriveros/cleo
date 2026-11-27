@@ -117,7 +117,13 @@ script; a **Linked** parameter follows a value by itself:
 | **Variable** → Self / Parent / Scene | A node variable. |
 
 A bound parameter needs no script at all — the machine reads it every frame. The full built-in list
-is in [Animation built-ins](../reference/animation-builtins.md).
+is in [Animation built-ins](../reference/animation-builtins.md). Under **Built-in · Reactions** are the
+character's [reaction values](#reaction-parameters): whether its body is down, whether it can get up, where the
+last hit came from.
+
+A **Trigger** fires when a script calls `setTrigger` — or, set to **Each hit** beside it, every time the
+character takes a hit (its reactions' hit count rises). A hit nothing takes that frame is dropped, so a flinch
+never plays a second late.
 
 > **Bind Speed to the built-in `planarSpeed`**, not to a script's intended speed. It is *measured*,
 > so a character jammed against a wall reads 0 and drops to idle instead of running on the spot; it
@@ -323,7 +329,13 @@ between two states, with its conditions.
 |---|---|
 | **Name** | |
 | **Enter on trigger** | Triggers that start this state directly, by name, from whatever state its layer is in — a script's `setTrigger('Roll')` plays the state listing Roll. Each with its own **blend** in, and **restart**: on, firing it while the state plays starts it over (a second hit replays the flinch); off, the trigger waits. A name that is not a parameter yet becomes a trigger. |
-| **Plays** | **Clip**; **Blend Space** — a [blend space](#blend-spaces) with per-axis parameter bindings; or **Pose** — a static pose from a [pose asset](#poses). |
+| **Plays** | **Clip**; **Blend Space** — a [blend space](#blend-spaces) with per-axis parameter bindings; or **Pose** — a static pose from a [pose asset](#poses). On the base layer also **Ragdoll** (the falling-figure icon) and **Get up** (the rising figure): the body's own states, see [Ragdoll and Get Up states](#ragdoll-and-get-up-states). |
+| **Starts** | A Ragdoll state: what entering it does to a character on its feet — **Fall** (it falls the way it was moving), **Trip** (its feet are taken from under it) or **Limp** (it drops out cold). Entered when a hit has already knocked it down, it adds nothing. |
+| **Without a body** | A Ragdoll state: the clip under the body, and what shows where no body can be made. None holds the pose it was entered with. |
+| **On back**, **On front** | A Get Up state: the clip it rises on lying on its back, and on its front. Empty uses the rig's own get-up clips (its [Reactions tab](reactions.md#get-up)). |
+| **React** | [Reaction effects](#reaction-effects): how the body takes hits while this state plays — **Full**, **Flinch** or **None**. |
+| **Hands** | Reaction effects: hands that stay on what they hold rather than reach for a wound. **Auto** is both while a support-hand IK holds a weapon. |
+| **Force ×**, **Shove ×** | Reaction effects: hits land, and shoves carry it, this many times as hard. |
 | **Loop** | |
 | **Play count** | |
 | **Speed** or **speed parameter** | Playback rate. |
@@ -367,7 +379,7 @@ between two states, with its conditions.
 | Field | Meaning |
 |---|---|
 | **Wait for clip end** | Wait until the source clip reaches a point (1 = its end). |
-| **Blend** | Cross-fade seconds, per transition. |
+| **Blend** | Cross-fade seconds, per transition. Not used into a Get Up state: the skin blends from the body. |
 | **Stay at least** | Least time in the source state before this may fire. |
 | **Can restart itself** | From Any State only: fire even while already in the target state, restarting it — a second hit replays the flinch. |
 | **Conditions** | A tree of AND/OR groups over parameters. |
@@ -445,6 +457,7 @@ the layer's name. It holds that layer's own settings:
 | **Blend** | **Override** replaces the pose beneath, by weight × mask. **Additive** adds the clip's motion *relative to its own first frame* on top — breathing, recoil, a flinch. A pose adds what it changes from its base pose (a [variant](#variants)), or from rest. |
 | **Weight** | `0`–`1` from the slider, or **param…** to read it from a parameter every frame. |
 | **Mask** | A [bone mask](#bone-masks), or **Whole body**. |
+| **Plays over Ragdoll and Get Up** (the falling-figure toggle) | Off (the default), the layer fades out while the base layer is in a [Ragdoll or Get Up state](#ragdoll-and-get-up-states), and back in after: an aim or a weapon pose must not pull at a body lying or getting up. On, it keeps playing. |
 | **Hand IK** | **Left** or **Right**: after every layer, that hand reaches where this layer's own pose has it relative to the other hand, so a weapon held in the other hand keeps both hands on it whatever the layers above do to that hand (an aim, recoil). **Reach** is how firmly, `0`–`1` or from a parameter (`0` lets go: a sprint). **Socket**: reach a socket on the other hand instead. |
 
 Three rules worth knowing:
@@ -550,6 +563,80 @@ breaks nothing.
 
 > Older projects stored poses on the rig itself. Those keep working, and the Poses section offers
 > **Move into a pose asset**, which keeps every pose id so no clip referencing one breaks.
+
+## Ragdoll and Get Up states
+
+A character with [reactions](reactions.md) (on the Jolt backend) can have its body's own states in the graph, so
+a fall, a knockout or a get-up is wired like any other state, with no script. They live on the base layer.
+
+- **A Ragdoll state** — **Plays ▸ Ragdoll**. While the graph is in it the body is the physics'. Entered on its
+  feet, the character falls as its **Starts** says; entered after a hit has already knocked it down, it only holds
+  the body. Either way **the body never gets up by itself while the graph is there**: the graph decides when.
+- **A Get Up state** — **Plays ▸ Get up**. The body rises on its clip, **On back** or **On front** as it lies,
+  lined up with where it lies and blended from it. The transition's own blend, root motion and foot placement do
+  not apply, and the character is held still. Entered before the body lies still, it waits on its first frame.
+- While the graph is in either, the other layers fade out (unless one [plays over them](#layers-and-bone-masks)),
+  and a way in from anywhere (Any State, **Enter on trigger**) to an ordinary state waits: a ragdoll is not pulled
+  into a car. Its trigger is taken, so it does not fire later.
+
+The usual wiring, which the graph toolbar's **Reaction presets ▸ Knock-down states** adds:
+
+| From | To | When |
+|---|---|---|
+| Any State | Ragdoll | **Ragdolled** — the body has left its feet (a hit, a shove, a fall). Put it first. |
+| Ragdoll | Get Up | **CanGetUp** — it lies still and alive, ready to rise. |
+| Ragdoll | the entry | not **Ragdolled** — the body is up without rising (a respawn). |
+| Get Up | the entry | **wait for clip end** at `0.95`. |
+
+The graph can also start a fall by itself: a trigger into the Ragdoll state (the Sandbox's **Trip** key) knocks a
+character on its feet down as **Starts** says. Leave the Ragdoll state for anything but a Get Up state and the
+reactions get the body up themselves, on the rig's own clips. A script's `reactions.getUp()` while the graph holds
+the body makes **CanGetUp** true. With no reactions (another backend) a Ragdoll state plays its clip or holds its
+pose, and a Get Up state plays as an ordinary clip.
+
+### Reaction effects
+
+Every state, on any layer, has **Reactions** rows: how the character's body takes hits, shoves and impacts while
+the state plays.
+
+| Row | Meaning |
+|---|---|
+| **React** | **Full** (default): as its reaction set says. **Flinch**: flinches only, never staggered or knocked down. **None**: the body does not react — the hit still counts (its `reaction:Hit` event, the hit parameters). |
+| **Hands** | **Auto** (default): both busy while a support-hand IK holds a weapon. **Both busy**, **Right busy**, **Left busy**, **Both free**: a busy hand stays on what it holds rather than reach for a wound. |
+| **Force ×** | Hits land this many times as hard: a braced crouch `0.6`. |
+| **Shove ×** | Shoves carry it this many times as far. |
+
+The base layer's state and every layer's are merged: the strictest **React** and every busy hand of a state shown
+at least half, the forces multiplied by how much of each state shows. A state with effects has a burst mark on its
+node. A script's own `reactions.busyHands` wins over **Hands**.
+
+### Hit reactions on a layer
+
+**Reaction presets ▸ Hit reaction layer** adds an additive layer that flinches on every hit: an empty **Off**
+state and a **Hit** state entered on the **Hit** trigger (set to fire on **Each hit**), playing a blend space over
+**HitAngle** (where the hit came from) and **HitHeight** (how high it landed), back to Off near its end — the shape
+of a recoil layer. Its weight is **HasControl**, so it rests while the body is down. Make the blend space's angle
+axis wrap, from `−180` to `180`: `0` is a hit from the front, `+90` from the character's left, `−90` its right,
+`±180` behind. A clip on an additive layer adds what it does relative to its first frame, so start each flinch on a
+neutral pose — [Cleo Creator's Motion tool](../creator/motion.md#additive-clips) makes them so. Entered again by a
+second hit, a one-shot blend space starts over.
+
+### Reaction parameters
+
+The **Built-in · Reactions** values, read from the character's reactions whatever node the parameter names:
+
+| Name | Type | Meaning |
+|---|---|---|
+| `ragdolled` | boolean | The body is the physics': falling, tumbling, lying, dead. False once a get-up starts. |
+| `canGetUp` | boolean | Lying still and alive, ready to rise (the rig's Get up delay), or asked to by `reactions.getUp()`. |
+| `faceUp` | boolean | Lying on its back. |
+| `reacting` | boolean | Any reaction has the body. |
+| `hasControl` | boolean | On its feet, flinching or staggering. True where there are no reactions. |
+| `staggering` | boolean | Shoved back on its feet. |
+| `hitAngle` | number | Where the last hit came from against the facing, degrees, counter-clockwise like `planarAngle`. |
+| `hitHeight` | number | Where up the body it landed, `0` the feet to `1` the top of the head, on the skeleton at rest. |
+| `hitStrength` | number | How hard, `0`–`1` against the fall threshold. |
+| `hitCount` | number | Hits taken so far: what a Trigger set to **Each hit** fires on. |
 
 ## Action slots
 

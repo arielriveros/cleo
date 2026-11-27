@@ -399,6 +399,12 @@ skeleton work well. A character whose **Gets up** is off, or that is dead or kno
 
 A hit or a shove while it gets up stops the clip: it staggers if it was up far enough, and falls if not.
 
+**The animator's graph can own the get-up instead.** While its base layer is in a
+[Ragdoll state](animation.md#ragdoll-and-get-up-states) the body never gets up by itself, whatever **Gets up**
+says; it rises when the graph enters a Get Up state, on that state's clips (these two when it names none), on the
+base layer rather than the Reaction slot. Leave the Ragdoll state for any other and it gets up by itself again,
+on these clips. The graph also sets how each of its states takes hits: [reaction effects](animation.md#reaction-effects).
+
 ## Poses and clips
 
 Behaviours with a pose slot (**Flinch**, **Brace**, **Protect head**, **Landing**, **Curl pose**) use the pose you

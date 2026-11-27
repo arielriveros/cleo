@@ -570,6 +570,18 @@ this.scene.physics.startRagdoll(modelNode, { impulse: [0, 1.5, -2] })
 
 This is the usual substitute for a death animation.
 
+A character with [reactions](reactions.md) can do it in its graph instead, with no script:
+[Ragdoll and Get Up states](../editor/animation.md#ragdoll-and-get-up-states). From a script:
+
+| Member | What it is |
+|---|---|
+| `animator.reactionKind` | `'ragdoll'`, `'getUp'` or `null`: the kind of reaction state the base layer is in. |
+| `animator.reactionEffects` | The [reaction effects](../editor/animation.md#reaction-effects) in force now, merged over the layers: `{ react, busyHands, force, shove }`. |
+| `animator.endReactionStates()` | Back to the entry state at once from a Ragdoll or Get Up state (`reactions.reset()` calls it). |
+
+To start a fall from a script, fire the trigger the graph enters its Ragdoll state on (the Sandbox's `Trip`) rather
+than calling `reactions.trip()`: the graph then owns the body until it rises.
+
 ## Sockets
 
 A socket is a named attach point on a bone, authored on the rig

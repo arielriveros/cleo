@@ -41,6 +41,22 @@ They are all also readable from script as plain properties — see
 | `groundDistance` | number | | `−1` when unknown. Requires a ground probe distance on the body. |
 | `slopeAngle` | number | | Degrees. |
 
+**Reactions** (Jolt): read from the reactions of the character the animator animates, whatever node the parameter
+names. With no reactions they read their default (`hasControl`: true).
+
+| Name | Type | Signed | Meaning |
+|---|---|---|---|
+| `ragdolled` | boolean | | The body is the physics': falling, tumbling, lying, dead. False once a get-up starts. |
+| `canGetUp` | boolean | | Lying still and alive, ready to rise; or asked to by `reactions.getUp()`. |
+| `faceUp` | boolean | | Lying on its back. |
+| `reacting` | boolean | | Any reaction has the body. |
+| `hasControl` | boolean | | On its feet: flinching, staggering or untouched. |
+| `staggering` | boolean | | Shoved back on its feet. |
+| `hitAngle` | number | ✔ | Where the last hit came from, against the facing: `0` front, `−90` right, `+90` left, `±180` behind. |
+| `hitHeight` | number | | Where up the body the last hit landed, `0`–`1`, on the skeleton at rest. |
+| `hitStrength` | number | | How hard, `0`–`1` against the reaction set's fall threshold. |
+| `hitCount` | number | | Hits taken so far. A **counter**: a Trigger parameter linked to it fires each time it rises. |
+
 > **Only the signed ones can go below zero.** A state's Speed parameter clamps at 0, so a blend-space
 > sample authored at a negative coordinate on an unsigned axis is simply unreachable — the probe can
 > never get there. This is the usual cause of "one of my clips never plays".

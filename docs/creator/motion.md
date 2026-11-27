@@ -442,6 +442,15 @@ Library poses reach every project's `/Creator/Poses` folder as Pose assets on th
 goals solved into the bones' rotations. Editing one here re-bakes every motion on this character that uses
 it, and both reach the Editor.
 
+### Additive clips
+
+A clip played on an animator's **additive** layer (a recoil, a hit flinch, a breath) adds what it does relative to
+its own **first frame**. Make the first key the neutral pose (no bone turned), shape the motion in the keys after
+it, and end on the neutral pose again, so the layer adds nothing at either end. Keep **Variation** at `0`: a drift
+would be added too. A hit flinch from the front: neutral at `0`, the chest thrown back and the head lagging at
+`0.08` s eased out, a small overshoot forward at `0.25` s, neutral again with a spring by `0.6` s; its left and
+right versions are one **Mirror** apart.
+
 A character reaches every project's `/Creator/Characters/<name>` folder by itself, with no save step. Its
 visible clips become one animation asset each, on the rig of its skeleton. Hiding or deleting a clip
 removes its asset, unless something in the project uses it. The model itself is not imported: add it to a

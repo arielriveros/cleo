@@ -40,6 +40,21 @@ in a hand. Turn-in-place picks the right clip when the camera swings behind.
     reactions.
   - Player contract 54 (reaction sets travel in the skin).
 
+- **Ragdolls and hit reactions in the animator graph, with no script.**
+  - Two new state kinds on the base layer (**Plays ▸ Ragdoll**, **Plays ▸ Get up**). In a Ragdoll state the body is
+    the physics': entered on its feet it falls, trips or drops limp; entered after a hit knocked it down it holds the
+    body, which then never gets up by itself. A Get Up state rises on its clip, face up or face down as the body lies,
+    lined up with it and blended from it, on the base layer. The other layers fade out under both (unless one plays
+    over them), and nothing but another such state is entered from anywhere meanwhile.
+  - Every state carries **reaction effects**: React (Full, Flinch only, None), busy hands, Hit force × and Shove ×,
+    merged over the base and the layers. A driver does not react; a crouch is braced; a gun hand stays on its grip.
+  - The character's reactions are ordinary built-in parameters (Ragdolled, CanGetUp, FaceUp, HasControl, HitAngle,
+    HitHeight, HitStrength…), and a Trigger can fire on **Each hit**, so an additive layer flinches by where a hit
+    came from. A one-shot blend space entered again starts over.
+  - The graph toolbar's **Reaction presets** add the usual wiring: knock-down states, and a hit-reaction layer.
+  - A script's `reactions.getUp()` asks the graph while it holds the body; `reactions.reset()` takes the graph back
+    to its entry. Player contract 55.
+
 - **The Sandbox gets people: blue civilians who go about the course and run from danger, red enemies who patrol it in
   pairs and fight, all on the player's own body.**
   - The player's animated body is a template of its own, **Sandbox Character** (its script `SandboxCharacter`: the
