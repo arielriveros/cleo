@@ -95,6 +95,28 @@ in a hand. Turn-in-place picks the right clip when the camera swings behind.
   without. Opening a template brings them up to its model's, and saving it keeps them.
 - **Fix: linking a material to a model with a one-entry material list left the list naming the old material.** The
   node then matched the old material's edits and missed its own.
+- **Reacting bodies and NPC brains cost a fraction of what they did.**
+  - A budget of reacting bodies (Options ▸ Engine ▸ Physics ▸ **Reacting bodies**, 6 by default,
+    `PhysicsSystem.maxPoweredRagdolls`): a hit that would only make a character flinch or stumble while that many
+    are reacting, or more than 40 m from the camera, moves nothing (the hit still counts); a fall always gets its
+    body, taking it from the farthest flinch.
+  - A body lying still leaves the simulation, holding its pose, until it gets up or is hit, and does not count.
+    Put back, its joints are made again with the pose they were first made in (`JointDesc.rest`, every backend):
+    their hinge angles and twists were measured from how it lay, so a knee bent on the ground had its limits moved
+    round by the bend (a corpse kicked, too).
+  - On Jolt and Rapier a ragdoll's joints ask for its profile's solver iterations for their own island
+    (`JointDesc.iterations`, `capabilities.islandIterations`); the world's count is no longer raised for every body
+    in it, and is set only when it changes.
+  - The senses cast where a fall lands and the ground ahead only in the air or rolling, the ground under it every
+    fourth step lying or getting up; the step's contacts are sorted out once for every reacting body. A muscle or a
+    string is sent to the physics only when it changes. A ragdoll's profile and layout are worked out once per skin.
+  - The animation a loose body's muscles reach for is posed every other frame; a layer not drawn poses nothing.
+  - AI: `ControllerNode.perceptionFilter` (who its senses consider: no ray at anyone else),
+    `Scene.aiDetail.farDistance`/`farFactor` (an agent far from the camera perceives and probes less often),
+    `Scene.pathSearchesThisFrame`. Physics stats gain `reactionsMs`, `poweredRagdolls` and `sensorRays` (the
+    Performance panel's reactions row).
+  - The Sandbox's NPCs perceive the player alone, every other frame, plan two paths a frame between them (their
+    scripts' searches included), and pick cover with a dozen rays where it took a hundred.
 - **A material can refuse decals.** Its new **Receive decals** option (`config.receiveDecals`, on by default and
   stored only when off) keeps every decal off the surface, on every route. With no stencil to carry the flag, the
   surfaces that have it off and that a visible decal's box reaches are drawn into a depth of their own

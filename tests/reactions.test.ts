@@ -14,6 +14,7 @@ import { groundWorld, humanoidModel, IDLE, boneIndex } from './helpers/humanoidR
 import type { Animation } from '../src/animation/animatedModel';
 import { quat } from 'gl-matrix';
 import { makeBody, box } from './helpers/physicsBodies';
+import { physicsStats } from '../src/physics/physicsStats';
 import { Node } from '../src/core/scene/nodes/node';
 
 // Reactions (physics/reactive/): a character that is hit flinches and clutches the wound, one pushed steps to keep
@@ -478,5 +479,97 @@ describe.each(BACKENDS)('reactions that look right on %s', backend => {
         expect(s.r.state).toBe('falling');
         expect(bent).toBeGreaterThan(25);
         expect(guard).toBeLessThan(0.45);
+    });
+});
+
+// What reacting costs, kept in check: a budget of reacting bodies (a flinch past it moves nothing, a fall takes the
+// farthest flinch's body), a body lying still out of the world, solver iterations for its own island, and senses
+// cast only as its state needs them.
+describe.each(BACKENDS)('reacting bodies on a budget on %s', backend => {
+    beforeAll(async () => { await acquirePhysicsBackend(backend); });
+    const made: PhysicsSystem[] = [];
+    afterEach(() => { for (const p of made.splice(0)) p.dispose(); resetScriptChannels(); });
+    const world = () => { const physics = groundWorld(backend); made.push(physics); return physics; };
+    const step = (physics: PhysicsSystem, nodes: ModelNode[], frames = 1, each?: (f: number) => void) => {
+        for (let f = 0; f < frames; f++) { each?.(f); physics.update(H); for (const n of nodes) n.animator!.update(H); }
+    };
+
+    it('a flinch past the budget moves no body, and its hit still counts', () => {
+        const physics = world();
+        physics.maxPoweredRagdolls = 1;
+        const a = humanoidModel(undefined, [0, 0, 0]), b = humanoidModel(undefined, [3, 0, 0]);
+        const ra = physics.reactionsOf(a)!, rb = physics.reactionsOf(b)!;
+        const hits: string[] = [];
+        getChannel('reaction').on('Hit', (info: ReactionEventInfo & { partName?: string }) => hits.push(info.partName ?? ''));
+        step(physics, [a, b], 3);
+        ra.hit({ part: 'Spine', direction: [0, 0, -1], impulse: 12 });
+        rb.hit({ part: 'Spine', direction: [0, 0, -1], impulse: 12 });
+        getChannel('reaction').flush?.();
+        expect(ra.ragdoll).not.toBeNull();
+        expect(rb.ragdoll).toBeNull();
+        expect(rb.state).toBe('animated');
+        expect(hits).toEqual(['Spine', 'Spine']);
+        expect(physics.poweredRagdollCount).toBe(1);
+    });
+
+    it('a fall always gets its body, taking it from the character only flinching', () => {
+        const physics = world();
+        physics.maxPoweredRagdolls = 1;
+        const a = humanoidModel(undefined, [0, 0, 0]), b = humanoidModel(undefined, [3, 0, 0]);
+        const ra = physics.reactionsOf(a)!, rb = physics.reactionsOf(b)!;
+        step(physics, [a, b], 3);
+        ra.hit({ part: 'Spine', direction: [0, 0, -1], impulse: 12 });
+        step(physics, [a, b], 2);
+        expect(ra.state).toBe('hitReact');
+        rb.trip();
+        expect(rb.ragdoll).not.toBeNull();
+        expect(ra.ragdoll).toBeNull();
+        expect(ra.state).toBe('animated');
+        expect(physics.poweredRagdollCount).toBe(1);
+    });
+
+    it('a body lying still leaves the world, out of the budget, and comes back to get up', () => {
+        const physics = world();
+        const node = humanoidModel();
+        const r = physics.reactionsOf(node)!;
+        let frozenDown = false, countFrozen = -1, unfrozenUp = false;
+        step(physics, [node], 1200, f => {
+            if (f === 3) r.trip();
+            if (r.state === 'down' && r.ragdoll?.frozen && !frozenDown) { frozenDown = true; countFrozen = physics.poweredRagdollCount; }
+            if (frozenDown && r.state === 'getUp' && r.ragdoll && !r.ragdoll.frozen) unfrozenUp = true;
+        });
+        expect(frozenDown, 'frozen lying still').toBe(true);
+        expect(countFrozen).toBe(0);
+        expect(unfrozenUp, 'back in the world to get up').toBe(true);
+        expect(r.state).toBe('animated');
+    });
+
+    it('asks for its solver iterations for its own island where the backend can, and raises the world\'s where not', () => {
+        const physics = world();
+        const base = physics.solverIterations;
+        const node = humanoidModel();
+        const r = physics.reactionsOf(node)!;
+        step(physics, [node], 3);
+        r.trip();
+        step(physics, [node], 5);
+        expect(r.ragdoll).not.toBeNull();
+        if (physics.capabilities!.islandIterations) expect(physics.solverIterations).toBe(base);
+        else expect(physics.solverIterations).toBeGreaterThan(base);
+    });
+
+    it('casts its senses as its state needs: the ground under it standing, where it lands falling', () => {
+        const physics = world();
+        const node = humanoidModel();
+        const r = physics.reactionsOf(node)!;
+        step(physics, [node], 3);
+        r.hit({ part: 'Spine', direction: [0, 0, -1], impulse: 12 });
+        let flinching = 0, falling = 0;
+        step(physics, [node], 240, f => {
+            if (f === 60) r.trip();
+            if (r.state === 'hitReact') flinching = Math.max(flinching, physicsStats.sensorRays);
+            if (r.state === 'falling') falling = Math.max(falling, physicsStats.sensorRays);
+        });
+        expect(flinching).toBe(1);
+        expect(falling).toBeGreaterThan(4);
     });
 });

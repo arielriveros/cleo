@@ -520,6 +520,27 @@ describe.each(BACKENDS)('physics backend: %s', kind => {
             expect(widest).toBeLessThan(0.45);
         });
 
+        // A ragdoll put back into the world where it lies (Ragdoll.unfreeze) makes its joints again with the pose
+        // they were first made in: a limb lying turned must not have its limits moved round with it.
+        it('cone-twist: measures its twist from `rest` when given, not from the pose it is made in', () => {
+            const twistOf = (w: PhysicsWorld, rest?: readonly [number, number, number, number]) => {
+                const anchor = body(w, { kind: 'sphere', radius: 0.05 }, [0, 5, 0], { mass: 0 });
+                // The bob made turned 0.6 rad about the joint's axis, its twist allowed ±0.1.
+                const s = Math.sin(0.3), c = Math.cos(0.3);
+                const bob = body(w, { kind: 'box', halfExtents: [0.2, 0.1, 0.1] }, [0, 4, 0], { mass: 1, rotation: [0, s, 0, c] });
+                w.createJoint({
+                    kind: 'coneTwist', a: anchor, b: bob, anchorA: [0, -0.5, 0], anchorB: [0, 0.5, 0],
+                    axisA: [0, -1, 0], axisB: [0, -1, 0], coneAngle: 0.3, twistAngle: 0.1, matchTwist: true, ...(rest ? { rest } : {}),
+                });
+                run(w, 90);
+                const q = pose(w, bob);
+                return 2 * Math.atan2(q[4], q[6]);
+            };
+            // Untwisted where the two stand: the bob stays turned. Untwisted at rest (no turn): it is turned back.
+            expect(Math.abs(twistOf(make()) - 0.6)).toBeLessThan(0.15);
+            expect(Math.abs(twistOf(make(), IDENTITY))).toBeLessThan(0.2);
+        });
+
         it('lets go once destroyed', () => {
             const w = make();
             const { anchor, bob } = pendulum(w);

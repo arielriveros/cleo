@@ -42,6 +42,17 @@ const epochOf = (body: PhysicsBody): number => (body instanceof Trigger ? body.r
 /** Whether a body is asleep (or held asleep). */
 const asleep = (body: PhysicsBody): boolean => body.isSleeping;
 
+/** One reacting body's share of a step's contacts (a, b, normal: five numbers each), read as a ContactSource. */
+class ContactSlice {
+  public readonly list: number[] = [];
+  public get contactCount(): number { return this.list.length / 5; }
+  public forEachContact(visit: (a: BodyHandle, b: BodyHandle, nx: number, ny: number, nz: number) => void): void {
+    const l = this.list;
+    for (let i = 0; i < l.length; i += 5) visit(l[i] as BodyHandle, l[i + 1] as BodyHandle, l[i + 2], l[i + 3], l[i + 4]);
+  }
+}
+const EMPTY_CONTACTS = new ContactSlice();
+
 /** A joint as PhysicsSystem.addJoint takes it: a JointDesc between two engine bodies. */
 export type JointSpec = JointDesc extends infer J ? J extends JointDesc ? Omit<J, 'a' | 'b'> : never : never;
 
@@ -1603,23 +1614,94 @@ export class PhysicsSystem {
   private _baseIterations: number | null = null;
 
   /**
-   * A chain of 15 jointed bodies sags and stretches at cannon's 10 solver iterations. Raise the count
-   * while a live (unfrozen) ragdoll wants it, and put it back when none does, so nothing pays for it
-   * the rest of the time.
+   * A chain of 15 jointed bodies sags and stretches at cannon's 10 solver iterations. Where the backend can give one
+   * island more iterations than the rest (`capabilities.islandIterations`: Jolt, Rapier), a ragdoll's joints ask
+   * for them themselves and nothing else pays. Elsewhere the world's count is raised while a live (unfrozen) ragdoll
+   * wants it, and put back when none does. Set only when it changes: a backend may rebuild its settings on every set.
    */
   private _applyRagdollIterations(): void {
     const world = this._world;
     if (!world) return;
-    let want = 0, powered = false;
-    for (const r of this._ragdolls) if (!r.frozen && !r.destroyed) { want = Math.max(want, r.solverIterations); powered ||= r.powered; }
+    const islands = world.capabilities.islandIterations;
+    let want = 0, powered = false, live = 0;
+    for (const r of this._ragdolls) {
+      if (r.frozen || r.destroyed) continue;
+      if (!islands) want = Math.max(want, r.solverIterations);
+      powered ||= r.powered;
+      if (r.powered) live++;
+    }
+    physicsStats.poweredRagdolls = live;
     this._fineSubsteps = powered && world.capabilities.jointDrives === 'shared';
     if (want > 0) {
       if (this._baseIterations === null) this._baseIterations = world.solverIterations;
-      world.solverIterations = Math.max(this._baseIterations, want);
+      const n = Math.max(this._baseIterations, want);
+      if (world.solverIterations !== n) world.solverIterations = n;
     } else if (this._baseIterations !== null) {
-      world.solverIterations = this._baseIterations;
+      if (world.solverIterations !== this._baseIterations) world.solverIterations = this._baseIterations;
       this._baseIterations = null;
     }
+  }
+
+  // ---- the reacting bodies' budget ----
+
+  /**
+   * The most powered ragdolls (reacting bodies, physics/reactive/) simulating at once. A hit that would only make a
+   * character flinch or stumble when this many are already reacting (or when it is farther than
+   * {@link flinchDistance} from what the game is looking at) makes no ragdoll: the hit still counts (its `Hit`
+   * event, the script reading it), the body only does not move. A fall always gets one: it takes the place of the
+   * least important flinch (the farthest). A body lying still is frozen and does not count. A project setting
+   * (Options ▸ Engine ▸ Physics).
+   */
+  public maxPoweredRagdolls: number = 6;
+  /** How far (m) from the camera (or the `simulationOrigins`) a flinch still gets a body. 0: anywhere. */
+  public flinchDistance: number = 40;
+
+  /** Powered ragdolls simulating now (not frozen). */
+  public get poweredRagdollCount(): number {
+    let n = 0;
+    for (const r of this._ragdolls) if (r.powered && !r.frozen && !r.destroyed) n++;
+    return n;
+  }
+
+  /** Where the game is looked at from: the simulation origins, else the active camera; empty: nowhere in particular. */
+  private _origins(): readonly ArrayLike<number>[] {
+    if (this.simulationOrigins) return this.simulationOrigins();
+    const cam = this._scene?.activeCamera;
+    return cam ? [cam.worldPosition] : [];
+  }
+
+  /** The distance from `node` to the nearest origin; 0 with none, so nothing is far. */
+  private _nearestOrigin(node: Node, origins: readonly ArrayLike<number>[]): number {
+    if (origins.length === 0) return 0;
+    const p = node.worldPosition;
+    let best = Infinity;
+    for (const o of origins) best = Math.min(best, Math.hypot(p[0] - o[0], p[1] - o[1], p[2] - o[2]));
+    return best;
+  }
+
+  /**
+   * @internal ReactionController: whether `node`'s reactions may start a powered ragdoll for a `flinch` (a hit it
+   * only flinches or stumbles from) or a `fall` (anything that takes it off its feet). See {@link maxPoweredRagdolls}.
+   */
+  public _admitReaction(node: Node, kind: 'flinch' | 'fall'): boolean {
+    const max = Math.max(0, Math.floor(this.maxPoweredRagdolls));
+    if (max <= 0 && kind === 'flinch') return false;
+    const origins = this._origins();
+    if (kind === 'flinch') {
+      if (this.flinchDistance > 0 && this._nearestOrigin(node, origins) > this.flinchDistance) return false;
+      return this.poweredRagdollCount < max;
+    }
+    if (this.poweredRagdollCount < max) return true;
+    // Spent: the farthest flinch gives its body back to its animation for this fall.
+    let evict: ReactionController | null = null, far = -1;
+    for (const [other, reactions] of this._reactions) {
+      const r = reactions.ragdoll;
+      if (other === node || !r || r.frozen || r.destroyed || (reactions.state !== 'hitReact' && reactions.state !== 'recover')) continue;
+      const d = this._nearestOrigin(other, origins);
+      if (d > far) { far = d; evict = reactions; }
+    }
+    evict?.reset();
+    return true;
   }
 
   /** The solver iteration count in force (for tests and the stats panel). */
@@ -1734,22 +1816,52 @@ export class PhysicsSystem {
   /** Every model's reactions that have a body to drive: the muscles' targets for the coming step. */
   private _reactionsBeforeStep(dt: number): void {
     if (this._reactions.size === 0) return;
+    const start = performance.now();
     for (const [node, reactions] of this._reactions) {
       if (!node.scene || node.markForRemoval) { reactions.destroy(); this._reactions.delete(node); continue; }
       if (reactions.ragdoll) {
         try { reactions._preStep(dt); } catch (e) { logScriptError('Reactions', e, 'Runtime'); }
       }
     }
+    physicsStats.reactionsMs += performance.now() - start;
   }
 
-  /** And after the step: measure, move between states, follow with the Collider. */
+  /**
+   * And after the step: measure, move between states, follow with the Collider. The step's contacts are sorted out
+   * once, into each reacting body's own (a body reads only what its parts touch), rather than each body walking
+   * every contact in the world.
+   */
   private _reactionsAfterStep(dt: number, contacts: ContactSource): void {
     if (this._reactions.size === 0) return;
+    const start = performance.now();
+    const handles = this._contactParts;
+    handles.clear();
+    for (const slice of this._contactSlices.values()) slice.list.length = 0;
     for (const reactions of this._reactions.values()) {
-      if (!reactions.ragdoll) continue;
-      try { reactions._postStep(dt, contacts); } catch (e) { logScriptError('Reactions', e, 'Runtime'); }
+      const r = reactions.ragdoll;
+      if (!r || r.frozen || r.destroyed) continue;
+      let slice = this._contactSlices.get(r);
+      if (!slice) { slice = new ContactSlice(); this._contactSlices.set(r, slice); }
+      for (const p of r.parts) if (typeof p.body.handle === 'number') handles.set(p.body.handle, slice);
     }
+    if (handles.size > 0 && contacts.contactCount > 0) {
+      contacts.forEachContact((a, b, nx, ny, nz) => {
+        const sa = handles.get(a), sb = handles.get(b);
+        if (sa) sa.list.push(a, b, nx, ny, nz);
+        if (sb && sb !== sa) sb.list.push(a, b, nx, ny, nz);
+      });
+    }
+    for (const reactions of this._reactions.values()) {
+      const r = reactions.ragdoll;
+      if (!r) continue;
+      try { reactions._postStep(dt, this._contactSlices.get(r) ?? EMPTY_CONTACTS); } catch (e) { logScriptError('Reactions', e, 'Runtime'); }
+    }
+    for (const r of this._contactSlices.keys()) if (r.destroyed) this._contactSlices.delete(r);
+    physicsStats.reactionsMs += performance.now() - start;
   }
+  /** Each reacting body's share of the step's contacts, by its ragdoll; and which share each part handle feeds. */
+  private readonly _contactSlices = new Map<Ragdoll, ContactSlice>();
+  private readonly _contactParts = new Map<number, ContactSlice>();
 
   /** Ragdolls still alive (frozen ones included), for the stats panel and tests. */
   public get ragdollCount(): number { return this._ragdolls.length; }

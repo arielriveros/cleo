@@ -10,7 +10,7 @@ import type { PhysicsSystem } from './physicsSystem';
 import { skeletonTopology } from '../animation/skeletonTopology';
 import { humanoidRigOf } from '../animation/animationRetarget';
 import {
-    autoHumanoidProfile, parseRagdollProfile, ragdollLayout, ragdollPartPose, ragdollPartPoseInto, rigidRotation,
+    cachedRagdollLayout, ragdollPartPose, ragdollPartPoseInto, rigidRotation, skinRagdollProfile,
     type RagdollProfile, type RagdollLayoutPart,
 } from './ragdollProfile';
 import { DEG2RAD } from '../core/math';
@@ -157,12 +157,15 @@ export class Ragdoll implements PhysicsMappingSource {
     public readonly powered: boolean;
     /** Freeze once at rest (updateSettle). A reaction controller keeps a living body awake to get up. */
     public autoFreeze = true;
+    /** The body has every part (falling, rolling, lying): the animator poses its target at half rate. */
+    public loose = false;
     private _skin: Skin | null = null;
     private _parts: RagdollPartInfo[] = [];
     private _mapping = new Float32Array(0);
     private _bindOf: mat4[] = [];
     /** The joints as made: kept so a frozen ragdoll can be put back (unfreeze). */
-    private _jointSpecs: { a: PhysicsBody; b: PhysicsBody; spec: JointSpec; drivePart: number }[] = [];
+    /** Each joint as made, and `rest`: A's rotation in B's frame then, which it is made with again (unfreeze). */
+    private _jointSpecs: { a: PhysicsBody; b: PhysicsBody; spec: JointSpec; drivePart: number; rest: [number, number, number, number] }[] = [];
     public partOfJoint = new Int32Array(0);
 
     /** Bone speed (m/s, linear and angular) under which a ragdoll counts as at rest. */
@@ -201,8 +204,7 @@ export class Ragdoll implements PhysicsMappingSource {
             break;
         }
 
-        const chosen = options.profile === null ? null
-            : parseRagdollProfile(options.profile ?? model.skin.ragdollProfile ?? autoHumanoidProfile(model.skin));
+        const chosen = options.profile === null ? null : skinRagdollProfile(model.skin, options.profile);
         if (chosen && chosen.parts.length >= 2 && this._buildProfile(modelNode, animator, chosen, cfg)) return;
         // A powered ragdoll needs a profile's segments: the generic one is passive.
         (this as { powered: boolean }).powered = false;
@@ -434,8 +436,10 @@ export class Ragdoll implements PhysicsMappingSource {
         cfg: RagdollOptions & typeof RAGDOLL_DEFAULTS,
     ): boolean {
         const skin = (modelNode.model as AnimatedModel).skin!;
-        const layout = ragdollLayout(skin, profile);
+        const layout = cachedRagdollLayout(skin, profile);
         if (layout.parts.length < 2) return false;
+        // Its joints ask for the profile's solver iterations for their island alone, where the backend can do that.
+        this._islandIterations = this._physics.capabilities?.islandIterations ? Math.max(0, Math.round(profile.solverIterations)) : 0;
 
         const fbm = animator.getFinalBoneMatrices();
         const modelWorld = modelNode.worldTransform;
@@ -616,10 +620,28 @@ export class Ragdoll implements PhysicsMappingSource {
     }
 
     private _add(a: PhysicsBody, b: PhysicsBody, joint: JointSpec, drivePart = -1): JointHandle | null {
-        const handle = this._physics.addJoint(a, b, joint);
+        const spec = this._islandIterations > 0 ? { ...joint, iterations: this._islandIterations } as JointSpec : joint;
+        const handle = this._physics.addJoint(a, b, spec);
         if (handle !== null) this._joints.push(handle);
-        this._jointSpecs.push({ a, b, spec: joint, drivePart });
+        const qa = a.quaternion, qb = b.quaternion;
+        const rest = quat.multiply(quat.create(), [-qb.x, -qb.y, -qb.z, qb.w], [qa.x, qa.y, qa.z, qa.w]);
+        this._jointSpecs.push({ a, b, spec, drivePart, rest: [rest[0], rest[1], rest[2], rest[3]] });
         return handle;
+    }
+    /** Solver iterations its joints ask for their own island (0: none; the world's count is raised instead). */
+    private _islandIterations = 0;
+
+    /**
+     * The muscle and the strings each part was last given: a reaction composes them every step, and most steps
+     * they are what they were. Sent again only when they change (a joint's drive is rebuilt when it is set), and
+     * forgotten when the joints are (freeze, unfreeze).
+     */
+    private _sentMuscle = new Float64Array(0);
+    private _sentPin = new Float64Array(0);
+    private _forgetSent(): void { this._sentMuscle.fill(NaN); this._sentPin.fill(NaN); }
+    private _sizeSent(): void {
+        const n = this._parts.length;
+        if (this._sentMuscle.length !== n * 5) { this._sentMuscle = new Float64Array(n * 5).fill(NaN); this._sentPin = new Float64Array(n * 5).fill(NaN); }
     }
 
     /** The parts' table, and which part carries each joint of the skin (what the animator's mapping reads). */
@@ -699,6 +721,12 @@ export class Ragdoll implements PhysicsMappingSource {
     public setMuscle(i: number, drive: JointDrive | null): void {
         const p = this._parts[i];
         if (!p || p.joint === null || this._frozen) return;
+        this._sizeSent();
+        const s = this._sentMuscle, k = i * 5;
+        const f = drive ? drive.frequency : -1, d = drive ? drive.damping : -1, t = drive ? drive.maxTorque : -1;
+        const g = drive ? drive.gravityCompensation ?? 0 : -1, r = drive ? drive.friction ?? 0 : -1;
+        if (s[k] === f && s[k + 1] === d && s[k + 2] === t && s[k + 3] === g && s[k + 4] === r) return;
+        s[k] = f; s[k + 1] = d; s[k + 2] = t; s[k + 3] = g; s[k + 4] = r;
         this._physics.setJointDrive(p.joint, drive, p.subtree);
     }
 
@@ -721,6 +749,12 @@ export class Ragdoll implements PhysicsMappingSource {
     public setPin(i: number, pin: BodyPin | null): void {
         const p = this._parts[i];
         if (!p || this._frozen) return;
+        this._sizeSent();
+        const s = this._sentPin, k = i * 5;
+        const a = pin ? pin.linearFrequency : -1, b = pin ? pin.angularFrequency : -1, d = pin ? pin.damping : -1;
+        const f = pin ? pin.maxForce : -1, t = pin ? pin.maxTorque : -1;
+        if (s[k] === a && s[k + 1] === b && s[k + 2] === d && s[k + 3] === f && s[k + 4] === t) return;
+        s[k] = a; s[k + 1] = b; s[k + 2] = d; s[k + 3] = f; s[k + 4] = t;
         this._physics.setBodyPin(p.body, pin);
     }
 
@@ -859,6 +893,8 @@ export class Ragdoll implements PhysicsMappingSource {
     public freeze(): void {
         if (this._frozen || this._destroyed) return;
         this._frozen = true;
+        this._forgetSent();
+        for (const body of this._bodies.values()) this._physics.setBodyPin(body, null);
         for (const joint of this._joints) this._physics.removeJoint(joint);
         this._joints = [];
         for (const p of this._parts ?? []) p.joint = null;
@@ -874,9 +910,12 @@ export class Ragdoll implements PhysicsMappingSource {
         if (!this._frozen || this._destroyed) return;
         this._frozen = false;
         this._stillFor = 0;
+        this._forgetSent();
         for (const body of this._bodies.values()) this._physics.addBody(body);
+        // Each as it was first made: its hinge angle and twist measured from that pose, not from how it lies now
+        // (or a knee bent on the ground would get its limits moved round by that bend).
         for (const j of this._jointSpecs) {
-            const handle = this._physics.addJoint(j.a, j.b, j.spec);
+            const handle = this._physics.addJoint(j.a, j.b, { ...j.spec, rest: j.rest } as JointSpec);
             if (handle === null) continue;
             this._joints.push(handle);
             if (j.drivePart >= 0 && this._parts[j.drivePart]) this._parts[j.drivePart].joint = handle;

@@ -9,9 +9,10 @@ import { LAYER } from '../collisionLayers';
 import type { Ragdoll } from '../ragdoll';
 import { resolveEvent } from '../../core/events/hub';
 import { closestSegmentSegment, quatConjugateTuple, quatRotateTuple, yawFromDirection } from '../../core/math';
-import { autoHumanoidProfile, parseRagdollProfile, ragdollLayout, ragdollPartPoseInto, type RagdollLayout } from '../ragdollProfile';
+import { cachedRagdollLayout, ragdollPartPoseInto, skinRagdollProfile, type RagdollLayout } from '../ragdollProfile';
+import { physicsStats } from '../physicsStats';
 import type { mat4 } from 'gl-matrix';
-import { BodySensors, type ContactList, type Raycaster } from './bodySensors';
+import { BodySensors, type ContactList, type Raycaster, type SensorDetail } from './bodySensors';
 import { ReactionBody } from './reactionBody';
 import { BAILS, BEHAVIOURS, STRUCK, stepState, type ReactionBehaviour, type ReactionContext, type ReactionState, type ReactionWound } from './behaviours';
 import type { AnimationActionHandle } from '../../animation/animator';
@@ -190,16 +191,13 @@ export class ReactionController {
         return best;
     }
 
-    /** The ragdoll layout a reaction would build, for hits before it has (cached per skin profile). */
+    /** The ragdoll layout a reaction would build, for hits before it has (cached per skin and profile). */
     private _layout(): RagdollLayout | null {
         const skin = this._skin;
         if (!skin) return null;
-        const profile = parseRagdollProfile(skin.ragdollProfile ?? autoHumanoidProfile(skin));
-        if (!profile) return null;
-        if (!this._layoutOf || this._layoutOf.profile !== skin.ragdollProfile) this._layoutOf = { profile: skin.ragdollProfile, layout: ragdollLayout(skin, profile) };
-        return this._layoutOf.layout;
+        const profile = skinRagdollProfile(skin);
+        return profile ? cachedRagdollLayout(skin, profile) : null;
     }
-    private _layoutOf: { profile: unknown; layout: RagdollLayout } | null = null;
 
     /** Use another of the skeleton's reaction sets (by id or name). */
     public useSet(name: string): void { this.set = pickReactionSet(parseReactionSets(this._skin?.reactionSets), name); }
@@ -215,8 +213,17 @@ export class ReactionController {
         if (h.damage) this._health = Math.max(0, this._health - h.damage);
         const dying = this._alive && this._health <= 0;
         if (impulse < T.minHitImpulse && !dying) return;
-        const r = this._ensure();
-        if (!r) return;
+        // A hit it would only flinch or stumble from asks for a body within the budget (PhysicsSystem.maxPoweredRagdolls);
+        // refused, the hit still counts (its Hit event), the body only does not move.
+        const severe = dying || impulse >= Math.min(T.staggerImpulse, T.fallImpulse);
+        const r = this._ensure(severe ? 'fall' : 'flinch');
+        if (!r) {
+            if (!this.ragdoll && this.node.animator && this._skin) {
+                const point = h.point ? [h.point[0], h.point[1], h.point[2]] as [number, number, number] : [0, 0, 0] as [number, number, number];
+                this._emit('Hit', { part: -1, partName: this._partNameOf(h.part), impulse, point });
+            }
+            return;
+        }
         const part = this._resolvePart(h.part, h.point);
         const p = r.parts[part];
         const point = h.point ? [h.point[0], h.point[1], h.point[2]] : [p.body.position.x, p.body.position.y, p.body.position.z];
@@ -409,7 +416,15 @@ export class ReactionController {
         if (r.destroyed) { this._forget(); return; }
         this._time += dt;
         this._stateTime += dt;
-        if (!r.frozen) this.sensors.update(r, dt, contacts, this.set.thresholds.settleSpeed, this._raycaster);
+        if (!r.frozen) {
+            // What the state reads, and no more: where a fall lands and the ground ahead only while it is in the air
+            // or rolling; the ground under it every step while it stands or falls, every fourth lying or rising.
+            const st = this._state, airborne = st === 'falling' || st === 'tumble';
+            const d = this._detail;
+            d.sweep = airborne; d.terrain = airborne;
+            d.under = airborne || st === 'hitReact' || st === 'stagger' || (++this._senseFrame & 3) === 0;
+            this.sensors.update(r, dt, contacts, this.set.thresholds.settleSpeed, this._raycaster, d);
+        } else this.sensors.stillFor += dt;
         if (this._clearBody && this._time >= this._clearUntil) this._restoreClear();
         this._transitions();
         if (!this.ragdoll || !this._body) return;
@@ -467,6 +482,10 @@ export class ReactionController {
                 if (!s.grounded && s.speed > T.downSpeed * 3) { this._go('falling'); break; }
                 const wantsUp = B.getUp.enabled && this.config.getUp !== false && this._time >= this._unconsciousUntil;
                 const writhing = B.writhe.enabled && this._wounds.length > 0 && t < B.writhe.params.duration;
+                // Lying still with nothing left to do but wait: its bodies leave the world, the pose held where it lies,
+                // until it gets up or something moves it (a hit, a push: _ensure puts them back).
+                const r = this.ragdoll;
+                if (r && !r.frozen && this._settledSent && !writhing && this._alive) r.freeze();
                 if (wantsUp && !writhing && s.stillFor > T.settleTime + B.getUp.params.delay) this._go('getUp');
                 break;
             }
@@ -498,6 +517,8 @@ export class ReactionController {
         this._state = next;
         this._stateTime = 0;
         this._balancedFor = 0;
+        // Off the ground's rest: its bodies back in the world (they left it lying still).
+        if (from === 'down' && next !== 'dead' && this.ragdoll?.frozen) this.ragdoll.unfreeze();
         if (next !== 'animated' && from === 'animated') { this._reactionStart = this._time; this._emit('Started', { from }); }
         // A get-up cut short (a hit, a push): its clip stops, and the body is the body's again.
         if (from === 'getUp' && next !== 'recover') this._stopGetUp();
@@ -546,14 +567,18 @@ export class ReactionController {
 
     // ---- the body ----
 
-    /** The powered ragdoll, made from the pose the character holds now. Null where it cannot be (no skin, no profile). */
-    private _ensure(): Ragdoll | null {
+    /**
+     * The powered ragdoll, made from the pose the character holds now. Null where it cannot be (no skin, no profile),
+     * or for a `flinch` the budget refuses (PhysicsSystem.maxPoweredRagdolls; a `fall` always gets one).
+     */
+    private _ensure(kind: 'flinch' | 'fall' = 'fall'): Ragdoll | null {
         if (this.ragdoll && !this.ragdoll.destroyed) {
             if (this.ragdoll.frozen) { this.ragdoll.unfreeze(); this.ragdoll.autoFreeze = !this._alive; }
             return this.ragdoll;
         }
         const animator = this.node.animator;
         if (!animator || !this._skin) return null;
+        if (!this._physics._admitReaction(this.node, kind)) return null;
         const r = this._physics.startRagdoll(this.node, { mode: 'powered' });
         if (!r.powered || r.parts.length === 0) { this._physics.stopRagdoll(this.node); return null; }
         r.autoFreeze = false;
@@ -688,6 +713,8 @@ export class ReactionController {
             const prev = this._prevAnim[i];
             for (let k = 0; k < 7; k++) prev[k] = body.anim[i][k];
         }
+        const st = this._state;
+        r.loose = st === 'falling' || st === 'tumble' || st === 'down' || st === 'dead';
         const animator = this.node.animator;
         if (animator) {
             // The feet planted by IK while the body carries the legs fight it: off (faded) unless only flinching.
@@ -919,13 +946,26 @@ export class ReactionController {
         return [f[0] / n, 0, f[2] / n];
     }
 
+    private readonly _detail: SensorDetail = { sweep: true, terrain: true, under: true };
+    private _senseFrame = 0;
+    /** The senses' rays: past its own limbs and its own capsule. One filter and one options record, reused. */
+    private readonly _rejectOwn = (_owner: Node | null, body: PhysicsBody) => this._physics.ragdollPartOf(body)?.ragdoll === this.ragdoll || this._isOwnCollider(body);
+    private readonly _rayOptions: { ignore: PhysicsBody[]; reject: (owner: Node | null, body: PhysicsBody) => boolean } = { ignore: [], reject: this._rejectOwn };
+    private readonly _rayFrom = vec3.create();
+    private readonly _rayTo = vec3.create();
     private readonly _raycaster: Raycaster = (from, to, ignore) => {
-        const hit = this._physics.raycast(vec3.fromValues(from[0], from[1], from[2]), vec3.fromValues(to[0], to[1], to[2]), {
-            ignore: ignore as PhysicsBody[],
-            reject: (_owner: Node | null, body: PhysicsBody) => this._physics.ragdollPartOf(body)?.ragdoll === this.ragdoll || this._isOwnCollider(body),
-        });
+        physicsStats.sensorRays++;
+        this._rayOptions.ignore = ignore as PhysicsBody[];
+        const hit = this._physics.raycast(vec3.set(this._rayFrom, from[0], from[1], from[2]), vec3.set(this._rayTo, to[0], to[1], to[2]), this._rayOptions);
         return hit ? { point: [hit.point[0], hit.point[1], hit.point[2]], normal: [hit.normal[0], hit.normal[1], hit.normal[2]], distance: hit.distance } : null;
     };
+
+    /** A part's name for a hit before there is a body (its index or name in the layout, as the hit gives it). */
+    private _partNameOf(part: unknown): string {
+        if (typeof part === 'string') return part;
+        if (typeof part === 'number') return this._layout()?.parts[part]?.part.name ?? '';
+        return '';
+    }
 
     private _isOwnCollider(body: PhysicsBody): boolean {
         const c = this._collider() as unknown as { ownBody?: PhysicsBody | null } | null;

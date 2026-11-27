@@ -709,6 +709,14 @@ export class ControllerNode extends Node {
 
     // ----- perception -------------------------------------------------------------------------------
 
+
+    /**
+     * Who this controller's senses consider: a character for which this returns false is never looked at (no
+     * line-of-sight ray, no sighting). Null, the default: every character. Runtime only, set by a script (an NPC
+     * that cares only about the player), never saved.
+     */
+    public perceptionFilter: ((character: Node) => boolean) | null = null;
+
     /**
      * Look around, remember what was seen, and optionally pick a target.
      *
@@ -723,7 +731,7 @@ export class ControllerNode extends Node {
         // Every `perceiveEvery` frames (Scene.aiDetail), on this controller's own frame of the cycle, with all the
         // time since it last looked: agents take turns rather than all looking on the same frame.
         this._perceiveWait += delta;
-        if (!this._onItsFrame(this._scene?.aiDetail.perceiveEvery ?? 1, this._perceiveFrame++)) return;
+        if (!this._onItsFrame((this._scene?.aiDetail.perceiveEvery ?? 1) * this._farFactor(pawn), this._perceiveFrame++)) return;
         delta = this._perceiveWait;
         this._perceiveWait = 0;
         if (isCharacterBody2D(pawn)) { this._perceive2D(pawn, delta); return; }
@@ -733,9 +741,12 @@ export class ControllerNode extends Node {
         this._candidates.length = 0;
         this._candidateIds.clear();
         const characters = this._scene?.characters;
+        const filter = this.perceptionFilter;
         if (characters) {
             for (const character of characters) {
                 if (character === pawn) continue;
+                // Only who the brain cares about gets a ray (an NPC looking for the player, not at every other NPC).
+                if (filter && !filter(character)) continue;
                 this._candidates.push({ id: character.id, position: character.worldPosition });
                 this._candidateIds.add(character.id);
             }
@@ -1032,7 +1043,7 @@ export class ControllerNode extends Node {
         // unless avoidance was asked for — see `_probeObstacles`.
         if (tuning.avoidDistance > 0 && vec3.length(this._desired) > 1e-6 && pawn instanceof CharacterNode) {
             // The whiskers every `probeEvery` frames (Scene.aiDetail); in between, the last ones still steer.
-            if (this._onItsFrame(this._scene?.aiDetail.probeEvery ?? 1, this._probeFrame++)) this._probeObstacles(pawn);
+            if (this._onItsFrame((this._scene?.aiDetail.probeEvery ?? 1) * this._farFactor(pawn), this._probeFrame++)) this._probeObstacles(pawn);
             avoidObstacles(this._desired, this._desired, this._probes, tuning, up);
         }
 
@@ -1729,6 +1740,20 @@ export class ControllerNode extends Node {
     private _cyclePhase = -1;
 
     /** Whether frame `frame` of this controller is one of its turns in a cycle of `every` frames. */
+    /**
+     * `aiDetail.farFactor` for an agent farther than `aiDetail.farDistance` from the camera (it perceives and probes
+     * that many times less often: nobody is close enough to see it hesitate), else 1.
+     */
+    private _farFactor(pawn: { worldPosition: ArrayLike<number> }): number {
+        const detail = this._scene?.aiDetail;
+        const far = detail?.farDistance ?? 0, factor = detail?.farFactor ?? 1;
+        if (!(far > 0) || !(factor > 1)) return 1;
+        const cam = this._scene?.activeCamera;
+        if (!cam) return 1;
+        const a = pawn.worldPosition, b = cam.worldPosition;
+        return Math.hypot(a[0] - b[0], a[1] - b[1], a[2] - b[2]) > far ? factor : 1;
+    }
+
     private _onItsFrame(every: number, frame: number): boolean {
         if (!(every > 1)) return true;
         if (this._cyclePhase < 0) {

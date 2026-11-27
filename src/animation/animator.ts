@@ -55,6 +55,11 @@ export interface PhysicsMappingSource {
     simulatedPose(part: number, out: number[]): void;
     /** Part `i`'s rigid world pose as the animation poses it (its final bone matrices, the node's world transform). */
     animatedPose(part: number, finalBones: readonly mat4[], nodeWorld: mat4, out: number[]): void;
+    /**
+     * The body has every part (it falls, rolls, lies): the animation underneath is only a loose target for its weak
+     * muscles, so it is posed every other frame (its clock still runs every frame).
+     */
+    readonly loose?: boolean;
 }
 
 /** Trigger-based animation playback. Superseded by the state machine below. */
@@ -2227,11 +2232,14 @@ export class Animator {
         // A layer's animator poses whenever the animator it belongs to does; see _skipPose.
         if (!this._isOverlay) {
             this._skipPose = false;
-            // Bodies drive this skeleton every frame: its target must be as fresh.
+            // Bodies drive this skeleton every frame: its target must be as fresh, unless the body has every part.
             if (this._lodStride > 1 && !this._physicsMapping) {
                 this._lodCountdown--;
                 if (this._lodCountdown > 0) this._skipPose = true;
                 else this._lodCountdown = this._lodStride;
+            } else if (this._physicsMapping?.loose) {
+                this._looseSkip = !this._looseSkip;
+                if (this._looseSkip) this._skipPose = true;
             }
         }
         this._ikDelta += Math.max(0, deltaTime);
@@ -2291,6 +2299,8 @@ export class Animator {
     private _lodCountdown = 0;
     /** This frame's pose is skipped (stride). A layer inherits it from the animator it belongs to. */
     private _skipPose = false;
+    /** Every other frame skipped while a loose body draws the skeleton (see PhysicsMappingSource.loose). */
+    private _looseSkip = false;
     /** Wall-clock time since foot IK last ran, so its smoothing keeps real time across skipped frames. */
     private _ikDelta = 0;
 
@@ -4790,6 +4800,8 @@ export class Animator {
                 o.presenceTarget = child._overlayEmpty || (!child._currentAnimation && !child._fieldEntries) ? 0 : 1;
                 o.fadeSeconds = child._presenceFadeSeconds;
             }
+            // A layer that is not drawn and is not fading in poses nothing (its clock and its machine still run).
+            if (o.presence <= 0 && o.presenceTarget <= 0) child._skipPose = true;
             child.update(deltaTime);
 
             const action = o.action;

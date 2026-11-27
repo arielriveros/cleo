@@ -1,4 +1,4 @@
-import { ConeTwistConstraint, PointToPointConstraint, Vec3, type Body } from 'cannon-es';
+import { ConeTwistConstraint, PointToPointConstraint, Quaternion, Vec3, type Body } from 'cannon-es';
 
 // cannon's cone-twist measures twist between a perpendicular it picks for each body's axis on its own
 // (Vec3.tangents), so a joint made in a pose already turned about its axis starts past its twist limit and
@@ -48,12 +48,16 @@ function swingBack(from: Vec3, to: Vec3, v: Vec3): void {
     v.set(v.x * c + _t.x * s + _n.x * k, v.y * c + _t.y * s + _n.y * k, v.z * c + _t.z * s + _n.z * k);
 }
 
-/** The perpendiculars that start a cone-twist untwisted with its bodies as they stand now. */
-export function matchedTwistAxes(a: Body, b: Body, axisA: Vec3, axisB: Vec3): { twistA: number[]; twistB: number[] } {
+/**
+ * The perpendiculars that start a cone-twist untwisted with its bodies as they stand now, or at `rest` (A's
+ * rotation in B's frame, JointDesc.rest) when given.
+ */
+export function matchedTwistAxes(a: Body, b: Body, axisA: Vec3, axisB: Vec3, rest?: ArrayLike<number>): { twistA: number[]; twistB: number[] } {
     const tA = new Vec3();
     axisA.unit(new Vec3()).tangents(tA, new Vec3());
-    const world = a.quaternion.vmult(tA);
-    const inB = b.quaternion.conjugate().vmult(world);
+    const inB = rest
+        ? new Quaternion(rest[0], rest[1], rest[2], rest[3]).vmult(tA)
+        : b.quaternion.conjugate().vmult(a.quaternion.vmult(tA));
     const n = axisB.unit(new Vec3());
     const tB = inB.vsub(n.scale(inB.dot(n)));
     if (tB.length() < 1e-6) n.tangents(tB, new Vec3());

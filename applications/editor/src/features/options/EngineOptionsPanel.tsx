@@ -82,6 +82,10 @@ function RuntimeOptions() {
           <NumberInput value={e.simulationRange} min={0} max={100000} step={5}
             onChange={v => set({ simulationRange: Math.max(0, v) })} />
         </Field>
+        <Field label='Reacting bodies' labelClassName={OPTION_LABEL}>
+          <NumberInput value={e.maxPoweredRagdolls} min={0} max={64} step={1}
+            onChange={v => set({ maxPoweredRagdolls: Math.max(0, Math.min(64, Math.round(v))) })} />
+        </Field>
         <Field label='Physics backend' labelClassName={OPTION_LABEL}>
           <Select value={e.physicsBackend} onChange={ev => set({ physicsBackend: ev.target.value as PhysicsBackendSetting })}>
             {PHYSICS_BACKENDS.map(b => (

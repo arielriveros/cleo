@@ -10,6 +10,8 @@ import { driveRecord } from '../drive/driveRecords';
 import type { DescribedWorld } from '../copy/describedWorld';
 import { boundingRadiusOf, collidersAabb, multiply, partShapeFor, rotate } from '../shapeBounds';
 import { fromX, matchedFrame } from '../jointFrames';
+
+const IDENTITY = [0, 0, 0, 1] as const;
 import { jolt, type Jolt } from './load';
 import { JoltVehicle } from './joltVehicle';
 import { copyState, landState, type VehicleEntry } from '../vehicle/vehicleCopy';
@@ -56,6 +58,7 @@ export const JOLT_CAPABILITIES: PhysicsCapabilities = {
     nativeDrivetrain: true,
     // Hinge and cone joints by their own motors (SwingTwist and Hinge, Position mode); ball joints by the shared spring.
     jointDrives: 'native',
+    islandIterations: true,
 };
 
 /** cannon's damping, `v *= (1 − d)^dt`, as Jolt's rate `c` in `v *= 1 − c·dt`: the same decay for small dt. */
@@ -69,7 +72,7 @@ function dampingRate(d: number): number {
  * A joint as built, from which a copy (the physics worker's) builds the same joint whatever the bodies' poses
  * are then: anchors from each body's node origin, and the frames measured from the poses it was made in.
  */
-export type JoltJointRecord = { a: BodyHandle; b: BodyHandle; collideConnected: boolean } & (
+export type JoltJointRecord = { a: BodyHandle; b: BodyHandle; collideConnected: boolean; iterations?: number } & (
     /** A's origin and frame, seen from B. */
     | { kind: 'fixed'; anchorB: number[]; frameB: number[] }
     | { kind: 'ball'; anchorA: number[]; anchorB: number[] }
@@ -459,7 +462,10 @@ export class JoltWorld implements DescribedWorld<JoltJointRecord> {
         const v = (x: V3) => [x[0], x[1], x[2]];
         const collideConnected = !!desc.collideConnected;
         const qa = this._rotation(ea), qb = this._rotation(eb);
+        // Where the joint reads zero: as the two stand now, or the rest it is given.
+        const za = desc.rest ?? qa, zb = desc.rest ? IDENTITY : qb;
         let record: JoltJointRecord;
+        const iterations = desc.iterations && desc.iterations > 0 ? Math.round(desc.iterations) : undefined;
         switch (desc.kind) {
             case 'fixed': {
                 // Hold the pose the two have now: A's origin and frame, seen from B.
@@ -475,14 +481,14 @@ export class JoltWorld implements DescribedWorld<JoltJointRecord> {
                 break;
             case 'hinge': {
                 // B's zero angle is A's as the two stand now.
-                const frameA = fromX(desc.axisA), frameB = matchedFrame(qa, frameA, qb, desc.axisB);
+                const frameA = fromX(desc.axisA), frameB = matchedFrame(za, frameA, zb, desc.axisB);
                 record = { kind: 'hinge', a: desc.a, b: desc.b, collideConnected, anchorA: v(desc.anchorA), anchorB: v(desc.anchorB), frameA, frameB };
                 break;
             }
             case 'coneTwist': {
                 // Twist about each body's axis, measured from the pose the joint is made in (see matchedFrame):
                 // two frames rolled apart at the start would read as a twist past a tight limit.
-                const frameA = fromX(desc.axisA), frameB = matchedFrame(qa, frameA, qb, desc.axisB);
+                const frameA = fromX(desc.axisA), frameB = matchedFrame(za, frameA, zb, desc.axisB);
                 record = {
                     kind: 'cone', a: desc.a, b: desc.b, collideConnected, anchorA: v(desc.anchorA), anchorB: v(desc.anchorB),
                     frameA, frameB, twist: desc.twistAngle, cone: desc.coneAngle,
@@ -490,6 +496,7 @@ export class JoltWorld implements DescribedWorld<JoltJointRecord> {
                 break;
             }
         }
+        if (iterations) record.iterations = iterations;
         return this.createJointFromRecord(record);
     }
 
@@ -550,6 +557,9 @@ export class JoltWorld implements DescribedWorld<JoltJointRecord> {
                 break;
             }
         }
+        // Its island solved with this many velocity steps (the most any of its constraints asks), the rest of the
+        // world with its own: a ragdoll's chain is stiff without every crate paying for it.
+        if (record.iterations) settings.mNumVelocityStepsOverride = record.iterations;
         const constraint = J.castObject(settings.Create(ea.body, eb.body), J.TwoBodyConstraint);
         J.destroy(settings);
         for (const o of temps) J.destroy(o);

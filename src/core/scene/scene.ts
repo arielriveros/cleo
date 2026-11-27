@@ -378,7 +378,11 @@ export class Scene {
      * host with many agents spreads them out (each agent on its own frame of the cycle, with the time since it
      * last ran), docs/design/netsync.md §7.
      */
-    public aiDetail: { perceiveEvery: number; probeEvery: number; pathsPerFrame?: number } = { perceiveEvery: 1, probeEvery: 1 };
+    public aiDetail: {
+        perceiveEvery: number; probeEvery: number; pathsPerFrame?: number;
+        /** Agents farther than this (m) from the active camera perceive and probe `farFactor` times less often. 0: off. */
+        farDistance?: number; farFactor?: number;
+    } = { perceiveEvery: 1, probeEvery: 1 };
 
     /** Path searches left this frame (see `aiDetail.pathsPerFrame`). */
     private _pathsLeft = Infinity;
@@ -392,8 +396,13 @@ export class Scene {
     public takePathSearch(): boolean {
         if (this._pathsLeft <= 0) return false;
         this._pathsLeft--;
+        this._pathsTaken++;
         return true;
     }
+
+    /** Path searches made this frame through {@link takePathSearch} (controllers' replans, and scripts that ask). */
+    public get pathSearchesThisFrame(): number { return this._pathsTaken; }
+    private _pathsTaken = 0;
 
     /**
      * The rain and snow falling from this scene's weather volumes (WeatherNode `precipitation`): one
@@ -798,6 +807,7 @@ export class Scene {
             if (this._hasStarted && !paused) {
                 const controlStart = performance.now();
                 this._pathsLeft = this.aiDetail.pathsPerFrame ?? Infinity;
+                this._pathsTaken = 0;
                 for (const controller of this.controllers) {
                     // Guarded per controller, like dispatchActions: one bad brain must not take the frame.
                     try { controller.think(delta); }

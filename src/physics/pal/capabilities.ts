@@ -38,6 +38,12 @@ export interface PhysicsCapabilities {
      * either way; body pins and gravity compensation are always the shared ones.
      */
     readonly jointDrives: 'native' | 'shared';
+    /**
+     * Whether a joint can ask for more solver iterations for its own island alone (JointDesc.iterations): Jolt's
+     * per-constraint velocity steps, Rapier's per-body additional iterations. Where it cannot (cannon), a ragdoll
+     * raises the whole world's count while it lives.
+     */
+    readonly islandIterations: boolean;
 }
 
 /** The boot log line: `physics cannon · capsule compound · groups 32-bit · ...`. */

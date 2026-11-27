@@ -46,6 +46,7 @@ export const RAPIER_CAPABILITIES: PhysicsCapabilities = {
     nativeDrivetrain: false,
     // Its spherical joints' motors take per-axis angles, not a rotation: the shared spring drives them instead.
     jointDrives: 'shared',
+    islandIterations: true,
 };
 
 /** Rapier's interaction groups: 16 bits of membership over 16 of filter. */
@@ -63,7 +64,7 @@ function dampingRate(d: number): number {
  * bodies' poses are then: the frames a fixed or cone-twist joint measured from the poses it was made in are
  * kept, not measured again.
  */
-export type RapierJointRecord = { a: BodyHandle; b: BodyHandle; collideConnected: boolean } & (
+export type RapierJointRecord = { a: BodyHandle; b: BodyHandle; collideConnected: boolean; iterations?: number } & (
     /** A's origin and frame, seen from B. */
     | { kind: 'fixed'; anchorB: number[]; frameB: number[] }
     | { kind: 'ball'; anchorA: number[]; anchorB: number[] }
@@ -372,6 +373,7 @@ export class RapierWorld implements DescribedWorld<RapierJointRecord> {
         const v = (x: V3) => [x[0], x[1], x[2]];
         const collideConnected = !!desc.collideConnected;
         let record: RapierJointRecord;
+        const iterations = desc.iterations && desc.iterations > 0 ? Math.round(desc.iterations) : undefined;
         switch (desc.kind) {
             case 'fixed': {
                 // Hold the pose the two have now: A's origin and frame, seen from B.
@@ -395,7 +397,8 @@ export class RapierWorld implements DescribedWorld<RapierJointRecord> {
                 // from the pose the joint is made in: two frames rolled apart at the start would read as a
                 // twist past a tight limit, which the solver fights for as long as the joint lives.
                 const qa = a.rotation(), qb = b.rotation();
-                const frameA = fromX(desc.axisA), frameB = matchedFrame([qa.x, qa.y, qa.z, qa.w], frameA, [qb.x, qb.y, qb.z, qb.w], desc.axisB);
+                const za = desc.rest ?? [qa.x, qa.y, qa.z, qa.w], zb = desc.rest ? [0, 0, 0, 1] : [qb.x, qb.y, qb.z, qb.w];
+                const frameA = fromX(desc.axisA), frameB = matchedFrame(za, frameA, zb, desc.axisB);
                 record = {
                     kind: 'cone', a: desc.a, b: desc.b, collideConnected, anchorA: v(desc.anchorA), anchorB: v(desc.anchorB),
                     frameA, frameB, twist: desc.twistAngle, cone: desc.coneAngle,
@@ -403,6 +406,7 @@ export class RapierWorld implements DescribedWorld<RapierJointRecord> {
                 break;
             }
         }
+        if (iterations) record.iterations = iterations;
         return this.createJointFromRecord(record);
     }
 
@@ -435,6 +439,11 @@ export class RapierWorld implements DescribedWorld<RapierJointRecord> {
             }
         }
         joint.setContactsEnabled(record.collideConnected);
+        // Its bodies solved with more iterations than the world's (the most any of their joints asks).
+        if (record.iterations) {
+            const extra = Math.max(0, record.iterations - this._raw.numSolverIterations);
+            for (const body of [a, b]) if (body.additionalSolverIterations() < extra) body.setAdditionalSolverIterations(extra);
+        }
         const id = this._nextJoint++;
         this._joints.set(id, { joint, record });
         return id as JointHandle;

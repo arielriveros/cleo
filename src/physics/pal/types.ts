@@ -153,7 +153,20 @@ export interface BodyDesc {
  * caps the joint's impulse (where a backend can, see capabilities); `collideConnected` lets the two
  * bodies collide with each other (default false).
  */
-export type JointDesc = { a: BodyHandle; b: BodyHandle; maxForce?: number; collideConnected?: boolean } & (
+export type JointDesc = {
+    a: BodyHandle; b: BodyHandle; maxForce?: number; collideConnected?: boolean;
+    /**
+     * Solver iterations for the island this joint is in, when the world's count is too few for it (a ragdoll's
+     * chain of 15 bodies). Only where `capabilities.islandIterations`; ignored elsewhere.
+     */
+    iterations?: number;
+    /**
+     * Hinge and cone-twist: A's rotation in B's frame [x y z w] at which the joint reads zero (its hinge angle, its
+     * twist), instead of the pose the two bodies stand in when it is made. A ragdoll put back into the world where
+     * it lies (Ragdoll.unfreeze) gives the pose it was first made in, so its limits stay where they were.
+     */
+    rest?: Q4;
+} & (
     /** Holds the two bodies in the relative pose they have when it is made. */
     | { kind: 'fixed' }
     /** A shared point: free rotation. */

@@ -76,6 +76,12 @@ export interface PhysicsStats {
     workerJitterMs: number;
     /** Everything inside PhysicsSystem.update(). */
     frameMs: number;
+    /** Reacting bodies (physics/reactive/): their muscles before the step, their senses and states after it. */
+    reactionsMs: number;
+    /** Powered ragdolls simulating now (not frozen): what PhysicsSystem.maxPoweredRagdolls caps. */
+    poweredRagdolls: number;
+    /** Rays the reacting bodies' senses cast this frame (the ground under them, ahead, where a fall lands). */
+    sensorRays: number;
 }
 
 // Mutable singleton accumulator.
@@ -117,6 +123,9 @@ export const physicsStats: PhysicsStats = {
     workerLeadMs: 0,
     workerJitterMs: 0,
     frameMs: 0,
+    reactionsMs: 0,
+    poweredRagdolls: 0,
+    sensorRays: 0,
 };
 
 /**
@@ -131,6 +140,8 @@ export function resetPhysicsStats(): void {
     physicsStats.tilemapMs = 0;
     physicsStats.rayMs = 0;
     physicsStats.rayCount = 0;
+    physicsStats.reactionsMs = 0;
+    physicsStats.sensorRays = 0;
     physicsStats.broadphaseMs = 0;
     physicsStats.narrowphaseMs = 0;
     physicsStats.solveMs = 0;

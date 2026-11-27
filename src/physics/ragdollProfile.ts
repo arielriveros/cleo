@@ -524,6 +524,37 @@ export function effectiveRagdollProfile(skin: Skin): { profile: RagdollProfile |
     return auto ? { profile: auto, source: 'auto' } : { profile: null, source: 'generic' };
 }
 
+const AUTO_PROFILES = new WeakMap<Skin, RagdollProfile | null>();
+const PARSED_PROFILES = new WeakMap<object, RagdollProfile | undefined>();
+const LAYOUTS = new WeakMap<Skin, WeakMap<RagdollProfile, RagdollLayout>>();
+
+/**
+ * The profile a ragdoll of `skin` builds from: `source` (a stored profile, read through parseRagdollProfile), else
+ * the skin's own, else the automatic humanoid's. Cached per skin and per source object, so a reaction that makes a
+ * ragdoll for every flinch measures the skeleton once. The result is shared: do not change it.
+ */
+export function skinRagdollProfile(skin: Skin, source?: unknown): RagdollProfile | undefined {
+    const raw = source ?? skin.ragdollProfile;
+    if (raw && typeof raw === 'object') {
+        if (!PARSED_PROFILES.has(raw)) PARSED_PROFILES.set(raw, parseRagdollProfile(raw));
+        return PARSED_PROFILES.get(raw);
+    }
+    if (!AUTO_PROFILES.has(skin)) {
+        const auto = autoHumanoidProfile(skin);
+        AUTO_PROFILES.set(skin, auto ? parseRagdollProfile(auto) ?? null : null);
+    }
+    return AUTO_PROFILES.get(skin) ?? undefined;
+}
+
+/** ragdollLayout, once per skin and profile object (see skinRagdollProfile). Shared: do not change it. */
+export function cachedRagdollLayout(skin: Skin, profile: RagdollProfile): RagdollLayout {
+    let bySkin = LAYOUTS.get(skin);
+    if (!bySkin) { bySkin = new WeakMap(); LAYOUTS.set(skin, bySkin); }
+    let layout = bySkin.get(profile);
+    if (!layout) { layout = ragdollLayout(skin, profile); bySkin.set(profile, layout); }
+    return layout;
+}
+
 /** Tolerant reader for a stored profile: anything unusable is null rather than a throw. */
 export function parseRagdollProfile(raw: unknown): RagdollProfile | undefined {
     if (!raw || typeof raw !== 'object') return undefined;

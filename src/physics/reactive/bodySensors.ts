@@ -29,6 +29,14 @@ export interface ContactList {
     forEachContact(visit: (a: BodyHandle, b: BodyHandle, nx: number, ny: number, nz: number) => void): void;
 }
 
+/**
+ * Which of the senses' rays to cast this step (all of them by default): `sweep`, where a fall lands (up to 20 rays);
+ * `terrain`, the ground ahead (4); `under`, the ground under the centre (1). What is not cast keeps its last value
+ * (the sweep and the terrain read as nothing ahead and flat).
+ */
+export interface SensorDetail { sweep: boolean; terrain: boolean; under: boolean }
+const ALL_DETAIL: SensorDetail = { sweep: true, terrain: true, under: true };
+
 /** How far ahead the fall is predicted, and in how many straight pieces. */
 const SWEEP_SECONDS = 1.2;
 const SWEEP_PIECES = 10;
@@ -83,7 +91,7 @@ export class BodySensors {
     private _bodies: PhysicsBody[] = [];
 
     /** Measure the body after a step of `dt` seconds. */
-    public update(ragdoll: Ragdoll, dt: number, contacts: ContactList | null, settleSpeed: number, raycast: Raycaster): void {
+    public update(ragdoll: Ragdoll, dt: number, contacts: ContactList | null, settleSpeed: number, raycast: Raycaster, detail: SensorDetail = ALL_DETAIL): void {
         const parts = ragdoll.parts;
         if (parts.length === 0) return;
         if (this._bodies.length !== parts.length || this._bodies.some((b, i) => b !== parts[i].body)) {
@@ -144,7 +152,9 @@ export class BodySensors {
         }
         const was = this._wasTouching;
         for (const i of this.touching) if (!was.has(i)) this.touchedNow.add(i);
-        this._wasTouching = new Set(this.touching);
+        const was2 = this._wasTouching;
+        was2.clear();
+        for (const i of this.touching) was2.add(i);
         this.grounded = this.touching.size > 0;
         if (this.grounded) { this.airTime = 0; this.groundedTime += dt; this.peakHeight = this.com[1]; }
         else { this.airTime += dt; this.groundedTime = 0; this.peakHeight = Math.max(this.peakHeight, this.com[1]); }
@@ -152,16 +162,19 @@ export class BodySensors {
 
         // The ground under it and ahead.
         const ignore = this._bodies;
-        const under = raycast([this.com[0], this.com[1] + 0.5, this.com[2]], [this.com[0], this.com[1] - 30, this.com[2]], ignore);
-        if (under) {
-            this.groundY = under.point[1];
-            this.groundNormal[0] = under.normal[0]; this.groundNormal[1] = under.normal[1]; this.groundNormal[2] = under.normal[2];
-        } else { this.groundY = NaN; this.groundNormal[0] = 0; this.groundNormal[1] = 1; this.groundNormal[2] = 0; }
+        if (detail.under) {
+            const under = raycast([this.com[0], this.com[1] + 0.5, this.com[2]], [this.com[0], this.com[1] - 30, this.com[2]], ignore);
+            if (under) {
+                this.groundY = under.point[1];
+                this.groundNormal[0] = under.normal[0]; this.groundNormal[1] = under.normal[1]; this.groundNormal[2] = under.normal[2];
+            } else { this.groundY = NaN; this.groundNormal[0] = 0; this.groundNormal[1] = 1; this.groundNormal[2] = 0; }
+        }
         this.height = Number.isFinite(this.groundY) ? this.com[1] - this.groundY : Infinity;
-        this._terrain(raycast, ignore);
+        if (detail.terrain) this._terrain(raycast, ignore);
+        else { this.terrain = 'flat'; this.slope = Math.acos(Math.max(-1, Math.min(1, this.groundNormal[1]))); }
 
         // Where it will land.
-        this.impact = this._sweep(raycast, ignore, head ?? pelvis, pelvis);
+        this.impact = detail.sweep ? this._sweep(raycast, ignore, head ?? pelvis, pelvis) : null;
 
         // Balance: the feet on the ground, the capture point against them.
         const support: [number, number][] = [];

@@ -36,6 +36,7 @@ export const CANNON_CAPABILITIES: PhysicsCapabilities = {
     coneLimit: 'native',
     manualSleep: true,
     profilePhases: ['broadphase', 'narrowphase', 'solve', 'integrate'],
+    islandIterations: false,
     threadable: true,
     precision: 64,
     vehicleCasts: ['ray'],
@@ -341,7 +342,7 @@ export class CannonWorld implements PhysicsWorld {
                     angle: desc.coneAngle, twistAngle: desc.twistAngle, maxForce,
                 });
                 if (desc.matchTwist) {
-                    const { twistA, twistB } = matchedTwistAxes(a, b, cone.axisA, cone.axisB);
+                    const { twistA, twistB } = matchedTwistAxes(a, b, cone.axisA, cone.axisB, desc.rest);
                     matchConeTwist(cone, twistA, twistB);
                 }
                 joint = cone;

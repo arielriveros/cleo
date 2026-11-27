@@ -194,7 +194,9 @@ describe('a profile ragdoll falling', () => {
         const p = world();
         const before = p.solverIterations;
         const r = p.startRagdoll(mannequin());
-        expect(p.solverIterations).toBe(20);
+        // Where a joint can ask for its own island's count (Jolt, Rapier) the world's stays; elsewhere it is raised.
+        if (p.capabilities?.islandIterations) expect(p.solverIterations).toBe(before);
+        else expect(p.solverIterations).toBe(20);
         for (let i = 0; i < 60 * 10 && !r.frozen; i++) p.update(1 / 60);
         expect(r.frozen).toBe(true);
         expect(p.solverIterations).toBe(before);

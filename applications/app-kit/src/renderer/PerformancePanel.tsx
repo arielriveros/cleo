@@ -110,6 +110,7 @@ type Sample = {
   bodies: number; broadphaseBodies: number; contacts: number; terrainMs: number;
   activeBodies: number; frozenBodies: number; restingBodies: number;
   triggerPassMs: number; triggerCandidates: number; triggerPairsTested: number; triggerOverlaps: number;
+  reactionsMs: number; poweredRagdolls: number; sensorRays: number;
   broadphaseMs: number; narrowphaseMs: number; solveMs: number; integrateMs: number;
   /** The physics engine (physics.backend), and the phases of its step it measures (its capabilities). */
   physicsBackend: string; physicsPhases: readonly string[];
@@ -139,6 +140,7 @@ const EMPTY: Sample = {
   bodies: 0, broadphaseBodies: 0, contacts: 0, terrainMs: 0,
   activeBodies: 0, frozenBodies: 0, restingBodies: 0,
   triggerPassMs: 0, triggerCandidates: 0, triggerPairsTested: 0, triggerOverlaps: 0,
+  reactionsMs: 0, poweredRagdolls: 0, sensorRays: 0,
   broadphaseMs: 0, narrowphaseMs: 0, solveMs: 0, integrateMs: 0,
   physicsBackend: '', physicsPhases: [],
   physicsExecutor: 'inline', workerState: 'inline', workerMode: 'off', sharedReplies: false, workerFallback: null, autoStepMs: 0, cores: 0,
@@ -348,6 +350,9 @@ export default function PerformancePanel({ physicsThread, playPin, active = true
           frozenBodies: phys?.frozenBodies ?? 0,
           restingBodies: phys?.restingBodies ?? 0,
           triggerPassMs: phys?.triggerPassMs ?? 0,
+          reactionsMs: phys?.reactionsMs ?? 0,
+          poweredRagdolls: phys?.poweredRagdolls ?? 0,
+          sensorRays: phys?.sensorRays ?? 0,
           triggerCandidates: phys?.triggerCandidates ?? 0,
           triggerPairsTested: phys?.triggerPairsTested ?? 0,
           triggerOverlaps: phys?.triggerOverlaps ?? 0,
@@ -587,6 +592,11 @@ export default function PerformancePanel({ physicsThread, playPin, active = true
              title='Frozen bodies are out of their simulation range; resting ones are asleep after coming to rest. Both stay solid, neither is simulated.' />
         {/* The engine's trigger-to-trigger pass (hitboxes against hurtboxes), which the backend does not do. Runs
             only while some trigger asks to detect others; `overlaps` counts every reported trigger overlap. */}
+        {/* Characters reacting with their whole body (physics/reactive/): their muscles, senses and states, how many
+            are simulating (Options ▸ Engine ▸ Physics ▸ Reacting bodies caps it), and their senses' rays. */}
+        {(d.poweredRagdolls > 0 || d.reactionsMs > 0) &&
+          <Row label='· reactions' value={`${fmt(d.reactionsMs)} ms · ${d.poweredRagdolls} bodies · ${d.sensorRays} rays`}
+               title='Reacting bodies: the time their muscles, senses and states take, how many are simulating, and the rays their senses cast.' />}
         <Row label='· triggers' value={`${fmt(d.triggerPassMs)} ms · ${d.triggerCandidates} · ${d.triggerPairsTested} tested · ${d.triggerOverlaps} overlapping`}
              title='Trigger-to-trigger pass: its time, the enabled triggers it considered, the pairs whose bounds met and got the exact test, and how many trigger overlaps are live.' />
         <Row label='· broadphase' value={d.broadphaseBodies.toLocaleString()} hl={d.broadphaseBodies > d.bodies}

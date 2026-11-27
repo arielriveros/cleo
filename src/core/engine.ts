@@ -47,6 +47,8 @@ interface CleoConfig {
     maxSubsteps?: number;
     /** Metres from the camera past which dynamic bodies freeze. See `PhysicsSystem.simulationRange`. */
     simulationRange?: number;
+    /** The most reacting bodies (powered ragdolls) at once. See `PhysicsSystem.maxPoweredRagdolls`. */
+    maxPoweredRagdolls?: number;
     /**
      * Run the physics step in a Web Worker: 'on', 'auto' (when it pays) or 'off' (the default). Needs the
      * host to have set `PhysicsSystem.workerFactory`; without one the step stays on the main thread.
@@ -172,6 +174,7 @@ export class CleoEngine {
     });
     if (config?.physics?.maxSubsteps) this._physicsSystem.maxSubsteps = config.physics.maxSubsteps;
     if (config?.physics?.simulationRange) this._physicsSystem.simulationRange = config.physics.simulationRange;
+    if (typeof config?.physics?.maxPoweredRagdolls === 'number') this._physicsSystem.maxPoweredRagdolls = config.physics.maxPoweredRagdolls;
     if (config?.physics?.worker) this._physicsSystem.setWorkerMode(config.physics.worker);
     if (config?.runtime?.maxFrameDelta) this.maxFrameDelta = config.runtime.maxFrameDelta;
 
@@ -456,6 +459,7 @@ export class CleoEngine {
     const next = new PhysicsSystem({ gravity: old.gravity, backend: options.backend, layers: old.layerNames });
     next.maxSubsteps = old.maxSubsteps;
     next.simulationRange = old.simulationRange;
+    next.maxPoweredRagdolls = old.maxPoweredRagdolls;
     next.simulationOrigins = old.simulationOrigins;
     next.profileStep = old.profileStep;
     await next.load();

@@ -58,6 +58,30 @@ through keeps foot placement.
 
 Scripts hear each step as a `reaction:*` event (see [Reactions (scripting)](../scripting/reactions.md#events)).
 
+## What a reaction costs
+
+A reacting body is 16 simulated parts, their joints and muscles, and the senses that tell it where it is going.
+Many at once is a lot of work, so the engine keeps it in check:
+
+- **A budget.** At most **Reacting bodies** characters (Options ▸ Engine ▸ Physics, 6 by default) have their
+  body at once. A hit that would only make one flinch or stumble while that many are reacting, or more than 40 m
+  from the camera, moves nothing: the hit still counts (its `reaction:Hit` event, the scripts reading it). A fall
+  always gets its body, taking it from the farthest character that is only flinching.
+- **Rest.** A body lying still has nothing to do until it gets up: its parts leave the simulation, holding the pose
+  where it lies, and come back the moment it gets up or something hits or shoves it. It does not count against the
+  budget.
+- **Its own solver iterations.** A chain of 16 jointed parts needs more solver iterations than a crate. On Jolt and
+  Rapier its joints ask for them for their own island alone (the ragdoll profile's **Solver iterations**); on
+  cannon-es the world's count is raised while a body reacts.
+- **Senses on demand.** Where a fall will land (up to 20 rays) and the ground ahead (4) are measured only in the
+  air or rolling; the ground under it every step while it stands or falls, every fourth lying or getting up. The
+  step's contacts are sorted out once for every reacting body.
+- **The animation underneath.** While the body has every part (falling, rolling, lying) the animation its weak
+  muscles reach for is posed every other frame; a layer that is not drawn poses nothing.
+
+The Performance panel's physics rows show the time reactions take, the bodies reacting and their rays
+(`physics.stats.reactionsMs`, `poweredRagdolls`, `sensorRays`).
+
 ## Reaction sets
 
 A skeleton holds any number of named reaction sets: a soldier and a civilian can share one rig and react
