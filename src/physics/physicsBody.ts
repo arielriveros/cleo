@@ -48,6 +48,12 @@ export interface PhysicsBodyOptions {
     sleepTimeLimit?: number;
     /** It is a character's: water leaves it alone unless a volume asks (see buoyancy). */
     character?: boolean;
+    /** Swept through each step (BodyDesc.motionQuality, where the backend has it). */
+    motionQuality?: 'discrete' | 'linearCast';
+    /** Which bodies of its group it does not collide with (BodyDesc.selfFilter, where the backend has it). */
+    selfFilter?: { group: number; index: number; ignore: number };
+    /** Its inertia, [Ixx Iyy Izz Ixy Ixz Iyz] about its centre of mass (BodyDesc.inertia, where the backend has it). */
+    inertia?: readonly number[];
 }
 
 /** Bits of BodyDesc.userData the engine uses. */
@@ -164,6 +170,9 @@ export class PhysicsBody {
             sleep: options.allowSleep === undefined && options.sleepSpeedLimit === undefined && options.sleepTimeLimit === undefined
                 ? undefined : { allow: options.allowSleep, speedLimit: options.sleepSpeedLimit, timeLimit: options.sleepTimeLimit },
             userData: options.character ? BODY_CHARACTER : 0,
+            ...(options.motionQuality ? { motionQuality: options.motionQuality } : {}),
+            ...(options.selfFilter ? { selfFilter: { ...options.selfFilter } } : {}),
+            ...(options.inertia ? { inertia: [...options.inertia] } : {}),
             colliders: [],
         };
         this._s.set([p[0], p[1], p[2], q[0], q[1], q[2], q[3]], P);
@@ -196,6 +205,18 @@ export class PhysicsBody {
     public set collisionResponse(response: boolean) {
         this._desc.collisionResponse = response;
         if (this._world) this._world.setCollisionResponse(this._handle, response);
+    }
+    /**
+     * Make a dynamic body kinematic — moved only by the velocity it is given, pushing what it meets and pushed by
+     * nothing — or dynamic again, keeping its velocity. Only where the world's backend can
+     * (`capabilities.kinematicParts`); a no-op elsewhere, and for a static body.
+     */
+    public setType(type: 'dynamic' | 'kinematic'): void {
+        if (this._desc.type === 'static' || !(this._desc.mass > 0)) return;
+        const world = this._world;
+        if (world && (!world.capabilities.kinematicParts || !world.setBodyType)) return;
+        this._desc.type = type;
+        if (world) world.setBodyType!(this._handle, type);
     }
     public get collisionFilterGroup(): number { return this._desc.group ?? 1; }
     public set collisionFilterGroup(group: number) { this._desc.group = group; this._pushFilter(); }

@@ -48,6 +48,8 @@ export const RAPIER_CAPABILITIES: PhysicsCapabilities = {
     jointDrives: 'shared',
     islandIterations: true,
     reactions: false,
+    kinematicParts: false,
+    ragdollPlanning: false,
 };
 
 /** Rapier's interaction groups: 16 bits of membership over 16 of filter. */

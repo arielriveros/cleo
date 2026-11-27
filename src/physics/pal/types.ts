@@ -145,6 +145,24 @@ export interface BodyDesc {
      * backend never reads them. Default 0.
      */
     userData?: number;
+    /**
+     * How it moves through others: 'discrete' (the default) or 'linearCast', swept along each step so a small fast
+     * body (a hand, a foot, a head flung at a wall) does not pass through what it meets. Only where
+     * `capabilities.ragdollPlanning` (Jolt's motion quality); ignored elsewhere.
+     */
+    motionQuality?: 'discrete' | 'linearCast';
+    /**
+     * Collision among the bodies of one group (a ragdoll's parts): the body is sub-group `index` (0..31) of
+     * `group` (a positive id, one per ragdoll) and does not collide with the group's sub-groups whose bits are set
+     * in `ignore`; it collides with every body of another group as its layers say. Only where
+     * `capabilities.ragdollPlanning` (Jolt's GroupFilterTable); ignored elsewhere.
+     */
+    selfFilter?: { group: number; index: number; ignore: number };
+    /**
+     * Inertia about the centre of mass in the body's frame, [Ixx Iyy Izz Ixy Ixz Iyz] kg·m², instead of the one its
+     * colliders give at its mass (a ragdoll's stabilised parts). Only where `capabilities.ragdollPlanning`.
+     */
+    inertia?: readonly number[];
     colliders: readonly ColliderDesc[];
 }
 
@@ -160,6 +178,16 @@ export type JointDesc = {
      * chain of 15 bodies). Only where `capabilities.islandIterations`; ignored elsewhere.
      */
     iterations?: number;
+    /**
+     * Position iterations for the island (how many times the solver corrects drift a step), where
+     * `capabilities.islandIterations`; ignored elsewhere.
+     */
+    positionIterations?: number;
+    /**
+     * The order the solver takes it in: higher is solved later and so holds best (a ragdoll's joints nearest its
+     * root highest). Only where `capabilities.ragdollPlanning` (Jolt's constraint priority); ignored elsewhere.
+     */
+    priority?: number;
     /**
      * Hinge and cone-twist: A's rotation in B's frame [x y z w] at which the joint reads zero (its hinge angle, its
      * twist), instead of the pose the two bodies stand in when it is made. A ragdoll put back into the world where
@@ -178,7 +206,15 @@ export type JointDesc = {
      * `matchTwist`: twist is measured from the pose the joint is made in, as Jolt and Rapier always do it (cannon
      * otherwise picks its own reference: a joint made turned about its axis starts past its limit).
      */
-    | { kind: 'coneTwist'; anchorA: V3; anchorB: V3; axisA: V3; axisB: V3; coneAngle: number; twistAngle: number; matchTwist?: boolean }
+    | {
+        kind: 'coneTwist'; anchorA: V3; anchorB: V3; axisA: V3; axisB: V3; coneAngle: number; twistAngle: number; matchTwist?: boolean;
+        /**
+         * The twist range, A turned about its axis relative to B (radians, right-handed about axisA), instead of
+         * ±twistAngle: a knee or an elbow made as one cone-twist whose twist axis is its hinge (a cone of a degree or
+         * two), its bend range one-sided. Only where `capabilities.ragdollPlanning`; elsewhere ±twistAngle.
+         */
+        twistMin?: number; twistMax?: number;
+    }
 );
 
 /**

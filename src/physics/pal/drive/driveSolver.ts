@@ -273,6 +273,9 @@ export class DriveSolver {
 
     // ---- lifetime ----
 
+    /** A body's mass changed what it is to the solver (made kinematic or dynamic): measured again when next used. */
+    public massChanged(h: BodyHandle): void { this._mass.delete(h); }
+
     /** Drop every drive and pin on a body leaving the world. */
     public removeBody(h: BodyHandle): void {
         if (this._pins.delete(h)) this._pinOrder = null;

@@ -95,6 +95,17 @@ in a hand. Turn-in-place picks the right clip when the camera swings behind.
   without. Opening a template brings them up to its model's, and saving it keeps them.
 - **Fix: linking a material to a model with a one-entry material list left the list naming the old material.** The
   node then matched the old material's edits and missed its own.
+- **Reactive ragdolls get Jolt's ragdoll tools.** On Jolt (`capabilities.ragdollPlanning`) a powered ragdoll is
+  planned with Jolt's `RagdollSettings` before it is built (`PhysicsWorld.planRagdoll`): its parents' inertias raised
+  by `Stabilize()` (its anatomical masses kept), self-collision filtered by part pairs from
+  `DisableParentChildCollisions()` (`BodyDesc.selfFilter`, a `GroupFilterTable` per ragdoll), its joints solved after
+  the ones they carry (`JointDesc.priority`, `CalculateConstraintPriorities`' rule) with position steps of their own
+  (`positionIterations`), knees and elbows one swing-twist each with a one-sided bend range (`twistMin`/`twistMax`),
+  hands, forearms, feet and head swept (`BodyDesc.motionQuality: 'linearCast'`). A muscle whose target turns follows
+  it instead of trailing it: a hinge's motor drives position and velocity together
+  (`EMotorState_PositionAndVelocity`), a cone's is aimed ahead along the turn (`2ζ/Ω`), so a swinging arm does not
+  roll about itself. A body can be made kinematic and back while it lives (`setBodyType`, `PhysicsBody.setType`,
+  `capabilities.kinematicParts`), in the worker too.
 - **Reactions run on Jolt only.** On cannon-es and Rapier the reaction sets looked wrong, so there a character has
   none (`PhysicsSystem.reactionsOf` gives `null`, `reactionsSupported`, `capabilities.reactions`): a hit moves only
   what it strikes, and the log says once why. The rig's Reactions tab shows a warning there, every control off.

@@ -1,7 +1,8 @@
 import { mat4, vec3, quat } from 'gl-matrix';
 import { PhysicsBody } from './physicsBody';
 import { ALL_LAYERS, LAYER } from './collisionLayers';
-import type { BodyPin, JointDrive, JointHandle } from './pal/types';
+import type { BodyPin, ColliderDesc, JointDrive, JointHandle } from './pal/types';
+import type { RagdollPlan } from './pal/ragdollPlan';
 import type { JointSpec } from './physicsSystem';
 import { AnimatedModel, type Skin } from '../animation/animatedModel';
 import type { Animator, PhysicsMappingSource } from '../animation/animator';
@@ -11,7 +12,7 @@ import { skeletonTopology } from '../animation/skeletonTopology';
 import { humanoidRigOf } from '../animation/animationRetarget';
 import {
     cachedRagdollLayout, ragdollPartPose, ragdollPartPoseInto, rigidRotation, skinRagdollProfile,
-    type RagdollProfile, type RagdollLayoutPart,
+    type RagdollProfile, type RagdollLayout, type RagdollLayoutPart,
 } from './ragdollProfile';
 import { DEG2RAD } from '../core/math';
 
@@ -127,6 +128,49 @@ const RAGDOLL_GROUP = LAYER.RAGDOLL;
  * level put them on.
  */
 const boneMask = (selfCollision: boolean | undefined): number => selfCollision ? ALL_LAYERS : ALL_LAYERS & ~RAGDOLL_GROUP;
+/**
+ * A powered ragdoll on a backend with ragdoll tools (capabilities.ragdollPlanning, Jolt): a knee's or an elbow's
+ * cone (radians) around its hinge, made as one cone-twist whose twist is the bend; position steps for its island.
+ */
+const HINGE_CONE = 2 * Math.PI / 180;
+const PLANNED_POSITION_STEPS = 4;
+/** The parts swept through each step (BodyDesc.motionQuality): small, fast, and thrown at walls. */
+const SWEPT_ROLES = new Set(['hand.L', 'hand.R', 'foreArm.L', 'foreArm.R', 'foot.L', 'foot.R', 'head']);
+/** Each powered ragdoll's own collision group (BodyDesc.selfFilter). */
+let nextSelfGroup = 1;
+/** A plan per layout, scale and total mass: the same skin and profile plan the same ragdoll every time. */
+const PLANS = new WeakMap<RagdollLayout, Map<string, RagdollPlan>>();
+
+/**
+ * Where a planned hinge (one cone-twist, its twist the bend) reads zero: the bend of the BIND pose (the profile's
+ * range is measured from it), and whatever turn off the hinge the pose it is made in has (a forearm's roll, a knee
+ * the animation splays a little), so the joint starts inside its narrow cone instead of snapping into it. A's
+ * rotation in B's frame; `lp`/`lc` the bind body frames, `qb`/`qa` the bodies now, `axis` the hinge in A's frame.
+ */
+function hingeRest(lp: ArrayLike<number>, lc: ArrayLike<number>, qb: { x: number; y: number; z: number; w: number }, qa: { x: number; y: number; z: number; w: number }, axis: ArrayLike<number>): [number, number, number, number] {
+    const bind = quat.multiply(quat.create(), quat.invert(quat.create(), [lp[0], lp[1], lp[2], lp[3]] as quat), [lc[0], lc[1], lc[2], lc[3]] as quat);
+    const now = quat.multiply(quat.create(), [-qb.x, -qb.y, -qb.z, qb.w] as quat, [qa.x, qa.y, qa.z, qa.w] as quat);
+    // now = bind·d, d = swing·twist (twist about the hinge, in A's frame): the rest is bind·swing.
+    const d = quat.multiply(quat.create(), quat.invert(quat.create(), bind), now);
+    const along = d[0] * axis[0] + d[1] * axis[1] + d[2] * axis[2];
+    const tw = quat.normalize(quat.create(), [axis[0] * along, axis[1] * along, axis[2] * along, d[3]] as quat);
+    if (!Number.isFinite(tw[3]) || Math.hypot(tw[0], tw[1], tw[2], tw[3]) < 1e-9) return [bind[0], bind[1], bind[2], bind[3]];
+    const swing = quat.multiply(quat.create(), d, quat.invert(quat.create(), tw));
+    const rest = quat.normalize(quat.create(), quat.multiply(quat.create(), bind, swing));
+    return [rest[0], rest[1], rest[2], rest[3]];
+}
+
+/** A part's collider, as a body of `scale` has it. */
+function partColliders(lp: RagdollLayoutPart, scale: number): ColliderDesc[] {
+    const r = lp.radius * scale, len = lp.length * scale, depth = lp.depth * scale;
+    switch (lp.part.shape) {
+        case 'box': return [{ shape: { kind: 'box', halfExtents: [r, len / 2, depth / 2] } }];
+        case 'sphere': return [{ shape: { kind: 'sphere', radius: r } }];
+        // Y along the segment; `height` is the straight part between the two cap centres.
+        default: return [{ shape: { kind: 'capsule', radius: r, height: Math.max(1e-3, len - 2 * r), segments: 10 } }];
+    }
+}
+
 /** Fastest a part may start, so a teleport or a hitch in the last frame cannot launch a corpse. */
 const MAX_HANDOFF_SPEED = 5;
 /** Fastest a part may start moving UP (m/s). */
@@ -159,6 +203,12 @@ export class Ragdoll implements PhysicsMappingSource {
     public autoFreeze = true;
     /** The body has every part (falling, rolling, lying): the animator poses its target at half rate. */
     public loose = false;
+    /**
+     * The part every other is drawn against (PhysicsMappingSource.anchorPart), or -1. A character on its feet has its
+     * hips kinematic on the animation, a step behind the skin: its upper body is drawn as simulated relative to them,
+     * on the hips where the animation has them now, so the waist never tears.
+     */
+    public anchorPart = -1;
     private _skin: Skin | null = null;
     private _parts: RagdollPartInfo[] = [];
     private _mapping = new Float32Array(0);
@@ -466,14 +516,27 @@ export class Ragdoll implements PhysicsMappingSource {
             return vec3.transformQuat(local, local, modelRot);
         })() : null;
 
+        // A powered ragdoll on Jolt is planned with its ragdoll tools first: masses and inertias stabilised for the
+        // chain, the part pairs that must not collide, its joints solved root first (pal/ragdollPlan.ts).
+        const placed = layout.parts.map(lp => placeOf(lp, modelWorld, fbm[lp.joint]));
+        const planning = this.powered && !!this._physics.capabilities?.ragdollPlanning && layout.parts.length <= 32;
+        const plan = planning ? this._plan(layout, placed[0]?.scale ?? 1, totalMass) : null;
+        const group = plan ? nextSelfGroup = nextSelfGroup % 0x7ffffff0 + 1 : 0;
+        const roleOf = new Map<number, string>();
+        if (planning) for (const [slot, node] of humanoidRigOf(skin)) if (!roleOf.has(node)) roleOf.set(node, slot);
+        this._planned = !!plan;
+
         const bodies: PhysicsBody[] = [];
         const scales: number[] = [];
         for (const lp of layout.parts) {
-            const { center, rotation, scale } = placeOf(lp, modelWorld, fbm[lp.joint]);
+            const { center, rotation, scale } = placed[lp.index];
             scales.push(scale);
+            const swept = planning && SWEPT_ROLES.has(roleOf.get(lp.node) ?? '');
             const body = new PhysicsBody({
                 name: 'ragdoll',
-                mass: Math.max(0.05, lp.mass * totalMass),
+                mass: plan ? Math.max(0.05, plan.masses[lp.index]) : Math.max(0.05, lp.mass * totalMass),
+                ...(plan ? { inertia: plan.inertia[lp.index], selfFilter: { group, index: lp.index, ignore: plan.ignore[lp.index] } } : {}),
+                ...(swept ? { motionQuality: 'linearCast' as const } : {}),
                 position: center,
                 quaternion: rotation,
                 linearDamping: profile.linearDamping,
@@ -485,18 +548,7 @@ export class Ragdoll implements PhysicsMappingSource {
                 group: RAGDOLL_GROUP,
                 mask: boneMask(profile.selfCollision),
             });
-            const r = lp.radius * scale, len = lp.length * scale, depth = lp.depth * scale;
-            switch (lp.part.shape) {
-                case 'box':
-                    body.addCollider({ shape: { kind: 'box', halfExtents: [r, len / 2, depth / 2] } });
-                    break;
-                case 'sphere':
-                    body.addCollider({ shape: { kind: 'sphere', radius: r } });
-                    break;
-                default:
-                    // Y along the segment; `height` is the straight part between the two cap centres.
-                    body.addCollider({ shape: { kind: 'capsule', radius: r, height: Math.max(1e-3, len - 2 * r), segments: 10 } });
-            }
+            for (const c of partColliders(lp, scale)) body.addCollider(c);
 
             // Hand-off: keep moving the way the animation was moving this part.
             if (prev && prev.dt > 1e-4) {
@@ -553,8 +605,26 @@ export class Ragdoll implements PhysicsMappingSource {
             const pivotB = local(pp.rotation, lp.pivot, pp.center, sB);
             pivots[lp.index] = { self: pivotA, parent: pivotB };
             const type = lp.part.joint?.type ?? 'cone';
+            // Planned: solved root first, with position steps of its own.
+            const planned = plan ? { priority: plan.priority[lp.index], positionIterations: PLANNED_POSITION_STEPS } : {};
             if (type === 'fixed') {
-                this._add(a, b, { kind: 'fixed', maxForce, collideConnected: false });
+                this._add(a, b, { kind: 'fixed', maxForce, collideConnected: false, ...planned });
+                continue;
+            }
+            if (plan && type === 'hinge' && lp.hingeAxis) {
+                // A knee or an elbow as ONE cone-twist: its twist axis the hinge, its twist the bend (one-sided, the
+                // profile's range from the bind pose), a cone of a couple of degrees round it. One constraint where
+                // a hinge and a limiting cone were two, and the bend's limits exact.
+                const jt = lp.part.joint!;
+                const lo = Math.min(jt.hingeMin, jt.hingeMax) * DEG2RAD, hi = Math.max(jt.hingeMin, jt.hingeMax) * DEG2RAD;
+                const axisA = local(lp.rotation, lp.hingeAxis, null, 1);
+                driveJoint[lp.index] = this._add(a, b, {
+                    kind: 'coneTwist', anchorA: pivotA, anchorB: pivotB,
+                    axisA, axisB: local(pp.rotation, lp.hingeAxis, null, 1),
+                    coneAngle: HINGE_CONE, twistAngle: Math.PI, twistMin: lo, twistMax: hi,
+                    rest: hingeRest(pp.rotation, lp.rotation, b.quaternion, a.quaternion, axisA),
+                    maxForce, collideConnected: false, ...planned,
+                }, lp.index);
                 continue;
             }
             if (type === 'hinge' && lp.hingeAxis) {
@@ -574,7 +644,7 @@ export class Ragdoll implements PhysicsMappingSource {
                 axisB: local(pp.rotation, lp.parentAxis, null, 1),
                 coneAngle: lp.coneAngle,
                 twistAngle: type === 'hinge' ? Math.PI : Math.max(lp.twistAngle, 5 * DEG2RAD),
-                maxForce, collideConnected: false,
+                maxForce, collideConnected: false, ...planned,
                 // A muscle turns a joint to where the animation has it, and the twist that pose starts with must
                 // not read as past the limit (cannon's own reference is arbitrary).
                 ...(this.powered ? { matchTwist: true } : {}),
@@ -624,9 +694,43 @@ export class Ragdoll implements PhysicsMappingSource {
         const handle = this._physics.addJoint(a, b, spec);
         if (handle !== null) this._joints.push(handle);
         const qa = a.quaternion, qb = b.quaternion;
-        const rest = quat.multiply(quat.create(), [-qb.x, -qb.y, -qb.z, qb.w], [qa.x, qa.y, qa.z, qa.w]);
+        // The rest it was given (a planned knee's bind pose), else the pose the two stand in now.
+        const given = (spec as { rest?: ArrayLike<number> }).rest;
+        const rest = given ? [given[0], given[1], given[2], given[3]] : quat.multiply(quat.create(), [-qb.x, -qb.y, -qb.z, qb.w], [qa.x, qa.y, qa.z, qa.w]);
         this._jointSpecs.push({ a, b, spec, drivePart, rest: [rest[0], rest[1], rest[2], rest[3]] });
         return handle;
+    }
+
+    /** Built from a plan of the backend's ragdoll tools (capabilities.ragdollPlanning): see _plan. */
+    public get planned(): boolean { return this._planned; }
+    private _planned = false;
+
+    /**
+     * The plan of this layout at `scale` and `totalMass` (pal/ragdollPlan.ts), made once and kept: its parts in the
+     * bind pose, scaled, with the shapes and masses the bodies get. Null where planning fails.
+     */
+    private _plan(layout: RagdollLayout, scale: number, totalMass: number): RagdollPlan | null {
+        const key = `${Math.round(scale * 1000)}|${Math.round(totalMass * 100)}`;
+        let byKey = PLANS.get(layout);
+        const hit = byKey?.get(key);
+        if (hit) return hit;
+        let plan: RagdollPlan | null = null;
+        try {
+            plan = this._physics.planRagdoll({
+                parts: layout.parts.map(lp => ({
+                    parent: lp.parent, colliders: partColliders(lp, scale),
+                    position: [lp.center[0] * scale, lp.center[1] * scale, lp.center[2] * scale],
+                    rotation: [lp.rotation[0], lp.rotation[1], lp.rotation[2], lp.rotation[3]],
+                    mass: Math.max(0.05, lp.mass * totalMass),
+                })),
+                // A body that reacts keeps its anatomical masses: only the inertias are stabilised.
+                keepMasses: true,
+            });
+        } catch { plan = null; }
+        if (!plan || plan.masses.length !== layout.parts.length || !plan.masses.every(m => Number.isFinite(m) && m > 0)) return null;
+        if (!byKey) { byKey = new Map(); PLANS.set(layout, byKey); }
+        byKey.set(key, plan);
+        return plan;
     }
     /** Solver iterations its joints ask for their own island (0: none; the world's count is raised instead). */
     private _islandIterations = 0;
@@ -638,7 +742,7 @@ export class Ragdoll implements PhysicsMappingSource {
      */
     private _sentMuscle = new Float64Array(0);
     private _sentPin = new Float64Array(0);
-    private _forgetSent(): void { this._sentMuscle.fill(NaN); this._sentPin.fill(NaN); }
+    private _forgetSent(): void { this._sentMuscle?.fill(NaN); this._sentPin?.fill(NaN); }
     private _sizeSent(): void {
         const n = this._parts.length;
         if (this._sentMuscle.length !== n * 5) { this._sentMuscle = new Float64Array(n * 5).fill(NaN); this._sentPin = new Float64Array(n * 5).fill(NaN); }
@@ -767,6 +871,20 @@ export class Ragdoll implements PhysicsMappingSource {
     /** How much of part `i` is drawn as simulated, 0..1 (1 by default); see PhysicsMappingSource. */
     public setMapping(i: number, weight: number): void {
         if (i >= 0 && i < this._mapping.length) this._mapping[i] = Math.max(0, Math.min(1, weight));
+    }
+
+    /**
+     * Part `i` kinematic — moved only by the velocity it is given, pushing what it meets and pushed by nothing (the
+     * legs of a character on its feet, on their animation) — or simulated again, keeping its velocity. False where
+     * the backend cannot switch a body (capabilities.kinematicParts), the ragdoll is frozen, or there is no part `i`.
+     */
+    public setKinematic(i: number, on: boolean): boolean {
+        const p = this._parts[i];
+        if (!p || this._frozen || this._destroyed) return false;
+        const b = p.body as PhysicsBody & { setType?: (type: 'dynamic' | 'kinematic') => void };
+        if (typeof b.setType !== 'function' || !this._physics.capabilities?.kinematicParts) return false;
+        if (b.isKinematic !== on) b.setType(on ? 'kinematic' : 'dynamic');
+        return b.isKinematic === on;
     }
 
     /** Push part `i` (or the one nearest `point`) by `impulse` (N·s, world) at `point` (default its centre). */

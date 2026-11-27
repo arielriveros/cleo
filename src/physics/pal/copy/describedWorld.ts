@@ -46,6 +46,8 @@ export interface DescribedWorld<J extends DescribedJointRecord = DescribedJointR
     createBodyWithNativeId?(desc: BodyDesc, nativeId: number): BodyHandle;
     /** Whether the body is dynamic (what a copy reports back). */
     isDynamic(h: BodyHandle): boolean;
+    /** A body made kinematic at run time (PhysicsWorld.setBodyType): reported back too, as the engine moves it. */
+    reportsKinematic?(h: BodyHandle): boolean;
     /** A dynamic body as water reads it, or undefined for any other body. */
     floaterOf(h: BodyHandle): ReplicaFloater | undefined;
 }

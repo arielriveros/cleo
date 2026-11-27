@@ -50,6 +50,18 @@ export interface PhysicsCapabilities {
      * wrong, so there `PhysicsSystem.reactionsOf` gives none. Passive (death) ragdolls run on every backend.
      */
     readonly reactions: boolean;
+    /**
+     * Whether a dynamic body can be made kinematic and back while it lives (PhysicsWorld.setBodyType): Jolt's motion
+     * types. What a reacting character's legs are while it stays on its feet (kinematic on its animation).
+     */
+    readonly kinematicParts: boolean;
+    /**
+     * Whether a ragdoll is built with the backend's own ragdoll tools (Jolt's RagdollSettings): masses and inertias
+     * stabilised for its chain, self-collision filtered by part pairs (BodyDesc.selfFilter), its joints solved
+     * root first (JointDesc.priority), knees and elbows one cone-twist each (JointDesc twistMin/twistMax), swept hands
+     * and feet (BodyDesc.motionQuality). See PhysicsWorld.planRagdoll.
+     */
+    readonly ragdollPlanning: boolean;
 }
 
 /** The boot log line: `physics cannon · capsule compound · groups 32-bit · ...`. */

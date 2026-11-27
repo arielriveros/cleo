@@ -18,7 +18,8 @@ engine's tests pin the cannon step bit for bit, so cannon games behave exactly a
 | `backendSelect.ts` | Every backend a project may ask for, and `resolvePhysicsBackendRequest`: the one to run, and why it is not the one asked for |
 | `cannon/` | The cannon-es backend, `CannonWorld`, and everything that only exists because of cannon: its broadphase, the heightfield and convex-SAT patches, the material table, the centre-of-mass bookkeeping |
 | `rapier/` | The Rapier backend, `RapierWorld`, and `load.ts`, the one place its package is loaded (on demand) |
-| `jolt/` | The Jolt backend, `JoltWorld`, and `load.ts`, the one place its package is loaded (on demand) |
+| `jolt/` | The Jolt backend, `JoltWorld`, `joltRagdollPlan.ts` (a ragdoll planned with Jolt's RagdollSettings), and `load.ts`, the one place its package is loaded (on demand) |
+| `ragdollPlan.ts` | What a backend's ragdoll tools plan before a ragdoll is built (`PhysicsWorld.planRagdoll`), and the joints' solve order (`ragdollJointPriorities`) |
 | `copy/` | Copying a world into the physics worker by description, for a backend whose world can say what each body and joint was made from (`DescribedWorld`): Rapier's and Jolt's |
 | `shapeBounds.ts` | Bounds, parts and quaternion helpers measured from shape descriptions, for any backend |
 | `jointFrames.ts` | Joint frames measured from joint descriptions, for a backend that builds joints from frames |
@@ -194,9 +195,11 @@ there, for a powered ragdoll started directly).
 | | Jolt | cannon | Rapier |
 |---|---|---|---|
 | `jointDrives` | native | native | shared |
-| Muscles on cone and hinge joints | `SwingTwistConstraint` / `HingeConstraint` Position motors, spring by stiffness and damping, `SetTargetOrientationBS(conj(qT))` | three `RotationalMotorEquation`s per joint (one on a hinge) retargeted every substep to the velocity the implicit spring asks for, capped by `maxTorque` | implicit spring torques, applied before the step |
+| Muscles on cone and hinge joints | `SwingTwistConstraint` / `HingeConstraint` motors, spring by stiffness and damping, `SetTargetOrientationBS(conj(qT))`; a target that turns (its spin, `setJointTarget`'s ω) is followed rather than trailed: a hinge's motor drives position and velocity together (`EMotorState_PositionAndVelocity`, `SetTargetAngularVelocity`), a cone's is aimed ahead of the target along its spin by the time a critically damped spring trails a steady turn by, `2ζ/Ω` (at most 0.6 rad). Given the target velocity itself (`SetTargetAngularVelocityCS`), or a feed-forward torque, a swing-twist turned the swing of a limb held off its cone's centre (an arm from the shoulder) partly into twist | three `RotationalMotorEquation`s per joint (one on a hinge) retargeted every substep to the velocity the implicit spring asks for, capped by `maxTorque` | implicit spring torques, applied before the step |
 | Muscles on ball and fixed joints, gravity compensation, friction, pins | shared | shared | shared |
 | Reactions (`capabilities.reactions`) | yes | no | no |
+| Kinematic and back (`capabilities.kinematicParts`, `setBodyType`) | yes | no | no |
+| Ragdoll tools (`capabilities.ragdollPlanning`) | yes | no | no |
 
 One set of numbers feels alike on every backend because the gains come from the same physics:
 
@@ -226,6 +229,31 @@ gives the pose its joints were first made in.
 
 Drives and pins copy into the [physics worker](physics-threading.md#joint-drives) and step there bit for bit
 as on the main thread.
+
+### Jolt's ragdoll tools
+
+*(unreleased)* Where `capabilities.ragdollPlanning` (Jolt), a powered ragdoll is built with what Jolt's own
+ragdolls are built with, through the layer, so its bodies and joints are still the engine's (and copy into the
+worker like any other):
+
+| What | How |
+|---|---|
+| The plan | `PhysicsWorld.planRagdoll(parts)` (`pal/ragdollPlan.ts`, `jolt/joltRagdollPlan.ts`): a throwaway `RagdollSettings` of the parts in the bind pose (a `Skeleton`, a `RagdollPart` each with its shape and mass) run through `Stabilize()` and `DisableParentChildCollisions()`, read back and freed; nothing enters the world. Cached per layout, scale and mass. |
+| Inertias | `Stabilize()` raises a parent's inertia toward its children's (Strunk, "Stop my constraints from blowing up!"); the body takes that inertia (`BodyDesc.inertia`, `MassAndInertiaProvided`) at its anatomical mass (`keepMasses`: `Stabilize()` also evens the chain's masses out, a 3 kg hand, which a reacting body must not have). |
+| Self-collision | The pairs `DisableParentChildCollisions()` turns off (every parent and child, and the parts already within 3 cm in the bind pose) become each part's `BodyDesc.selfFilter`: one `GroupFilterTable` per ragdoll (its own group id), a part per sub-group, filtered in Jolt's broad phase. A table is held while any body of its group lives. |
+| Solve order | Each joint's `JointDesc.priority` is the height of the chain below it (`CalculateConstraintPriorities`' rule, ported and held to the native one): a joint is solved after the ones it carries. Each has `positionIterations` 4 of its own (`mNumPositionStepsOverride`). |
+| Knees and elbows | One `SwingTwistConstraint` each, its twist axis the hinge and its twist range the profile's bend (`twistMin`/`twistMax`, one-sided), a 2° cone round it: one constraint where a hinge and a limiting cone were two. It reads zero at the bind pose's bend, keeping the made-in pose's turn off the hinge (`JointDesc.rest`), so it never starts outside its cone. The drive on it is a swing drive. |
+| Swept parts | Hands, forearms, feet and the head are `BodyDesc.motionQuality: 'linearCast'` (`EMotionQuality_LinearCast`): flung at a wall they stop at it. |
+| Kinematic parts | `PhysicsWorld.setBodyType(h, 'kinematic' \| 'dynamic')` (`SetMotionType`), keeping velocity and mass: a reacting character's legs on its animation. Moved by the velocity the engine gives it each step. |
+
+`tests/pal/joltRagdoll.test.ts` holds them: a kinematic round trip keeps its velocity and nothing pushes it, and a
+switched body steps in the worker as inline, bit for bit; a swept ball stops at a wall a discrete one passes; two
+parts of one group that ignore each other do not collide, of two groups they do, and 200 groups made and gone leave
+nothing; a one-sided twist range holds both ways; priority and position steps land on the constraint; a motor given
+its target's spin trails a turning target by far less (hinge and cone), and a cone whose target swings off its
+centre gets no twist from the spin, with a fixed or a free parent, and follows a twisting target too; a planned humanoid keeps its total mass,
+filters every parent and child, makes one joint per part, sweeps its hands, forearms, feet and head, and bends its
+knee only within its range; the ported priorities equal the native ones; 200 plans do not grow Jolt's heap.
 
 ## Rapier compared with cannon
 

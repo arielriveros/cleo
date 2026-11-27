@@ -10,6 +10,8 @@ import { driveRecord } from '../drive/driveRecords';
 import type { DescribedWorld } from '../copy/describedWorld';
 import { boundingRadiusOf, collidersAabb, multiply, partShapeFor, rotate } from '../shapeBounds';
 import { fromX, matchedFrame } from '../jointFrames';
+import type { RagdollPlan, RagdollPlanInput } from '../ragdollPlan';
+import { MAX_PLANNED_PARTS, planJoltRagdoll } from './joltRagdollPlan';
 
 const IDENTITY = [0, 0, 0, 1] as const;
 import { jolt, type Jolt } from './load';
@@ -60,6 +62,8 @@ export const JOLT_CAPABILITIES: PhysicsCapabilities = {
     jointDrives: 'native',
     islandIterations: true,
     reactions: true,
+    kinematicParts: true,
+    ragdollPlanning: true,
 };
 
 /** cannon's damping, `v *= (1 − d)^dt`, as Jolt's rate `c` in `v *= 1 − c·dt`: the same decay for small dt. */
@@ -73,15 +77,32 @@ function dampingRate(d: number): number {
  * A joint as built, from which a copy (the physics worker's) builds the same joint whatever the bodies' poses
  * are then: anchors from each body's node origin, and the frames measured from the poses it was made in.
  */
-export type JoltJointRecord = { a: BodyHandle; b: BodyHandle; collideConnected: boolean; iterations?: number } & (
+export type JoltJointRecord = {
+    a: BodyHandle; b: BodyHandle; collideConnected: boolean; iterations?: number;
+    /** Position steps for its island, and its solve order (JointDesc.positionIterations, priority). */
+    positionIterations?: number; priority?: number;
+} & (
     /** A's origin and frame, seen from B. */
     | { kind: 'fixed'; anchorB: number[]; frameB: number[] }
     | { kind: 'ball'; anchorA: number[]; anchorB: number[] }
     /** Frames with X along the hinge, Y the zero angle. */
     | { kind: 'hinge'; anchorA: number[]; anchorB: number[]; frameA: number[]; frameB: number[] }
     /** Frames with X the twist axis, Y the plane axis. */
-    | { kind: 'cone'; anchorA: number[]; anchorB: number[]; frameA: number[]; frameB: number[]; twist: number; cone: number }
+    | {
+        kind: 'cone'; anchorA: number[]; anchorB: number[]; frameA: number[]; frameB: number[]; twist: number; cone: number;
+        /** A's twist range relative to B (JointDesc twistMin/twistMax), when not ±twist. */
+        twistMin?: number; twistMax?: number;
+    }
 );
+
+/**
+ * Jolt measures a swing-twist's twist as body 2 (B, the parent) turned relative to body 1 (A): the inverse of the
+ * engine's A relative to B, so a range [min, max] of A's is Jolt's [-max, -min].
+ */
+const TWIST_SIGN = -1;
+
+/** The most a cone motor's target is led along its spin (rad): past it, a turn that fast is not one to follow. */
+const MAX_LEAD = 0.6;
 
 interface Entry {
     readonly handle: BodyHandle;
@@ -94,7 +115,14 @@ interface Entry {
     readonly desc: BodyDesc;
     /** Bumped by every change to what it is made of (colliders, layers, response, reporting): what a copy diffs by. */
     configVersion: number;
-    readonly type: BodyType;
+    /** Dynamic, kinematic or static; dynamic and kinematic switch at run time (setBodyType). */
+    type: BodyType;
+    /** Made kinematic at run time (setBodyType): moved by the engine, so a copy reports it back like a dynamic one. */
+    switched?: boolean;
+    /** Its BodyDesc.selfFilter group, whose table it holds a place in. */
+    selfGroup?: number;
+    /** Switched by setBodyType at least once: a copy is told its type from then on (see descOf), back too. */
+    retyped?: boolean;
     readonly mass: number;
     readonly sensor: boolean;
     readonly dofs: number;
@@ -117,6 +145,16 @@ interface Entry {
 interface Native {
     jolt: JoltNS.JoltInterface | null;
     owned: unknown[];
+    /**
+     * The collision tables of BodyDesc.selfFilter's groups, by group id: one reference held here while any body of
+     * the group lives (the bodies hold their own), released after the world's bodies are gone.
+     */
+    groups: Map<number, { table: JoltNS.GroupFilterTable; bodies: number }>;
+}
+
+function releaseGroups(native: Native): void {
+    for (const g of native.groups.values()) g.table.Release();
+    native.groups.clear();
 }
 
 const collected = new FinalizationRegistry<Native>(native => freeNative(native));
@@ -127,6 +165,7 @@ function freeNative(native: Native): void {
     for (const o of native.owned) J.destroy(o);
     native.owned.length = 0;
     if (native.jolt) { J.destroy(native.jolt); native.jolt = null; }
+    releaseGroups(native);
 }
 
 export class JoltWorld implements DescribedWorld<JoltJointRecord> {
@@ -136,7 +175,7 @@ export class JoltWorld implements DescribedWorld<JoltJointRecord> {
     public profile = false;
 
     private readonly _J: Jolt;
-    private readonly _native: Native = { jolt: null, owned: [] };
+    private readonly _native: Native = { jolt: null, owned: [], groups: new Map() };
     private _system!: JoltNS.PhysicsSystem;
     private _bi!: JoltNS.BodyInterface;
     private _lock!: JoltNS.BodyLockInterfaceNoLock;
@@ -155,7 +194,8 @@ export class JoltWorld implements DescribedWorld<JoltJointRecord> {
     /** Enabled bodies in the world's order: creation order, a re-enabled body last. */
     private readonly _order: BodyHandle[] = [];
     private _bodyList: BodyHandle[] | null = null;
-    private readonly _joints = new Map<number, { constraint: JoltNS.TwoBodyConstraint; record: JoltJointRecord }>();
+    /** `spinning`: its motors drive position and velocity (the drive's target turns), not position alone. */
+    private readonly _joints = new Map<number, { constraint: JoltNS.TwoBodyConstraint; record: JoltJointRecord; spinning?: boolean }>();
     public readonly drives = new DriveSolver();
     /** Each native drive's inertia along its motor axes when its springs were last set: [twist or hinge, swing]. */
     private readonly _gains = new Map<number, number[]>();
@@ -266,6 +306,10 @@ export class JoltWorld implements DescribedWorld<JoltJointRecord> {
         const id = e.body.GetID();
         if (e.enabled) this._bi.RemoveBody(id);
         this._bi.DestroyBody(id);
+        if (e.selfGroup !== undefined) {
+            const g = this._native.groups.get(e.selfGroup);
+            if (g && --g.bodies <= 0) { g.table.Release(); this._native.groups.delete(e.selfGroup); }
+        }
         this._entries.delete(h);
         this._byId.delete(e.id);
         this._byPtr.delete(e.ptr);
@@ -325,6 +369,32 @@ export class JoltWorld implements DescribedWorld<JoltJointRecord> {
         e.response = response;
         e.configVersion++;
     }
+
+    /**
+     * A dynamic body made kinematic (moved only by the velocity it is given, pushing what it meets and pushed by
+     * nothing) or back, keeping its velocity and its mass. Static bodies stay static.
+     */
+    public setBodyType(h: BodyHandle, type: 'dynamic' | 'kinematic'): void {
+        const e = this._entry(h);
+        if (e.type === type || e.type === 'static' || !(e.mass > 0)) return;
+        const J = this._J;
+        this._bi.SetMotionType(e.body.GetID(), type === 'kinematic' ? J.EMotionType_Kinematic : J.EMotionType_Dynamic, J.EActivation_Activate);
+        e.type = type;
+        e.switched = type === 'kinematic';
+        e.retyped = true;
+        e.configVersion++;
+        // Its mass is the solver's again (dynamic) or none of it (kinematic): the drives measure it afresh.
+        this.drives.massChanged(h);
+        this._version++;
+    }
+
+    /** A ragdoll planned with Jolt's RagdollSettings (pal/ragdollPlan.ts, jolt/joltRagdollPlan.ts): nothing is built. */
+    public planRagdoll(input: RagdollPlanInput): RagdollPlan {
+        return planJoltRagdoll(this._J, input, colliders => this._shape(colliders, 'origin'));
+    }
+
+    /** A body made kinematic at run time: a copy reports it back as it moves (see setBodyType). */
+    public reportsKinematic(h: BodyHandle): boolean { return !!this._entry(h).switched; }
 
     public setReportContacts(h: BodyHandle, report: boolean): void {
         const e = this._entry(h);
@@ -493,11 +563,14 @@ export class JoltWorld implements DescribedWorld<JoltJointRecord> {
                 record = {
                     kind: 'cone', a: desc.a, b: desc.b, collideConnected, anchorA: v(desc.anchorA), anchorB: v(desc.anchorB),
                     frameA, frameB, twist: desc.twistAngle, cone: desc.coneAngle,
+                    ...(desc.twistMin !== undefined && desc.twistMax !== undefined ? { twistMin: Math.min(desc.twistMin, desc.twistMax), twistMax: Math.max(desc.twistMin, desc.twistMax) } : {}),
                 };
                 break;
             }
         }
         if (iterations) record.iterations = iterations;
+        if (desc.positionIterations && desc.positionIterations > 0) record.positionIterations = Math.round(desc.positionIterations);
+        if (desc.priority !== undefined && Number.isFinite(desc.priority)) record.priority = Math.max(0, Math.round(desc.priority));
         return this.createJointFromRecord(record);
     }
 
@@ -552,8 +625,14 @@ export class JoltWorld implements DescribedWorld<JoltJointRecord> {
                 s.mSwingType = J.ESwingType_Cone;
                 s.mNormalHalfConeAngle = record.cone;
                 s.mPlaneHalfConeAngle = record.cone;
-                s.mTwistMinAngle = -record.twist;
-                s.mTwistMaxAngle = record.twist;
+                if (record.twistMin !== undefined && record.twistMax !== undefined) {
+                    const lo = TWIST_SIGN * record.twistMin, hi = TWIST_SIGN * record.twistMax;
+                    s.mTwistMinAngle = Math.max(-Math.PI, Math.min(lo, hi));
+                    s.mTwistMaxAngle = Math.min(Math.PI, Math.max(lo, hi));
+                } else {
+                    s.mTwistMinAngle = -record.twist;
+                    s.mTwistMaxAngle = record.twist;
+                }
                 settings = s;
                 break;
             }
@@ -561,7 +640,10 @@ export class JoltWorld implements DescribedWorld<JoltJointRecord> {
         // Its island solved with this many velocity steps (the most any of its constraints asks), the rest of the
         // world with its own: a ragdoll's chain is stiff without every crate paying for it.
         if (record.iterations) settings.mNumVelocityStepsOverride = record.iterations;
+        if (record.positionIterations) settings.mNumPositionStepsOverride = record.positionIterations;
         const constraint = J.castObject(settings.Create(ea.body, eb.body), J.TwoBodyConstraint);
+        // Solved in this order (higher later: it holds best); unset is Jolt's own 0.
+        if (record.priority !== undefined) constraint.SetConstraintPriority(record.priority);
         J.destroy(settings);
         for (const o of temps) J.destroy(o);
         this._system.AddConstraint(constraint);
@@ -657,8 +739,29 @@ export class JoltWorld implements DescribedWorld<JoltJointRecord> {
         // What the motor pushed in the last substep, for readJointDrive.
         const last = this._lastDt > 0 ? this._lastDt : dt;
         let lambda: number;
+        // A target that turns (its own spin, in B's frame) is followed rather than trailed. A cone's motors stay in
+        // Position mode and are aimed AHEAD of the target along its spin by the time a critically damped spring
+        // trails a steady turn by (2ζ/Ω), so the spring sits on the moving target: Jolt's swing-twist given a target
+        // velocity (EMotorState_PositionAndVelocity, SetTargetAngularVelocityCS) turned a swing of a limb held off
+        // its cone's centre (an arm hanging from the shoulder) partly into twist, and a feed-forward torque on the
+        // limb rolled it about itself the same way (tests/pal/joltRagdoll.test.ts). A hinge's single motor takes the
+        // spin about its axis (B's relative to A: its negative) in PositionAndVelocity mode.
+        const w = e.omega, spinning = w[0] !== 0 || w[1] !== 0 || w[2] !== 0;
+        let t: ArrayLike<number> = e.target;
+        if (record.kind === 'cone' && spinning) {
+            const lead = 2 * zeta / omega;
+            let rx = w[0] * lead, ry = w[1] * lead, rz = w[2] * lead;
+            const angle = Math.hypot(rx, ry, rz);
+            if (angle > MAX_LEAD) { rx *= MAX_LEAD / angle; ry *= MAX_LEAD / angle; rz *= MAX_LEAD / angle; }
+            const a = Math.min(angle, MAX_LEAD), s = a > 1e-12 ? Math.sin(a / 2) / a : 0.5;
+            t = multiply([rx * s, ry * s, rz * s, Math.cos(a / 2)], e.target, this._led);
+        }
         // Jolt's body-space target is B's rotation in A's frame (R2 = R1·X): the inverse of the drive's.
-        const t = e.target, q = this._q4([-t[0], -t[1], -t[2], t[3]]);
+        const q = this._q4([-t[0], -t[1], -t[2], t[3]]);
+        if (record.kind === 'hinge' && spinning !== !!joint.spinning) {
+            joint.spinning = spinning;
+            J.castObject(joint.constraint, J.HingeConstraint).SetMotorState(spinning ? J.EMotorState_PositionAndVelocity : J.EMotorState_Position);
+        }
         if (record.kind === 'cone') {
             const c = J.castObject(joint.constraint, J.SwingTwistConstraint);
             const l = c.GetTotalLambdaMotor();
@@ -668,6 +771,10 @@ export class JoltWorld implements DescribedWorld<JoltJointRecord> {
             const c = J.castObject(joint.constraint, J.HingeConstraint);
             lambda = Math.abs(c.GetTotalLambdaMotor());
             c.SetTargetOrientationBS(q);
+            if (spinning) {
+                const axis = rotate(record.frameB, 1, 0, 0, this._spinCs);
+                c.SetTargetAngularVelocity(-(w[0] * axis[0] + w[1] * axis[1] + w[2] * axis[2]));
+            }
         }
         e.report[0] += lambda / last;
         e.report[1] = Math.min(1, lambda / (d.maxTorque * last));
@@ -676,6 +783,10 @@ export class JoltWorld implements DescribedWorld<JoltJointRecord> {
         if (b?.enabled && b.type === 'dynamic' && !b.body.IsActive()) this._bi.ActivateBody(b.body.GetID());
         return true;
     };
+
+    private readonly _spinCs = [0, 0, 0];
+    /** A cone's target led along its spin (see _nativeDrive). */
+    private readonly _led = [0, 0, 0, 1];
 
     /** A motor's spring as absolute stiffness (N·m/rad) and damping (N·m·s/rad). */
     private _stiffness(m: JoltNS.MotorSettings, k: number, c: number): void {
@@ -687,8 +798,9 @@ export class JoltWorld implements DescribedWorld<JoltJointRecord> {
     }
 
     /** Turn a hinge or cone joint's motors on with a drive's torque limit, or off (null, or no spring) with its friction. */
-    private _motor(joint: { constraint: JoltNS.TwoBodyConstraint; record: JoltJointRecord }, d: JointDrive | null): void {
+    private _motor(joint: { constraint: JoltNS.TwoBodyConstraint; record: JoltJointRecord; spinning?: boolean }, d: JointDrive | null): void {
         const J = this._J;
+        joint.spinning = false;
         const on = !!d && d.frequency > 0 && d.maxTorque > 0;
         const state = on ? J.EMotorState_Position : J.EMotorState_Off;
         const limit = (m: JoltNS.MotorSettings) => {
@@ -891,6 +1003,7 @@ export class JoltWorld implements DescribedWorld<JoltJointRecord> {
             position: [pose[0], pose[1], pose[2]], rotation: [pose[3], pose[4], pose[5], pose[6]],
             colliders: e.colliderDescs, centerOfMass: e.centerOfMass,
             group: e.group, mask: e.mask, collisionResponse: e.response, reportContacts: e.reports,
+            ...(e.desc.type !== undefined || e.retyped ? { type: e.type } : {}),
         };
     }
 
@@ -981,6 +1094,7 @@ export class JoltWorld implements DescribedWorld<JoltJointRecord> {
         J.destroy(this._layerFilter);
         J.destroy(this._native.jolt);
         this._native.jolt = null;
+        releaseGroups(this._native);
     }
 
     private _create(desc: BodyDesc, nativeId: number | undefined): BodyHandle {
@@ -1021,9 +1135,29 @@ export class JoltWorld implements DescribedWorld<JoltJointRecord> {
         const mass = type === 'dynamic' ? desc.mass : 0;
         if (type === 'dynamic') {
             cs.mOverrideMassProperties = J.EOverrideMassProperties_MassAndInertiaProvided;
-            const mp = this._massOf(cs.GetShape(), mass);
+            const mp = this._massOf(cs.GetShape(), mass, desc.inertia);
             cs.mMassPropertiesOverride = mp;
             J.destroy(mp);
+            // Swept: a small fast part does not pass through what it meets in a step.
+            if (desc.motionQuality === 'linearCast') cs.mMotionQuality = J.EMotionQuality_LinearCast;
+        }
+        // Its group's table of which sub-groups (parts) collide with which; the same table for every body of it.
+        let selfGroup: number | undefined;
+        const f = desc.selfFilter;
+        if (f && type !== 'static' && f.group > 0 && f.index >= 0 && f.index < MAX_PLANNED_PARTS) {
+            let g = this._native.groups.get(f.group);
+            if (!g) {
+                const table = new J.GroupFilterTable(MAX_PLANNED_PARTS);
+                table.AddRef();
+                g = { table, bodies: 0 };
+                this._native.groups.set(f.group, g);
+            }
+            for (let j = 0; j < MAX_PLANNED_PARTS; j++) if (j !== f.index && ((f.ignore >>> j) & 1)) g.table.DisableCollision(f.index, j);
+            g.bodies++;
+            selfGroup = f.group;
+            const cg = new J.CollisionGroup(g.table, f.group >>> 0, f.index);
+            cs.mCollisionGroup = cg;
+            J.destroy(cg);
         }
         let body: JoltNS.Body;
         if (nativeId === undefined) body = this._bi.CreateBody(cs);
@@ -1040,6 +1174,7 @@ export class JoltWorld implements DescribedWorld<JoltJointRecord> {
             handle, body, id: body.GetID().GetIndexAndSequenceNumber(), ptr: J.getPointer(body), desc, configVersion: 0, type, mass, sensor, dofs,
             colliderDescs: colliders, centerOfMass, group, mask, response: desc.collisionResponse ?? true, reports: !!desc.reportContacts,
             friction, restitution, enabled: true, parts: null, radius: 0, written: null,
+            ...(selfGroup !== undefined ? { selfGroup } : {}),
         };
         this._entries.set(handle, entry);
         this._byId.set(entry.id, entry);
@@ -1106,10 +1241,25 @@ export class JoltWorld implements DescribedWorld<JoltJointRecord> {
      */
     private _localCom(e: Entry): number[] { return e.type === 'dynamic' ? this._shapeCom(e) : [0, 0, 0]; }
 
-    /** A body's mass properties: its given mass, inertia from its shape (or a solid box's when it has no volume). */
-    private _massOf(shape: JoltNS.Shape, mass: number): JoltNS.MassProperties {
+    /**
+     * A body's mass properties: its given mass, inertia from its shape (or a solid box's when it has no volume), or
+     * the inertia it is given (BodyDesc.inertia, [Ixx Iyy Izz Ixy Ixz Iyz]).
+     */
+    private _massOf(shape: JoltNS.Shape, mass: number, inertia?: readonly number[]): JoltNS.MassProperties {
         const J = this._J;
         const mp = new J.MassProperties();
+        if (inertia && inertia.length >= 6 && inertia.every(Number.isFinite) && inertia[0] > 0 && inertia[1] > 0 && inertia[2] > 0) {
+            mp.mMass = mass > 0 ? mass : 1;
+            const m = mp.mInertia;
+            const cols = [[inertia[0], inertia[3], inertia[4], 0], [inertia[3], inertia[1], inertia[5], 0], [inertia[4], inertia[5], inertia[2], 0], [0, 0, 0, 1]];
+            for (let k = 0; k < 4; k++) {
+                const c = new J.Vec4(cols[k][0], cols[k][1], cols[k][2], cols[k][3]);
+                m.SetColumn4(k, c);
+                J.destroy(c);
+            }
+            mp.mInertia = m;
+            return mp;
+        }
         const measured = shape.GetMassProperties();
         if (measured.mMass > 0) {
             mp.mMass = measured.mMass;
@@ -1125,7 +1275,7 @@ export class JoltWorld implements DescribedWorld<JoltJointRecord> {
 
     /** The body's mass made what it was given again, after its shape changed. */
     private _applyMass(e: Entry): void {
-        const mp = this._massOf(e.body.GetShape(), e.mass);
+        const mp = this._massOf(e.body.GetShape(), e.mass, e.desc.inertia);
         e.body.GetMotionProperties().SetMassProperties(e.dofs, mp);
         this._J.destroy(mp);
     }

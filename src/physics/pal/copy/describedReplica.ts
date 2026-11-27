@@ -59,6 +59,7 @@ export class DescribedReplica<J extends DescribedJointRecord> implements WorldRe
                     world.setCollisionFilter(h, d.group ?? 1, d.mask ?? -1);
                     world.setCollisionResponse(h, d.collisionResponse ?? true);
                     world.setReportContacts(h, !!d.reportContacts);
+                    if ((d.type === 'dynamic' || d.type === 'kinematic') && world.setBodyType && world.isDynamic(h) !== (d.type === 'dynamic')) world.setBodyType(h, d.type);
                     break;
                 }
                 case 'addJoint': {
@@ -86,12 +87,13 @@ export class DescribedReplica<J extends DescribedJointRecord> implements WorldRe
     public report(take: (bytes: number) => ArrayBuffer): { bodies: Float64Array; bodyCount: number } {
         const world = this.world, handles = world.bodies();
         let moving = 0;
-        for (const h of handles) if (world.isDynamic(h)) moving++;
+        const reported = (h: BodyHandle) => world.isDynamic(h) || !!world.reportsKinematic?.(h);
+        for (const h of handles) if (reported(h)) moving++;
         const bodies = new Float64Array(take(moving * BODY_ROW * 8), 0, moving * BODY_ROW);
         const pose = this._seven, vel = this._six;
         let k = 0;
         for (const h of handles) {
-            if (!world.isDynamic(h)) continue;
+            if (!reported(h)) continue;
             world.getTransform(h, pose);
             world.getVelocity(h, vel);
             bodies[k] = this._slotOf.get(h) ?? -1;

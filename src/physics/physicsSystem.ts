@@ -31,6 +31,7 @@ import type { PhysicsWorld } from "./pal/world";
 import { PhysicsEventKind, type BodyHandle, type ColliderGeometry, type ColliderPart } from "./pal/types";
 import { PhysicsBody } from "./physicsBody";
 import type { BodyPin, JointDesc, JointDrive, JointHandle, PhysicsBackendKind } from "./pal/types";
+import type { RagdollPlan, RagdollPlanInput } from "./pal/ragdollPlan";
 import { WorkerPort, type PhysicsPort } from "./worker/ports";
 import { effectiveSimulationRange, shouldFreeze, SIMULATION_WAKE_GRACE } from "./simulationRange";
 
@@ -1189,6 +1190,15 @@ export class PhysicsSystem {
    * Join two engine bodies (both in the world): see pal/types.ts JointDesc for the kinds. Returns the
    * joint, for {@link removeJoint}; a world clear removes every joint.
    */
+  /**
+   * A ragdoll planned with the running backend's own ragdoll tools (pal/ragdollPlan.ts), or null where it has none
+   * (`capabilities.ragdollPlanning`).
+   */
+  public planRagdoll(input: RagdollPlanInput): RagdollPlan | null {
+    const world = this._world;
+    return world?.capabilities.ragdollPlanning && world.planRagdoll ? world.planRagdoll(input) : null;
+  }
+
   public addJoint(a: PhysicsBody, b: PhysicsBody, joint: JointSpec): JointHandle | null {
     if (!this._world || a.world !== this._world || b.world !== this._world) return null;
     return this._world.createJoint({ ...joint, a: a.handle, b: b.handle } as JointDesc);
@@ -1649,6 +1659,9 @@ export class PhysicsSystem {
   public flinchDistance: number = 40;
 
   /** Powered ragdolls simulating now (not frozen). */
+  /** Seconds this system has simulated (stepped, unpaused): a clock that runs with the game. */
+  public get simulatedTime(): number { return this._time; }
+
   public get poweredRagdollCount(): number {
     let n = 0;
     for (const r of this._ragdolls) if (r.powered && !r.frozen && !r.destroyed) n++;

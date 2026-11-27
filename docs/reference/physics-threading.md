@@ -118,6 +118,13 @@ joint id, so the worker steps exactly as the main thread would. A world with no 
 all. The reactions themselves (their sensors, states and behaviours) run on the main thread, in `endFrame`,
 from the bodies the worker sent back; the drives' torque readings are not sent back.
 
+A body made kinematic or dynamic again (`setBodyType`, a reacting character's legs) goes to the worker as a
+`config` op carrying its type (`descOf` gives the type of any body switched once); the worker reports a body
+switched kinematic back with the dynamic ones, since the engine moves it there by its velocity. A planned
+ragdoll's bodies carry their `inertia`, `selfFilter` and `motionQuality` in their descriptions, and its joints
+their `priority`, `positionIterations` and twist range in their records: the worker's copy is built with the
+same.
+
 ## Measurements
 
 The Valley example in the editor (dev server, Play, 8-core desktop, 130 bodies of which 12 moving,

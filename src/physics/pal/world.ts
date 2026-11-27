@@ -1,4 +1,5 @@
 import type { PhysicsCapabilities } from './capabilities';
+import type { RagdollPlan, RagdollPlanInput } from './ragdollPlan';
 import type {
     BodyDesc, BodyHandle, BodyPin, ColliderDesc, ColliderPart, JointDesc, JointDrive, JointHandle, MassProperties, Out,
     PhysicsBackendKind, PhysicsEventKind, RayHit, RayOptions, StepProfile, V3,
@@ -64,6 +65,17 @@ export interface PhysicsWorld {
     setCollisionFilter(body: BodyHandle, group: number, mask: number): void;
     /** Whether a body takes part in the solver (see BodyDesc.collisionResponse). */
     setCollisionResponse(body: BodyHandle, response: boolean): void;
+    /**
+     * A dynamic body made kinematic or back while it lives (only where `capabilities.kinematicParts`; absent or a
+     * no-op elsewhere). Its velocity and mass are kept.
+     */
+    setBodyType?(body: BodyHandle, type: 'dynamic' | 'kinematic'): void;
+    /**
+     * A ragdoll planned with the backend's own ragdoll tools (only where `capabilities.ragdollPlanning`): each part's
+     * mass and inertia stabilised for the chain, the part pairs that must not collide, and the joints' solve order.
+     * Builds nothing in the world.
+     */
+    planRagdoll?(input: RagdollPlanInput): RagdollPlan;
     /** Whether a body reports first contacts (see BodyDesc.reportContacts). */
     setReportContacts(body: BodyHandle, report: boolean): void;
     getMassProperties(body: BodyHandle, out: MassProperties): MassProperties;
