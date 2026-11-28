@@ -59,12 +59,16 @@ export default class SandboxNpcNode extends SandboxCharacterNode {
     @attribute('Senses', { min: 0, max: 3, step: 0.05 })
     public noticeSeconds: number = 0.35
 
-    /** Hits within the last moments (N·s, fading by half every `shockHalfLife` s) past which it staggers, and falls. */
+    /**
+     * Hits within the last moments (N·s, fading by half every `shockHalfLife` s) past which it staggers (once, until
+     * they have faded to half of it), and falls: three rifle rounds at the rifle's rate stagger it, a fourth knocks it
+     * down.
+     */
     @attribute('Knock-downs', { min: 0, max: 400, step: 1 })
-    public staggerShock: number = 24
+    public staggerShock: number = 40
 
     @attribute('Knock-downs', { min: 0, max: 400, step: 1 })
-    public knockdownShock: number = 48
+    public knockdownShock: number = 56
 
     @attribute('Knock-downs', { min: 0.05, max: 5, step: 0.05 })
     public shockHalfLife: number = 0.6
@@ -108,6 +112,8 @@ export default class SandboxNpcNode extends SandboxCharacterNode {
     protected _threatTime: number = -999
     /** Hits adding up, N·s; seconds lying down, and reacting. */
     protected _shock: number = 0
+    /** It has been staggered by the hits adding up now: not again until they have faded to half of Stagger Shock. */
+    protected _shockStaggered: boolean = false
     protected _downFor: number = 0
     protected _reactingFor: number = 0
     /** Out of a car's way: a sideways sprint this way (x, z) until then. */
@@ -415,6 +421,7 @@ export default class SandboxNpcNode extends SandboxCharacterNode {
         }
         // The knocks fade.
         if (this._shock > 0 && delta > 0) this._shock *= Math.pow(0.5, delta / Math.max(0.05, this.shockHalfLife))
+        if (this._shockStaggered && this._shock < this.staggerShock * 0.5) this._shockStaggered = false
     }
 
     /** Whether the player at the wheel is still its target (an enemy's is: SandboxEnemy). */
@@ -455,17 +462,23 @@ export default class SandboxNpcNode extends SandboxCharacterNode {
 
     /** A hit on its body (its reactions'): the knock adds up; enough, and it staggers or falls. */
     @eventListener('reaction:Hit')
-    protected _wasHit(info: { impulse?: number, partName?: string }) {
+    protected _wasHit(info: { impulse?: number, partName?: string, direction?: number[] }) {
         this._shock += Math.max(0, info?.impulse ?? 0)
         const reactions = this.reactions
         // Lying down there is nothing more to knock over; getting up, a hit knocks it back (its reactions do that).
         if (!reactions || ['falling', 'tumble', 'down', 'dead', 'getUp'].includes(reactions.state)) return
-        const away = this._awayFromThreat()
+        // The way the round was going, over the ground: its shooter is not its threat yet (the shot's weapon:Shot comes
+        // after this), and a first round that knocks it down knocks it away from the gun, not back from its own facing.
+        const d = info?.direction, flat = d ? Math.hypot(d[0], d[2]) : 0
+        const away = d && flat > 1e-3 ? [d[0] / flat, d[2] / flat] : this._awayFromThreat()
         const legs = /Thigh|Shin|Foot/.test(info?.partName ?? '') && this.groundSpeed > 3
         if (this._shock >= this.knockdownShock || legs) {
             this._shock = 0
+            this._shockStaggered = false
             reactions.push([away[0] * 2.4, 0.3, away[1] * 2.4])
-        } else if (this._shock >= this.staggerShock) {
+        } else if (this._shock >= this.staggerShock && !this._shockStaggered) {
+            // Once per crossing: a shove on every round after would stack into a fall the rounds alone do not make.
+            this._shockStaggered = true
             reactions.push([away[0] * 1.0, 0, away[1] * 1.0])
         }
     }

@@ -700,10 +700,19 @@ export default class SandboxCharacterNode extends CharacterNode {
      * and faded out once the body moves, for the Look layer.
      */
     protected _lookToward(delta: number, yaw: number, pitch: number) {
-        this.lookYaw = Math.max(-90, Math.min(90, this._wrap(yaw)))
-        this.lookPitch = Math.max(-45, Math.min(45, pitch - this.lookRest()))
-        // Aiming, the aim turns the head with the weapon.
-        const still = !this.hasMoveInput && this.isGrounded && this.groundSpeed < 0.3 && !this.aiming
+        // Straight behind, the side it looks round on stays the one it was: flipped across, the trunk would whip from
+        // one shoulder to the other.
+        let off = this._wrap(yaw)
+        if (Math.abs(off) > 150 && this.lookYaw !== 0 && Math.sign(off) !== Math.sign(this.lookYaw)) off = Math.sign(this.lookYaw) * Math.abs(off)
+        // Held by its reactions (a flinch after a hit, a stagger), the look stays where it was: the reaction has the head.
+        const hold = (this as unknown as { reactionHold?: { turn: number } | null }).reactionHold
+        if (!hold || !(hold.turn < 1)) {
+            this.lookYaw = Math.max(-90, Math.min(90, off))
+            this.lookPitch = Math.max(-45, Math.min(45, pitch - this.lookRest()))
+        }
+        // Aiming, the aim turns the head with the weapon. Past 110 degrees off the body there is no looking round:
+        // the body turns instead, and the look fades.
+        const still = !this.hasMoveInput && this.isGrounded && this.groundSpeed < 0.3 && !this.aiming && Math.abs(off) <= 110
         if (delta > 0) {
             this._lookAmount += ((still ? 1 : 0) - this._lookAmount) * (1 - Math.exp(-this.lookSpeed * delta))
             // Crouched, the head alone turns (the Look Head layer); standing, the trunk under it too (Look).

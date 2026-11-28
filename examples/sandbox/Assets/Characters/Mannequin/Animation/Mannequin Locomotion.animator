@@ -11089,7 +11089,8 @@
               "axis": "v"
             }
           ]
-        }
+        },
+        "body": "overlay"
       },
       {
         "name": "Hit Reaction",
@@ -11216,7 +11217,8 @@
             "exitTime": 0.9,
             "blendTime": 0.15
           }
-        ]
+        ],
+        "body": "overlay"
       },
       {
         "name": "Look",

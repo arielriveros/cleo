@@ -1142,6 +1142,9 @@ describe.skipIf(!present)('the Sandbox example project', { timeout: 300_000 }, (
             ['Pistol Aim', 'additive', 'PistolAimWeight'], ['Rifle Aim', 'additive', 'RifleAimWeight'], ['Shotgun Aim', 'additive', 'ShotgunAimWeight'],
             ['Recoil', 'additive', undefined], ['Hit Reaction', 'additive', 'HasControl'], ['Look', 'additive', 'LookWeight'], ['Look Head', 'additive', 'LookHeadWeight'],
             ['Pain Arch', 'additive', 'Pain'], ['Pain Hold', 'override', 'Pain']]);
+        // The fast ones drawn over a reacting body rather than in its muscles' target: a recoil or a flinch a muscle
+        // followed would lag it and overshoot (AnimationLayer.body).
+        expect(machine().layers.filter((l: any) => l.body === 'overlay').map((l: any) => l.name)).toEqual(['Recoil', 'Hit Reaction']);
         const layers = machine().layers.filter((l: any) => /^Lean/.test(l.name));
         const mask = library('boneMasks').find((m: any) => m.name === 'Lean');
         expect(Object.keys(mask.weights).map(n => n.replace(/^.*:/, '')).sort()).toEqual(
@@ -2668,9 +2671,9 @@ describe.skipIf(!present)('the Sandbox example project', { timeout: 300_000 }, (
             });
             input.release('Fire');
             const fired = gun.shots - before;
-            // 600 rounds a minute: seven or eight in 0.7 s.
-            expect(fired).toBeGreaterThanOrEqual(6);
-            expect(fired).toBeLessThanOrEqual(8);
+            // 450 rounds a minute: about six in 0.7 s.
+            expect(fired).toBeGreaterThanOrEqual(5);
+            expect(fired).toBeLessThanOrEqual(7);
             expect(hits).toContain('Crate Collider');
             // Each hit pushes it: 18 N·s on 25 kg is 0.72 m/s along the shot, less what one step's friction takes.
             expect(fastest, `the crate's fastest along the shot: ${fastest.toFixed(2)} m/s`).toBeGreaterThan(0.3);
@@ -2704,7 +2707,7 @@ describe.skipIf(!present)('the Sandbox example project', { timeout: 300_000 }, (
             p.run(1);
             input.release('Fire');
             const held = gun.shots - before;
-            if (weapon === 2) { expect(held).toBeGreaterThanOrEqual(9); expect(held).toBeLessThanOrEqual(11); }
+            if (weapon === 2) { expect(held).toBeGreaterThanOrEqual(7); expect(held).toBeLessThanOrEqual(9); }
             else expect(held).toBe(1);
             // Three pulls, three shots, as fast as the pistol cycles.
             p.run(0.1);
@@ -2734,7 +2737,7 @@ describe.skipIf(!present)('the Sandbox example project', { timeout: 300_000 }, (
             p.run(0.3);
             // Third person: the gun plays it (first person: the viewmodel's Fire clip, through its Event Actions; this
             // headless run builds no viewmodel animators).
-            expect(gun.shots - shots).toBeGreaterThanOrEqual(9);
+            expect(gun.shots - shots).toBeGreaterThanOrEqual(7);
             expect(plays.mock.calls.length).toBe(gun.shots - shots);
             input.release('Aim');
             // No spare copies of the cue (how overlap used to be faked, six at most).

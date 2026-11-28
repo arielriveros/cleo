@@ -45,18 +45,18 @@ export default class SandboxEnemyNode extends SandboxNpcNode {
     @attribute('Combat', { min: 1, max: 3, step: 1 })
     public preferredWeapon: number = 2
 
-    /** A burst: how long the trigger is held (s), and the gap between two. */
+    /** A burst: how long the trigger is held (s; two to four rounds of the rifle), and the gap between two. */
     @attribute('Combat', { min: 0.05, max: 3, step: 0.05 })
-    public burstMin: number = 0.3
+    public burstMin: number = 0.2
 
     @attribute('Combat', { min: 0.05, max: 3, step: 0.05 })
-    public burstMax: number = 0.6
+    public burstMax: number = 0.45
 
     @attribute('Combat', { min: 0, max: 5, step: 0.05 })
-    public gapMin: number = 0.5
+    public gapMin: number = 0.9
 
     @attribute('Combat', { min: 0, max: 5, step: 0.05 })
-    public gapMax: number = 1.2
+    public gapMax: number = 1.8
 
     /** The aim's error at 15 m (m, off the target), and how much a moving target adds a m/s. */
     @attribute('Combat', { min: 0, max: 5, step: 0.05 })

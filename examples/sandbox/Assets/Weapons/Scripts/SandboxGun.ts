@@ -38,9 +38,9 @@ export interface SandboxShotView {
  * walked on, not seen).
  *
  * A HIT on a dynamic body pushes it: the shot's `impulse` (shared by its pellets) along the shot at the point it hit
- * (so a crate hit high tips, a ball spins), no more than `maxPushSpeed` of speed at once. Every hit leaves sparks and
- * dust (`impactTemplate`) and, on anything but a character, a hole (`holeTemplate`), the hole moving with what it is
- * on; the shot draws a tracer
+ * (so a crate hit high tips, a ball spins), no more than `maxPushSpeed` of speed at once. A hit on a hard surface
+ * (anything but a character) leaves sparks and dust (`impactTemplate`) and a hole (`holeTemplate`), the hole moving
+ * with what it is on; a character throws nothing (its body's reaction is the hit); the shot draws a tracer
  * (`tracerTemplate`). In third person the gun flashes at its muzzle (`flashTemplate`) and plays its shot (`shotSound`,
  * a cue in the character's `Sounds` group); in first person the viewmodel's fire clip does both. A template the scene
  * does not have is skipped, with a warning once.
@@ -352,16 +352,17 @@ export default class SandboxGunNode extends Node {
     }
 
     /**
-     * Sparks and dust off the surface, and a hole in it: one that moves with what it is on. A character gets the sparks
-     * and no hole: a decal does not follow a skinned body's limbs, and its materials receive none besides (the
-     * Mannequin's have Receive decals off, so a hole in the ground at its feet does not paint its legs).
+     * Sparks and dust off a hard surface, and a hole in it: one that moves with what it is on. A character throws
+     * nothing: its body's reaction is the hit (no sparks off flesh, and a decal does not follow a skinned body's limbs;
+     * the Mannequin's materials have Receive decals off besides, so a hole in the ground at its feet does not paint
+     * its legs).
      */
     private _impact(hit: any): void {
+        if (this._onCharacter(hit)) return
         const n = hit.normal
         const at = [hit.point[0] + n[0] * 0.01, hit.point[1] + n[1] * 0.01, hit.point[2] + n[2] * 0.01]
         const rotation = eulerOntoNormal(n)
         this._spawn(this.impactTemplate, at, rotation)
-        if (this._onCharacter(hit)) return
         const hole = this._spawn(this.holeTemplate, at, [rotation[0], rotation[1], Math.random() * 360])
         if (!hole) return
         // On a body that moves, the hole goes with it.

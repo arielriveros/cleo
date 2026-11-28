@@ -714,8 +714,15 @@ the layer's time; another knock starts it over). Hurt outputs `hurt` (the pain p
   warns it (the car's `dodgeVehicle`) and it steps off the car's line at a sprint, unless its brain is already
   fighting the car (an enemy's **car engage**). Each comes to its subclass as a threat. The player at the wheel is
   still an enemy's target (its `fightsDrivers`); a civilian's only on foot.
-- **Knock-downs.** One round is a flinch. Hits add up (**Stagger Shock**, **Knockdown Shock**, fading by half every
-  **Shock Half Life**): past the first it staggers, past the second, or hit in the legs running, it falls.
+- **Knock-downs.** One round is a flinch. Hits add up (**Stagger Shock** 40, **Knockdown Shock** 56, fading by half
+  every **Shock Half Life**): past the first it staggers once (not again until the hits have faded to half of it), past
+  the second, or hit in the legs running, it falls. Three rifle rounds at the AK-47's rate stagger it; a fourth
+  inside a second knocks it down. A round that knocks it down knocks it away from the gun (the hit's `direction`).
+- **A flinch before it acts.** Hit, it neither walks nor turns for a moment (its reaction set's **Hold control**,
+  0.35 s, however many rounds follow), then runs or goes for cover, turning at half its pace until the hit reaction is
+  over; staggered, it turns with its stepping body, never under it. Its look stays where it was while it is held,
+  and fades out for anything past 110° off its body (it turns to it instead). The player's Mannequin has **Flinch
+  holds control** off: its input is never held.
 - **It never dies.** Its health is kept full, a body lying longer than **Down Seconds** is got up, and one reacting
   longer than **Stuck Seconds** is put back on its feet (a get-up under way does not count: its clip plays out). While it is off its feet the brain is **knocked**; a flinch
   or a stagger it stays up through keeps the brain where it was (it goes on patrolling, fighting or fleeing).
@@ -734,7 +741,8 @@ the danger before it calms down. Once up after a fall, it runs.
 - **Patrol.** It walks the nav mesh route nearest where it was placed (or the one its **Route** names), stopping at
   each point to look round. Two placed within 10 m of each other patrol as a pair: one leads, the other keeps behind
   it to the right.
-- **Engage.** The player in sight: it aims, fires in bursts, keeps between 8 and 22 m (its brain's **close in** and
+- **Engage.** The player in sight: it aims, fires in short bursts (0.2 to 0.45 s, two to four rounds, 0.9 to 1.8 s
+  apart: its `burstMin`, `burstMax`, `gapMin`, `gapMax`), keeps between 8 and 22 m (its brain's **close in** and
   **back off**), side-steps now and then, and holds fire with someone else in the line. It aims worse far away and
   at a moving target, and better the longer it holds the player in its sights. It tells its partner.
 - **Cover.** Hit, or nearly hit twice: it sprints to the best spot the shooter cannot see (a **Cover Point** within
@@ -938,12 +946,12 @@ The crosshair's spread is drawn at the lens it is seen through, so its ticks sta
 
 ### Firing
 
-**The weapons' numbers are Firing Line's** (its `FpsShared` table), set on each holder's SandboxGun in the Player
-template:
+**The weapons' numbers are Firing Line's** (its `FpsShared` table), set on each holder's SandboxGun in the Sandbox
+Character template, but for the AK-47's rate, slowed from Firing Line's 600 a minute:
 
 | | Pistol | AK-47 | SAPS-12 |
 |---|---|---|---|
-| Rounds a minute | 380, a pull each | 600, held | 76, a pull each, pumped |
+| Rounds a minute | 380, a pull each | 450, held | 76, a pull each, pumped |
 | Magazine, reserve | 12, 84 | 30, 150 | 6, 36 |
 | Pellets | 1 | 1 | 9 |
 | Spread from the hip, aimed (degrees) | 1.6, 0.25 | 2.6, 0.4 | 4.2, 2.6 |
@@ -978,11 +986,11 @@ steps.
 **What a hit does.** A dynamic body hit takes an `impulse` along the shot at the point it was hit (14 N·s from the
 pistol, 18 from the AK-47, 27 shared by the shotgun's pellets, a few times a real bullet's), so a crate shoves and
 tips, a barrel rolls, a ball flies; no hit speeds anything up by more than `maxPushSpeed` (2.5 m/s), so a 3 kg ball
-is not shot off the course. Every hit sprays sparks and dust (**Bullet Impact**) and, on anything but a character,
-leaves a hole (**Bullet Hole**, a decal that fades after 40 s), which moves with the body it is on. A character gets
-the sparks and no hole, and no decal lands on one at all: the three Mannequin materials have **Receive decals** off
-(see [Models and materials](models-and-materials.md#sections)), so a hole in the ground at a character's feet stops at
-its shoes. The shot draws a **Tracer** from the
+is not shot off the course. A hit on a hard surface (the ground, the car, a prop) sprays sparks and dust (**Bullet
+Impact**) and leaves a hole (**Bullet Hole**, a decal that fades after 40 s), which moves with the body it is on. A
+character throws nothing and keeps no hole: its body's reaction is the hit. No decal lands on one at all: the three
+Mannequin materials have **Receive decals** off (see [Models and materials](models-and-materials.md#sections)), so a
+hole in the ground at a character's feet stops at its shoes. The shot draws a **Tracer** from the
 muzzle and, in third person, a **Muzzle Flash** (particles and a point light) and the weapon's shot (its cue in the
 Player's **Sounds**); in first person the viewmodel's fire clip does both, through its animator's Event Actions.
 Each shot cue has 16 [voices](audio.md#overlap) (a new shot steals the quietest), half a semitone of random pitch

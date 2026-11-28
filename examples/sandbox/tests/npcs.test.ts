@@ -1,9 +1,7 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { describe, expect, it } from 'vitest';
 import { mat4, vec3 } from 'gl-matrix';
-import { EXAMPLE, dataReady } from '@tools/exampleKit/testKit';
 import { TEST_PHYSICS } from '@engine-tests/helpers/testPhysics';
-import { HostRuntime } from '@host/hostRuntime';
-import { packExampleGame } from '@host/exampleGame';
+import { ALL, AWAY, DEG, SANDBOX_AI_DETAIL, TICK, actionsOf, finite, planar, play, present, reactionTrail, shoot, useNpcHooks } from './npcKit';
 
 // The Sandbox's NPCs, played: the game as Play in window packs it, run headless on the host runtime (real models,
 // their animators and reactions, the scripts, physics on the game clock), with only the NPCs a test asks for.
@@ -18,140 +16,7 @@ import { packExampleGame } from '@host/exampleGame';
 // brain; they never die (a knock-down always gets up, and a stagger or a fall hurts them for 12 s: the pain pose),
 // and the player is not knocked about by gunshots at all.
 
-const present = dataReady();
-const TICK = 30;
-const DEG = 180 / Math.PI;
-
-/** A seeded Math.random, so a test plays the same way every run. */
-function seeded(seed: number) {
-    let a = seed >>> 0;
-    return () => {
-        a = (a + 0x6d2b79f5) >>> 0;
-        let t = a;
-        t = Math.imul(t ^ (t >>> 15), t | 1);
-        t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
-        return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
-    };
-}
-
-const open: HostRuntime[] = [];
-beforeEach(() => { vi.spyOn(Math, 'random').mockImplementation(seeded(7)); });
-afterEach(() => {
-    for (const r of open.splice(0)) r.dispose();
-    vi.restoreAllMocks();
-});
-
-type Vec = [number, number, number];
-interface Setup {
-    /** The NPCs to keep (by placed name), and where to put them instead (with a heading, degrees). */
-    npcs: Record<string, { at?: Vec, yaw?: number } | true>;
-    /** Where the player stands, and its heading. */
-    player?: { at: Vec, yaw?: number };
-}
-
-const planar = (a: ArrayLike<number>, b: ArrayLike<number>) => Math.hypot(a[0] - b[0], a[2] - b[2]);
-/** How often the NPCs perceive, probe and plan in the Sandbox itself (its Game Manager's `aiDetail`). */
-const SANDBOX_AI_DETAIL = { perceiveEvery: 2, probeEvery: 2, pathsPerFrame: 2, farDistance: 35, farFactor: 3 };
-const finite = (p: ArrayLike<number>) => Number.isFinite(p[0] + p[1] + p[2]);
-const ALL = ['Civilian 1', 'Civilian 2', 'Civilian 3', 'Civilian 4', 'Civilian 5', 'Civilian 6', 'Enemy Pillars 1', 'Enemy Pillars 2', 'Enemy Crates 1', 'Enemy Crates 2'];
-/** Far from every NPC's sight: where the player waits when a test is not about it. */
-const AWAY: Vec = [-45, 0.02, 45];
-
-/** The Sandbox, packed with only `setup.npcs` placed (where it says), and started on the host. */
-async function play(setup: Setup, options: { aiDetail?: { perceiveEvery: number; probeEvery: number; pathsPerFrame?: number } } = {}) {
-    const bin = await packExampleGame(EXAMPLE, {
-        edit: (data) => {
-            const scene = data.scenes[data.entry].scene;
-            const group = scene.children.find((c: any) => c.name === 'NPCs');
-            group.children = group.children.filter((c: any) => c.name in setup.npcs);
-            for (const c of group.children) {
-                const s = setup.npcs[c.name];
-                if (s === true) continue;
-                if (s.at) c.position = [...s.at];
-                if (s.yaw !== undefined) c.rotation = [0, s.yaw, 0];
-            }
-            const collider = scene.children.find((c: any) => c.name === 'Player Collider');
-            if (setup.player) {
-                collider.position = [...setup.player.at];
-                if (setup.player.yaw !== undefined) collider.rotation = [0, setup.player.yaw, 0];
-            }
-        },
-    });
-    const r = await HostRuntime.open({ bin }, {
-        tickRate: TICK, physicsBackend: TEST_PHYSICS,
-        // Every agent perceives every tick, and every animator poses fully: the game as one player plays it.
-        aiDetail: options.aiDetail ?? { perceiveEvery: 1, probeEvery: 1, pathsPerFrame: 4 }, animationLod: false,
-    });
-    open.push(r);
-    const nodes = [...r.scene.nodes] as any[];
-    const player = nodes.find(n => n.nodeType === 'character' && n.team === 'player');
-    r.focusPoints = () => [player.worldPosition];
-    /** The Character of the NPC placed as `name`. */
-    const npc = (name: string) => nodes.find(n => n.name === name)?.children.find((c: any) => c.nodeType === 'character');
-    const named = (name: string) => nodes.find(n => n.name === name);
-    /** Every state an NPC was in, in order. */
-    const states = new Map<any, string[]>();
-    const watched: any[] = [];
-    const watch = (...who: any[]) => { for (const w of who) { watched.push(w); states.set(w, [w.state]); } };
-    /**
-     * Step `seconds` of game time, `each` before every tick (true from it stops early), `after` after it. It lets the
-     * test runner in every second of game time: a long run in one go starves its worker's messages and times them out.
-     */
-    const played = { lastTickMs: 0 };
-    const run = async (seconds: number, each?: (t: number) => boolean | void, after?: () => void) => {
-        const ticks = Math.round(seconds * TICK);
-        for (let k = 0; k < ticks; k++) {
-            if (each?.(k / TICK) === true) return;
-            const start = performance.now();
-            r.step(1);
-            played.lastTickMs = performance.now() - start;
-            after?.();
-            for (const w of watched) { const s = states.get(w)!; if (s[s.length - 1] !== w.state) s.push(w.state); }
-            // A quarter of a game second at most between yields: a busy tick is tens of milliseconds.
-            if (k % (TICK / 6) === TICK / 6 - 1) await new Promise(done => setImmediate(done));
-        }
-    };
-    return { r, player, npc, named, run, watch, states, get lastTickMs() { return played.lastTickMs; } };
-}
-type Played = Awaited<ReturnType<typeof play>>;
-
-/** Shoot the player's rifle from its eyes at `target` (the gun's own raycast, its push, its weapon:Shot). */
-function shoot(p: Played, target: ArrayLike<number>) {
-    const gun = p.player.children.find((c: any) => c.name === 'Weapons').children.find((c: any) => c.name === 'Rifle Grip');
-    const me = p.player.worldPosition;
-    const eye = [me[0], me[1] + 1.55, me[2]];
-    const d = [target[0] - eye[0], target[1] - eye[1], target[2] - eye[2]];
-    const n = Math.hypot(d[0], d[1], d[2]);
-    return gun.fire(eye, [d[0] / n, d[1] / n, d[2] / n], 0, p.player.ownBodies());
-}
-
-/** The reactions' states a character went through, in order. */
-function reactionTrail(character: any) {
-    const trail: string[] = [];
-    return { trail, note: () => { const s = character.reactions?.state ?? 'none'; if (trail[trail.length - 1] !== s) trail.push(s); } };
-}
-
-/**
- * Every clip a character's animator was asked to play as an action, and whether it had it; and every get-up its
- * graph's Get Up state rose on (Animator.playGetUp), by the clip it played.
- */
-function actionsOf(character: any) {
-    const model = character.children.find((c: any) => c.nodeType === 'model');
-    const played: { clip: string, found: boolean }[] = [];
-    const base = model.animator.playAction.bind(model.animator);
-    model.animator.playAction = (clip: string, options: any) => {
-        const handle = base(clip, options);
-        played.push({ clip, found: !handle.done });
-        return handle;
-    };
-    const getUp = model.animator.playGetUp.bind(model.animator);
-    model.animator.playGetUp = (faceUp: boolean, fallback: any) => {
-        const clock = getUp(faceUp, fallback);
-        if (clock) played.push({ clip: model.animator.currentAnimation?.name ?? '', found: true });
-        return clock;
-    };
-    return played;
-}
+useNpcHooks();
 
 describe.skipIf(!present)(`the Sandbox's NPCs (${TEST_PHYSICS})`, { timeout: 300_000 }, () => {
     it('places six civilians and four enemies, every one the Sandbox Character underneath', async () => {
@@ -267,6 +132,25 @@ describe.skipIf(!present)(`the Sandbox's NPCs (${TEST_PHYSICS})`, { timeout: 300
         expect(finite(civ.worldPosition)).toBe(true);
     });
 
+    it('three rifle rounds at the rifle\'s cadence stagger a civilian: it steps and stays on its feet', async () => {
+        const p = await play({ npcs: { 'Civilian 1': { at: [32, 0, -24], yaw: 180 } }, player: { at: [32, 0.02, -34], yaw: 0 } });
+        const civ = p.npc('Civilian 1');
+        const r = reactionTrail(civ);
+        await p.run(1);
+        // 450 rounds a minute: one every 0.133 s, in the chest.
+        let fired = 0, steps = 0;
+        await p.run(6, (t) => {
+            if (fired < 3 && t >= fired * (60 / 450)) { shoot(p, [civ.worldPosition[0], civ.worldPosition[1] + 1.25, civ.worldPosition[2]]); fired++; }
+            r.note();
+            steps = Math.max(steps, civ.reactions.balance?.steps ?? 0);
+        });
+        expect(fired).toBe(3);
+        expect(r.trail.join('>')).toMatch(/stagger/);
+        expect(r.trail.join('>'), 'it stays on its feet').not.toMatch(/falling/);
+        expect(steps, 'it steps').toBeGreaterThan(0);
+        expect(civ.reactions.alive).toBe(true);
+    });
+
     it('run over by the car, a civilian is thrown, gets up and runs from it', async () => {
         // In front of the parked car's bonnet (the car faces +X), the car sent at it at 8 m/s with nobody in it.
         const p = await play({ npcs: { 'Civilian 1': { at: [20.6, 0, 1.5], yaw: -90 } }, player: { at: AWAY } });
@@ -380,7 +264,7 @@ describe.skipIf(!present)(`the Sandbox's NPCs (${TEST_PHYSICS})`, { timeout: 300
         expect(finite(p.player.worldPosition)).toBe(true);
     });
 
-    it('a round in a civilian throws sparks off it and leaves no hole, where one in the ground beside it does', async () => {
+    it('a round in a civilian throws nothing off it and leaves no hole, where one in the ground beside it throws sparks and leaves one', async () => {
         const p = await play({ npcs: { 'Civilian 1': { at: [32, 0, -24], yaw: 180 } }, player: { at: [32, 0.02, -34], yaw: 0 } });
         const civ = p.npc('Civilian 1');
         await p.run(1);
@@ -388,10 +272,12 @@ describe.skipIf(!present)(`the Sandbox's NPCs (${TEST_PHYSICS})`, { timeout: 300
         const holes = count('Bullet Hole'), impacts = count('Bullet Impact');
         const hit = shoot(p, [civ.worldPosition[0], civ.worldPosition[1] + 1.25, civ.worldPosition[2]]);
         expect(hit, 'the round hits the civilian').toBeTruthy();
-        expect(count('Bullet Impact')).toBeGreaterThan(impacts);
+        // Sparks are a hard surface's: a body takes the round with its reaction alone.
+        expect(count('Bullet Impact'), 'sparks off the civilian').toBe(impacts);
         expect(count('Bullet Hole'), 'a hole on the civilian').toBe(holes);
         const ground = shoot(p, [civ.worldPosition[0] + 1.5, 0, civ.worldPosition[2] - 2]);
         expect(ground, 'the round hits the ground').toBeTruthy();
+        expect(count('Bullet Impact'), 'sparks off the ground').toBe(impacts + 1);
         expect(count('Bullet Hole'), 'a hole in the ground').toBe(holes + 1);
     });
 

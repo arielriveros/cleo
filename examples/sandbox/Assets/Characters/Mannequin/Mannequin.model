@@ -963,7 +963,7 @@
             {
               "id": "default",
               "name": "Default",
-              "strength": 1,
+              "strength": 1.95,
               "muscles": {
                 "neck": {
                   "frequency": 2.23,
@@ -1029,18 +1029,32 @@
                   "enabled": true,
                   "params": {
                     "weakness": 0.5,
-                    "weaknessTime": 0.25,
+                    "weaknessTime": 0.4,
+                    "weaknessFloor": 0.1,
                     "trackStiffness": 6,
                     "trackStrength": 3,
+                    "followSpin": 0.6,
                     "maxKick": 6,
                     "snap": 0.4,
-                    "reachDelay": 0.1,
+                    "reachDelay": 0.18,
                     "holdTime": 1.2,
                     "maxReach": 0.65,
                     "reachStiffness": 3,
                     "reachPull": 0.5,
+                    "lookDelay": 0.1,
                     "lookTime": 1,
-                    "duration": 1.4
+                    "tone": 0.35,
+                    "toneTime": 0.3,
+                    "impulseOneFoot": 0.8,
+                    "impulseAirborne": 0.5,
+                    "duration": 1.4,
+                    "painLean": 0.25,
+                    "shockSpin": 0.3,
+                    "gutFold": 0.45,
+                    "backArch": 0.35,
+                    "armTwist": 0.3,
+                    "kneeGive": 0.5,
+                    "legStagger": 0.6
                   }
                 },
                 "stepBalance": {
@@ -1048,9 +1062,34 @@
                   "params": {
                     "knockTime": 0.35,
                     "leanInto": 0.15,
+                    "prediction": 0.2,
+                    "stepTime": 0.25,
+                    "stepHeight": 0.1,
+                    "stepLength": 0.4,
+                    "widthMin": 0.12,
+                    "widthMax": 0.4,
+                    "maxSteps": 4,
+                    "tire": 0.7,
+                    "assist": 1,
+                    "firstStep": 0.12,
+                    "crossMax": 0.08,
+                    "stanceStiffness": 1.2,
+                    "maxShove": 3,
                     "giveUpTilt": 0.6,
                     "giveUpTime": 0.15,
                     "recoverTime": 0.4
+                  }
+                },
+                "armsOut": {
+                  "enabled": true,
+                  "params": {
+                    "spin": 1.2,
+                    "shove": 1.2,
+                    "abduct": 0.9,
+                    "elbow": 0.4,
+                    "stiffness": 4,
+                    "windmill": 3,
+                    "hold": 1.1
                   }
                 },
                 "catchFall": {
@@ -1113,7 +1152,16 @@
                     "inherit": 1,
                     "ejectSpeed": 2,
                     "ejectUp": 1,
-                    "clearTime": 0.35
+                    "clearTime": 0.35,
+                    "kneeTuck": 1.25,
+                    "hipTuck": 1,
+                    "curl": 0.25,
+                    "chinTuck": 0.5,
+                    "armsIn": 0.8,
+                    "stiffness": 3,
+                    "catchTime": 0.3,
+                    "catchSpeed": 7,
+                    "rollSpeed": 2.5
                   }
                 },
                 "struck": {
@@ -1143,6 +1191,14 @@
                   "params": {
                     "strength": 0.05,
                     "friction": 2
+                  }
+                },
+                "rollOver": {
+                  "enabled": true,
+                  "params": {
+                    "twist": 0.35,
+                    "speed": 2.5,
+                    "giveUp": 4
                   }
                 },
                 "getUp": {
@@ -1288,11 +1344,11 @@
               "massFraction": 0.1,
               "joint": {
                 "type": "cone",
-                "swing": 31,
-                "twist": 30,
+                "swing": 58,
+                "twist": 35,
                 "hingeMin": 0,
                 "hingeMax": 0,
-                "tilt": [25, 0]
+                "tilt": [32, 0]
               }
             },
             {
@@ -1385,11 +1441,11 @@
               "massFraction": 0.1,
               "joint": {
                 "type": "cone",
-                "swing": 30,
-                "twist": 30,
+                "swing": 58,
+                "twist": 35,
                 "hingeMin": 0,
                 "hingeMax": 0,
-                "tilt": [25, 0]
+                "tilt": [32, 0]
               }
             },
             {
@@ -1430,7 +1486,8 @@
           "angularDamping": 0.2,
           "solverIterations": 20,
           "friction": 0.8,
-          "restitution": 0.05
+          "restitution": 0.05,
+          "footFriction": 2
         }
       },
       "jointIndices": {

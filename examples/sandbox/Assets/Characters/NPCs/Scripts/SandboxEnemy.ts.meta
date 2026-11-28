@@ -1387,14 +1387,14 @@
           "kind": "number"
         },
         "access": "public",
-        "default": 24,
+        "default": 40,
         "hidden": false,
         "attribute": {
           "group": "Knock-downs",
           "min": 0,
           "max": 400,
           "step": 1,
-          "tooltip": "Hits within the last moments (N·s, fading by half every `shockHalfLife` s) past which it staggers, and falls."
+          "tooltip": "Hits within the last moments (N·s, fading by half every `shockHalfLife` s) past which it staggers (once, until they have faded to half of it), and falls: three rifle rounds at the rifle's rate stagger it, a fourth knocks it down."
         }
       },
       {
@@ -1403,7 +1403,7 @@
           "kind": "number"
         },
         "access": "public",
-        "default": 48,
+        "default": 56,
         "hidden": false,
         "attribute": {
           "group": "Knock-downs",
@@ -1691,6 +1691,15 @@
         "hidden": true
       },
       {
+        "name": "_shockStaggered",
+        "type": {
+          "kind": "boolean"
+        },
+        "access": "protected",
+        "default": false,
+        "hidden": true
+      },
+      {
         "name": "_downFor",
         "type": {
           "kind": "number"
@@ -1749,14 +1758,14 @@
           "kind": "number"
         },
         "access": "public",
-        "default": 0.3,
+        "default": 0.2,
         "hidden": false,
         "attribute": {
           "group": "Combat",
           "min": 0.05,
           "max": 3,
           "step": 0.05,
-          "tooltip": "A burst: how long the trigger is held (s), and the gap between two."
+          "tooltip": "A burst: how long the trigger is held (s; two to four rounds of the rifle), and the gap between two."
         }
       },
       {
@@ -1765,7 +1774,7 @@
           "kind": "number"
         },
         "access": "public",
-        "default": 0.6,
+        "default": 0.45,
         "hidden": false,
         "attribute": {
           "group": "Combat",
@@ -1780,7 +1789,7 @@
           "kind": "number"
         },
         "access": "public",
-        "default": 0.5,
+        "default": 0.9,
         "hidden": false,
         "attribute": {
           "group": "Combat",
@@ -1795,7 +1804,7 @@
           "kind": "number"
         },
         "access": "public",
-        "default": 1.2,
+        "default": 1.8,
         "hidden": false,
         "attribute": {
           "group": "Combat",
