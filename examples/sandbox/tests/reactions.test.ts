@@ -159,6 +159,8 @@ describe('the Sandbox scripts use the reactions', () => {
         const player = source('Characters', 'Mannequin', 'Scripts', 'SandboxPlayer.ts');
         expect(player).toMatch(/export default class SandboxPlayerNode extends SandboxCharacterNode/);
         expect(player).toContain("Input.started('Trip')");
+        // The Trip key is the animator's Trip trigger (its Ragdoll state), fired by name.
+        expect(player).toMatch(/@animTrigger\('Trip'\)\n\s+private _trip\(\) \{\}/);
         expect(player).toContain("Input.started('Shove')");
         const input = JSON.parse(readFileSync(join(EXAMPLE, 'ProjectSettings', 'input.json'), 'utf-8'));
         const actions = input.maps.flatMap((m: any) => m.actions.map((a: any) => a.name));

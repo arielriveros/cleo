@@ -577,7 +577,8 @@ the wheel with the steering, and the seated feet go through the floor (no leg IK
 The mannequin reacts with its whole body, with the [reactions](reactions.md) of its skeleton: the Mannequin rig's
 **Default** set (its **Reactions** tab), the same for the player and every NPC:
 
-- **T** trips it: its feet stop, it falls forward onto its hands, lies a moment and gets up.
+- **T** trips it: the player's script fires the animator's **Trip** trigger, and the graph's Ragdoll state takes its
+  feet from under it; it falls forward onto its hands, lies a moment and gets up.
 - **G** shoves it back: it is carried back on its feet, its legs walking it out, and keeps its control.
 - **Bailing out** of the car at speed (above) throws it out to tumble along the ground.
 - **A shot** that strikes a character (its capsule, or a limb of a body already reacting) is its reactions'
@@ -600,6 +601,31 @@ up knocks it back down (or off balance, if it was nearly up).
 
 The course's surfaces have a friction of 0.7, so a falling body grips the ground and rolls; the props keep their own
 0.3 (a pair of surfaces takes the smaller), so they slide as before.
+
+### In the animator graph
+
+The body's falls are wired in the animator, with no script ([Ragdoll and Get Up states](animation.md#ragdoll-and-get-up-states)):
+
+- the base layer's **Down** group holds a **Ragdoll** state (Starts: Trip; entered on the **Trip** trigger, or from
+  Any State, first, on **Ragdolled**: a hit's fall, a shove, the car) and a **Get Up** state (*Stand Up* on its back,
+  *Getting Up* on its front). Ragdoll goes to Get Up on **CanGetUp**, and Get Up back to **Pick Idle** near its end;
+- the [reaction effects](animation.md#reaction-effects): the car's states take no hits (**React: None**), the crouched
+  ones are braced (**Force ×0.6**, **Shove ×0.5**), and a weapon layer's carry, crouch and sprint keep the gun hand
+  on its grip (**Hands: Right busy**; **Both busy** while reloading).
+
+### Hit reactions
+
+A **Hit Reaction** layer (additive, over the **Hit** bone mask: spine, neck, head, shoulders, arms and forearms) flinches
+on every hit a character takes: its **Hit** state is entered on the **Hit** trigger (set to fire on **Each hit**) and
+plays the **Hit Reactions** blend space over **HitAngle** (where the hit came from) and **HitHeight** (how high it
+landed), back to **Off** near its end. Its weight is **HasControl**, so it rests while the body is down.
+
+Its eight flinches (Hit Front, Back, Left, Right, and the four Hit Head ones) were made in Cleo Creator's
+[Motion](../creator/motion.md#additive-clips) tool on its mannequin: each starts and ends on the neutral pose, throws
+the chest (or the head) away from the hit at 0.08 s, overshoots a little at 0.26 s and settles by 0.6 s. They sync into
+`/Creator/Motion` and are linked to the Mannequin rig (retargeted by name, through the **Creator Mannequin** rig in
+`/Characters/Mannequin/Animation/Clips/Hit`). Their documents, with the script that wrote them, are in
+`build/creator/hit-reactions` (Assets ▸ Import in the Creator opens one).
 
 ## The NPCs
 

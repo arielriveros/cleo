@@ -129,7 +129,10 @@ function reactionTrail(character: any) {
     return { trail, note: () => { const s = character.reactions?.state ?? 'none'; if (trail[trail.length - 1] !== s) trail.push(s); } };
 }
 
-/** Every clip a character's animator was asked to play as an action, and whether it had it. */
+/**
+ * Every clip a character's animator was asked to play as an action, and whether it had it; and every get-up its
+ * graph's Get Up state rose on (Animator.playGetUp), by the clip it played.
+ */
 function actionsOf(character: any) {
     const model = character.children.find((c: any) => c.nodeType === 'model');
     const played: { clip: string, found: boolean }[] = [];
@@ -138,6 +141,12 @@ function actionsOf(character: any) {
         const handle = base(clip, options);
         played.push({ clip, found: !handle.done });
         return handle;
+    };
+    const getUp = model.animator.playGetUp.bind(model.animator);
+    model.animator.playGetUp = (faceUp: boolean, fallback: any) => {
+        const clock = getUp(faceUp, fallback);
+        if (clock) played.push({ clip: model.animator.currentAnimation?.name ?? '', found: true });
+        return clock;
     };
     return played;
 }
@@ -504,6 +513,75 @@ describe.skipIf(!present)(`the Sandbox's NPCs (${TEST_PHYSICS})`, { timeout: 300
         // Up partway, knocked back, and up again in the end.
         expect(r.trail.join('>')).toMatch(/getUp>(falling|stagger).*animated/);
         expect(civ.reactions.alive).toBe(true);
+    });
+
+    it("goes down and up through its animator graph: Ragdoll while the body is down, Get Up on Mixamo's clip, then on its way", async () => {
+        const p = await play({ npcs: { 'Civilian 1': { at: [32, 0, -24], yaw: 180 } }, player: { at: [32, 0.02, -34], yaw: 0 } });
+        const civ = p.npc('Civilian 1');
+        const a = civ.children.find((c: any) => c.nodeType === 'model' && c.animator).animator;
+        const base: string[] = [];
+        let movedRising = 0;
+        civ.reactions.trip();
+        await p.run(30, () => {
+            const s = a.currentStateName;
+            if (base[base.length - 1] !== s) base.push(s);
+            if (s === 'Get Up') movedRising = Math.max(movedRising, Math.hypot(civ.velocity[0], civ.velocity[2]));
+            if (base.includes('Get Up') && civ.reactions.state === 'animated' && s !== 'Get Up') return true;
+        });
+        // The graph followed the fall (Any State on Ragdolled), held the body down, and rose on its Get Up state.
+        expect(base.join('>')).toMatch(/^[^>]+>Ragdoll>Get Up>/);
+        expect(civ.reactions.state).toBe('animated');
+        expect(movedRising, 'moving while it got up').toBeLessThan(0.2);
+    });
+
+    it('flinches on its Hit Reaction layer by where a hit came from: in front, then its right', async () => {
+        const p = await play({ npcs: { 'Enemy Pillars 1': { at: [32, 0, -24], yaw: 180 } }, player: { at: AWAY } });
+        const en = p.npc('Enemy Pillars 1');
+        const a = en.children.find((c: any) => c.nodeType === 'model' && c.animator).animator;
+        await p.run(1);
+        const seen: { layer: string | null; angle: number; height: number }[] = [];
+        const hitFrom = async (where: 'front' | 'right', part: string) => {
+            const f = en.worldForward;
+            // In front, the round travels back along its facing; from its right, toward its left.
+            const dir = where === 'front' ? [-f[0], 0, -f[2]] : [f[2], 0, -f[0]];
+            en.reactions.hit({ part, direction: dir, impulse: 6 });
+            let entered = false;
+            await p.run(0.5, () => {
+                if (a.layerStateName('Hit Reaction') === 'Hit' && !entered) {
+                    entered = true;
+                    seen.push({ layer: 'Hit', angle: Number(a.getParam('HitAngle')), height: Number(a.getParam('HitHeight')) });
+                }
+            });
+            if (!entered) seen.push({ layer: a.layerStateName('Hit Reaction'), angle: NaN, height: NaN });
+            await p.run(0.6);
+        };
+        await hitFrom('front', 'Chest');
+        await hitFrom('right', 'Head');
+        expect(seen.map(s => s.layer)).toEqual(['Hit', 'Hit']);
+        expect(Math.abs(seen[0].angle)).toBeLessThan(5);
+        expect(seen[1].angle).toBeCloseTo(-90, -1);
+        // The chest is the trunk, the head high.
+        expect(seen[0].height).toBeLessThan(0.85);
+        expect(seen[1].height).toBeGreaterThan(0.85);
+        // The flinch is over by itself: back to Off.
+        expect(a.layerStateName('Hit Reaction')).toBe('Off');
+    });
+
+    it("the player's Trip key takes its feet from under it through the graph's Trip trigger, and it gets up", async () => {
+        const p = await play({ npcs: {}, player: { at: [32, 0.02, -34], yaw: 0 } });
+        const me = p.player;
+        const a = me.children.find((c: any) => c.nodeType === 'model' && c.animator)?.animator
+            ?? [...p.r.scene.nodes].find((n: any) => n.name === 'Mannequin' && n.animator)?.animator;
+        await p.run(1);
+        const base: string[] = [];
+        me._trip();
+        await p.run(30, () => {
+            const s = a.currentStateName;
+            if (base[base.length - 1] !== s) base.push(s);
+            if (base.includes('Get Up') && me.reactions.state === 'animated' && s !== 'Get Up') return true;
+        });
+        expect(base.join('>')).toMatch(/^[^>]+>Ragdoll>Get Up>/);
+        expect(me.reactions.state).toBe('animated');
     });
 
     it('nearly hit twice, an enemy runs for cover and crouches where the shooter cannot see it', async () => {

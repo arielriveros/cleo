@@ -1,0 +1,71 @@
+{
+  "id": "b442e68a49204a43986791fe7de3bea3",
+  "name": "Hit Reactions",
+  "rigId": "1ca1de6215e2febc1b4ec0cb651189eb",
+  "mode": "2d",
+  "xAxis": {
+    "name": "Angle",
+    "min": -180,
+    "max": 180,
+    "smoothing": 0
+  },
+  "yAxis": {
+    "name": "Height",
+    "min": 0,
+    "max": 1,
+    "smoothing": 0
+  },
+  "weightSmoothing": 0,
+  "samples": [
+    {
+      "clipName": "Hit Front",
+      "x": 0,
+      "y": 0.6
+    },
+    {
+      "clipName": "Hit Left",
+      "x": 90,
+      "y": 0.6
+    },
+    {
+      "clipName": "Hit Right",
+      "x": -90,
+      "y": 0.6
+    },
+    {
+      "clipName": "Hit Back",
+      "x": 180,
+      "y": 0.6
+    },
+    {
+      "clipName": "Hit Back",
+      "x": -180,
+      "y": 0.6
+    },
+    {
+      "clipName": "Hit Head Front",
+      "x": 0,
+      "y": 0.92
+    },
+    {
+      "clipName": "Hit Head Left",
+      "x": 90,
+      "y": 0.92
+    },
+    {
+      "clipName": "Hit Head Right",
+      "x": -90,
+      "y": 0.92
+    },
+    {
+      "clipName": "Hit Head Back",
+      "x": 180,
+      "y": 0.92
+    },
+    {
+      "clipName": "Hit Head Back",
+      "x": -180,
+      "y": 0.92
+    }
+  ]
+}

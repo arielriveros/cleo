@@ -585,14 +585,19 @@ describe.skipIf(!present)('the Sandbox example project', { timeout: 300_000 }, (
     it('names only clips its skeleton owns, and links every parameter to something that exists', () => {
         const own = library('animations').filter(a => a.rigId === rig().id)
         const clipNames = new Set(own.map(a => a.clips[0].name));
-        // Its own clips, and the get-up clips its reactions play: imported with skeletons of their own (Mixamo's)
-        // and linked to it, retargeted onto the Mannequin when they play.
+        // Its own clips, the get-up clips (Mixamo's, imported with skeletons of their own) and the hit flinches (made
+        // in Cleo Creator on its mannequin), linked to it and retargeted onto the Mannequin when they play.
         const linked = library('animations').filter(a => rig().animationIds.includes(a.id) && a.rigId !== rig().id);
-        expect(linked.map(a => a.name).sort()).toEqual(['Getting Up', 'Stand Up']);
+        const hits = ['Hit Back', 'Hit Front', 'Hit Head Back', 'Hit Head Front', 'Hit Head Left', 'Hit Head Right', 'Hit Left', 'Hit Right'];
+        expect(linked.map(a => a.name).sort()).toEqual(['Getting Up', ...hits, 'Stand Up']);
         expect(new Set(rig().animationIds)).toEqual(new Set([...own, ...linked].map(a => a.id)));
+        const linkedNames = new Set(linked.map(a => a.clips[0].name));
         const sm = machine();
         for (const s of sm.states) {
             if (s.field) for (const sample of s.field.samples) expect(clipNames.has(sample.clipName), sample.clipName).toBe(true);
+            // A Get Up state rises on the linked get-up clips; a Ragdoll state holds the pose it is entered with.
+            else if (s.getUp) for (const c of [s.getUp.faceUp, s.getUp.faceDown]) expect(linkedNames.has(c), `${s.name}: ${c}`).toBe(true);
+            else if (s.ragdoll) expect(s.clipName, s.name).toBe('');
             else expect(clipNames.has(s.clipName), `${s.name}: ${s.clipName}`).toBe(true);
         }
         // The layers' blend spaces (the Look layer's) play clips the skeleton owns too; a pose sample or state holds a
@@ -601,7 +606,8 @@ describe.skipIf(!present)('the Sandbox example project', { timeout: 300_000 }, (
         for (const l of sm.layers) for (const s of l.states) {
             if (s.field) for (const sample of s.field.samples) {
                 if (sample.poseRef) expect(poseIds.has(sample.poseRef.poseId) && !!s.field.poses[sample.clipName], `${l.name}: ${sample.clipName}`).toBe(true);
-                else expect(clipNames.has(sample.clipName), `${l.name}: ${sample.clipName}`).toBe(true);
+                // The Hit Reaction layer's blend space plays the Creator's flinches.
+                else expect(clipNames.has(sample.clipName) || linkedNames.has(sample.clipName), `${l.name}: ${sample.clipName}`).toBe(true);
             }
             else if (s.poseRef) expect(poseIds.has(s.poseRef.poseId) && !!s.pose, `${l.name}: ${s.name}`).toBe(true);
             // An empty state (the Recoil layer's Off) adds nothing.
@@ -621,9 +627,14 @@ describe.skipIf(!present)('the Sandbox example project', { timeout: 300_000 }, (
         // The car's two triggers (fired by name: SandboxPlayer's enterTrigger and exitTrigger) are the only parameters
         // nothing links: everything else the machine reads by itself.
         // The car's triggers, and each gun's recoil (the Recoil layer's kick, raised by the holder on every shot).
-        expect(sm.parameters.filter((p: any) => p.type === 'trigger').map((p: any) => p.name)).toEqual(['EnterCar', 'ExitCar', 'PistolFire', 'RifleFire', 'ShotgunFire']);
+        // Hit fires on every hit the character takes (its reactions' hit count); Trip is the player's key.
+        expect(sm.parameters.filter((p: any) => p.type === 'trigger').map((p: any) => p.name)).toEqual(['EnterCar', 'ExitCar', 'PistolFire', 'RifleFire', 'ShotgunFire', 'Hit', 'Trip']);
         for (const p of sm.parameters) {
-            if (p.type === 'trigger') continue;
+            if (p.type === 'trigger') {
+                // A trigger linked to a count fires on a built-in that counts.
+                if (p.variable) expect(NODE_BUILTINS[p.variable.varName]?.counter, `${p.name}: ${p.variable.varName}`).toBe(true);
+                continue;
+            }
             expect(p.variable.nodeRef).toBe('parent');
             if (p.variable.source === 'builtin') expect(NODE_BUILTINS[p.variable.varName], p.variable.varName).toBeDefined();
             else expect(['moveDir', 'isJumping', 'turnRequest', 'crouched'].includes(p.variable.varName) || scriptFields.has(p.variable.varName), p.variable.varName).toBe(true);
@@ -631,10 +642,11 @@ describe.skipIf(!present)('the Sandbox example project', { timeout: 300_000 }, (
         const params = new Set(sm.parameters.map((p: any) => p.name));
         const conds = (c: any): any[] => !c ? [] : c.children ? c.children.flatMap(conds) : [c];
         for (const t of sm.transitions) for (const c of conds(t.condition)) expect(params.has(c.param), c.param).toBe(true);
-        // Only the turns, the stop (which plants sideways), the hard landing (which crouches where it came down) and
-        // getting in and out of the car (from the door to the seat and back) drive the character with their root motion.
+        // Only the turns, the stop (which plants sideways), the hard landing (which crouches where it came down),
+        // getting in and out of the car (from the door to the seat and back) and Mixamo's Stand Up (played anywhere but
+        // a Get Up state, which lines the body up itself) drive the character with their root motion.
         const rootMotion = library('animations').filter(a => a.clips[0].rootMotion).map(a => a.name).sort();
-        expect(rootMotion).toEqual(['CarEnter', 'CarExit', 'CrouchTurn90L', 'CrouchTurn90R', 'LandHard', 'Rifle CrouchTurn90L', 'Rifle CrouchTurn90R', 'Rifle Turn90L', 'Rifle Turn90R', 'RunTurnL', 'RunTurnR', 'Stop', 'StopMirror', 'Turn180L', 'Turn180R', 'Turn90L', 'Turn90R']);
+        expect(rootMotion).toEqual(['CarEnter', 'CarExit', 'CrouchTurn90L', 'CrouchTurn90R', 'LandHard', 'Rifle CrouchTurn90L', 'Rifle CrouchTurn90R', 'Rifle Turn90L', 'Rifle Turn90R', 'RunTurnL', 'RunTurnR', 'Stand Up', 'Stop', 'StopMirror', 'Turn180L', 'Turn180R', 'Turn90L', 'Turn90R']);
     });
 
     it('ships the current scripts and the actions they read', () => {
@@ -1128,7 +1140,7 @@ describe.skipIf(!present)('the Sandbox example project', { timeout: 300_000 }, (
             ['Lowered', 'additive', 'LoweredWeight'],
             ['Lean Left', 'additive', 'LeanLeft'], ['Lean Right', 'additive', 'LeanRight'], ['Lean Forward', 'additive', 'LeanForward'],
             ['Pistol Aim', 'additive', 'PistolAimWeight'], ['Rifle Aim', 'additive', 'RifleAimWeight'], ['Shotgun Aim', 'additive', 'ShotgunAimWeight'],
-            ['Recoil', 'additive', undefined], ['Look', 'additive', 'LookWeight'], ['Look Head', 'additive', 'LookHeadWeight']]);
+            ['Recoil', 'additive', undefined], ['Hit Reaction', 'additive', 'HasControl'], ['Look', 'additive', 'LookWeight'], ['Look Head', 'additive', 'LookHeadWeight']]);
         const layers = machine().layers.filter((l: any) => /^Lean/.test(l.name));
         const mask = library('boneMasks').find((m: any) => m.name === 'Lean');
         expect(Object.keys(mask.weights).map(n => n.replace(/^.*:/, '')).sort()).toEqual(
@@ -3063,11 +3075,70 @@ describe.skipIf(!present)('the Sandbox example project', { timeout: 300_000 }, (
         expect(vec3.distance(crate.worldPosition as vec3, at), 'shoved').toBeGreaterThan(0.3);
     });
 
+    it("puts its body's falls in its graph: Down holds a Ragdoll and a Get Up state, followed into from anywhere and up on Mixamo's clips", () => {
+        const sm = machine();
+        const state = (n: string) => sm.states.find((s: any) => s.name === n);
+        expect(sm.groups.find((g: any) => g.name === 'Down').states).toEqual(['Ragdoll', 'Get Up']);
+        // Entered on its feet (the player's Trip key) its feet are taken from under it; after a hit it only holds the body.
+        expect(state('Ragdoll').ragdoll).toEqual({ start: 'trip' });
+        expect(state('Ragdoll').triggers).toEqual([{ trigger: 'Trip', blendTime: 0.1 }]);
+        expect(state('Get Up').getUp).toEqual({ faceUp: 'Stand Up', faceDown: 'Getting Up' });
+        const way = (from: string, to: string) => sm.transitions.filter((t: any) => t.from === from && t.to === to);
+        // First of the ways from anywhere: a fall interrupts whatever the graph is doing.
+        expect(sm.transitions[0]).toMatchObject({ from: '*', to: 'Ragdoll', conditions: [{ param: 'Ragdolled', op: 'true' }] });
+        expect(way('Ragdoll', 'Get Up')[0].conditions).toEqual([{ param: 'CanGetUp', op: 'true' }]);
+        expect(way('Ragdoll', 'Pick Idle')[0].conditions).toEqual([{ param: 'Ragdolled', op: 'false' }]);
+        expect(way('Get Up', 'Pick Idle')[0]).toMatchObject({ hasExitTime: true, exitTime: 0.95 });
+        const linked = (name: string) => sm.parameters.find((p: any) => p.name === name)?.variable?.varName;
+        expect(['Ragdolled', 'CanGetUp', 'HasControl', 'HitAngle', 'HitHeight', 'Hit'].map(linked)).toEqual(['ragdolled', 'canGetUp', 'hasControl', 'hitAngle', 'hitHeight', 'hitCount']);
+        expect(sm.transitions.length).toBeLessThan(210);
+    });
+
+    it('says how its states take hits: no reaction in the car, braced crouched, the gun hand on its grip', () => {
+        const sm = machine();
+        const state = (n: string) => sm.states.find((s: any) => s.name === n);
+        for (const s of ['CarEnter', 'CarDrive', 'CarExit']) expect(state(s).reactions, s).toEqual({ react: 'none' });
+        for (const s of sm.groups.find((g: any) => g.name === 'Crouching').states) if (state(s)) expect(state(s).reactions, s).toEqual({ force: 0.6, shove: 0.5 });
+        for (const layer of ['Pistol', 'Rifle', 'Shotgun']) {
+            const l = sm.layers.find((x: any) => x.name === layer);
+            for (const s of l.states) {
+                const want = ['Carry', 'Crouch', 'Sprint'].includes(s.name) ? { busyHands: 'right' } : s.name === 'Reload' ? { busyHands: 'both' } : undefined;
+                expect(s.reactions, `${layer} ${s.name}`).toEqual(want);
+            }
+        }
+    });
+
+    it('flinches on a layer of its own by where a hit came from and how high: the Creator clips in a blend space', () => {
+        const l = machine().layers.find((x: any) => x.name === 'Hit Reaction');
+        const mask = library('boneMasks').find((m: any) => m.name === 'Hit');
+        expect([l.maskId, l.mask]).toEqual([mask.id, mask.weights]);
+        expect(Object.keys(mask.weights).map(n => n.replace(/^.*:/, '')).sort()).toEqual(
+            ['Head', 'LeftArm', 'LeftForeArm', 'LeftShoulder', 'Neck', 'RightArm', 'RightForeArm', 'RightShoulder', 'Spine', 'Spine1', 'Spine2']);
+        const [off, hit] = l.states;
+        expect([off.name, off.isEntry, off.clipName]).toEqual(['Off', true, '']);
+        expect(hit).toMatchObject({ name: 'Hit', loop: false, fieldInputs: { x: 'HitAngle', y: 'HitHeight' }, triggers: [{ trigger: 'Hit', blendTime: 0.03 }] });
+        expect(l.transitions).toEqual([{ from: 'Hit', to: 'Off', conditions: [], hasExitTime: true, exitTime: 0.9, blendTime: 0.15 }]);
+        // From in front, its left, its right, behind (both ends of the angle), on the trunk and on the head.
+        const at = (x: number, y: number) => hit.field.samples.find((s: any) => s.x === x && s.y === y)?.clipName;
+        expect([at(0, 0.6), at(90, 0.6), at(-90, 0.6), at(180, 0.6), at(-180, 0.6)]).toEqual(['Hit Front', 'Hit Left', 'Hit Right', 'Hit Back', 'Hit Back']);
+        expect([at(0, 0.92), at(90, 0.92), at(-90, 0.92), at(180, 0.92)]).toEqual(['Hit Head Front', 'Hit Head Left', 'Hit Head Right', 'Hit Head Back']);
+        expect(hit.field.samples).toEqual(library('animationFields').find((f: any) => f.name === 'Hit Reactions').samples);
+        // Each flinch starts and ends on the pose it adds nothing to (an additive clip measures from its first frame).
+        for (const a of library('animations').filter(x => /^Hit /.test(x.name))) {
+            const clip = a.clips[0];
+            for (const ch of clip.channels.filter((c: any) => c.targetPath === 'rotation')) {
+                const s = clip.samplers[ch.samplerIndex], o = s.output, n = s.input.length;
+                const first = [o[0], o[1], o[2], o[3]], last = [o[(n - 1) * 4], o[(n - 1) * 4 + 1], o[(n - 1) * 4 + 2], o[(n - 1) * 4 + 3]];
+                expect(Math.abs(first[0] * last[0] + first[1] * last[1] + first[2] * last[2] + first[3] * last[3]), `${a.name}`).toBeGreaterThan(0.9999);
+            }
+        }
+    });
+
     it('groups its turns, stops, running turns, air, landings and the car, each state in one group', () => {
         const sm = machine();
         const states = new Set(sm.states.map((s: any) => s.name));
         const forks = new Set((sm.forks ?? []).map((f: any) => f.name));
-        expect(sm.groups.map((g: any) => g.name)).toEqual(['Turning', 'Stopping', 'Running Turn', 'Air', 'Landing', 'Car', 'Crouching', 'Standing', 'Moving']);
+        expect(sm.groups.map((g: any) => g.name)).toEqual(['Turning', 'Stopping', 'Running Turn', 'Air', 'Landing', 'Car', 'Crouching', 'Standing', 'Moving', 'Down']);
         const seen = new Set<string>();
         for (const g of sm.groups) {
             expect(states.has(g.name) || forks.has(g.name), `${g.name} is not also a state or a fork`).toBe(false);

@@ -15,7 +15,7 @@ describe.skipIf(!dataReady())('state groups on the Sandbox animator', () => {
     const top = graphPlan(sm, null)
     // Standing and Moving fold each stance's idle and locomotion (unarmed, pistol, rifle) into one box.
     expect(top.states.sort()).toEqual(['Stairs', 'Start'])
-    expect(top.groups.map(g => g.name)).toEqual(['Turning', 'Stopping', 'Running Turn', 'Air', 'Landing', 'Car', 'Crouching', 'Standing', 'Moving'])
+    expect(top.groups.map(g => g.name)).toEqual(['Turning', 'Stopping', 'Running Turn', 'Air', 'Landing', 'Car', 'Crouching', 'Standing', 'Moving', 'Down'])
     // Its forks are its groups': each drawn inside its group, the group standing for it outside.
     expect(top.forks).toEqual([])
     for (const f of ['Pick Turn', 'Pick Stop', 'Settle', 'Pick Run Turn', 'Take Off']) expect(top.groups.flatMap(g => g.forks)).toContain(f)

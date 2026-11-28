@@ -2167,6 +2167,77 @@
                     "varType": "number",
                     "source": "variable"
                   }
+                },
+                {
+                  "name": "Ragdolled",
+                  "type": "variable",
+                  "default": false,
+                  "variable": {
+                    "nodeRef": "parent",
+                    "varName": "ragdolled",
+                    "varType": "boolean",
+                    "source": "builtin"
+                  }
+                },
+                {
+                  "name": "CanGetUp",
+                  "type": "variable",
+                  "default": false,
+                  "variable": {
+                    "nodeRef": "parent",
+                    "varName": "canGetUp",
+                    "varType": "boolean",
+                    "source": "builtin"
+                  }
+                },
+                {
+                  "name": "HasControl",
+                  "type": "variable",
+                  "default": true,
+                  "variable": {
+                    "nodeRef": "parent",
+                    "varName": "hasControl",
+                    "varType": "boolean",
+                    "source": "builtin"
+                  }
+                },
+                {
+                  "name": "HitAngle",
+                  "type": "variable",
+                  "default": 0,
+                  "variable": {
+                    "nodeRef": "parent",
+                    "varName": "hitAngle",
+                    "varType": "number",
+                    "source": "builtin"
+                  }
+                },
+                {
+                  "name": "HitHeight",
+                  "type": "variable",
+                  "default": 0,
+                  "variable": {
+                    "nodeRef": "parent",
+                    "varName": "hitHeight",
+                    "varType": "number",
+                    "source": "builtin"
+                  }
+                },
+                {
+                  "name": "Hit",
+                  "type": "trigger",
+                  "default": false,
+                  "variable": {
+                    "nodeRef": "parent",
+                    "varName": "hitCount",
+                    "varType": "number",
+                    "source": "builtin"
+                  }
+                },
+                {
+                  "name": "Trip",
+                  "type": "trigger",
+                  "default": false
                 }
               ],
               "states": [
@@ -2525,7 +2596,10 @@
                   ],
                   "footLock": false,
                   "ikWeight": 0,
-                  "holdMovement": true
+                  "holdMovement": true,
+                  "reactions": {
+                    "react": "none"
+                  }
                 },
                 {
                   "name": "CarDrive",
@@ -2536,7 +2610,10 @@
                   "y": 68,
                   "footLock": false,
                   "ikWeight": 0,
-                  "holdMovement": true
+                  "holdMovement": true,
+                  "reactions": {
+                    "react": "none"
+                  }
                 },
                 {
                   "name": "CarExit",
@@ -2553,7 +2630,10 @@
                   ],
                   "footLock": false,
                   "ikWeight": 0,
-                  "holdMovement": true
+                  "holdMovement": true,
+                  "reactions": {
+                    "react": "none"
+                  }
                 },
                 {
                   "name": "Stairs",
@@ -2761,7 +2841,11 @@
                     },
                     "weightSmoothing": 0.04
                   },
-                  "syncGroup": "Crouch"
+                  "syncGroup": "Crouch",
+                  "reactions": {
+                    "force": 0.6,
+                    "shove": 0.5
+                  }
                 },
                 {
                   "name": "CrouchTurn90L",
@@ -2770,7 +2854,11 @@
                   "speed": 1,
                   "x": 612,
                   "y": 329,
-                  "footLock": false
+                  "footLock": false,
+                  "reactions": {
+                    "force": 0.6,
+                    "shove": 0.5
+                  }
                 },
                 {
                   "name": "CrouchTurn90R",
@@ -2779,7 +2867,11 @@
                   "speed": 1,
                   "x": 612,
                   "y": 617,
-                  "footLock": false
+                  "footLock": false,
+                  "reactions": {
+                    "force": 0.6,
+                    "shove": 0.5
+                  }
                 },
                 {
                   "name": "Pistol Idle",
@@ -3348,6 +3440,10 @@
                       "smoothing": 0.03
                     },
                     "weightSmoothing": 0.04
+                  },
+                  "reactions": {
+                    "force": 0.6,
+                    "shove": 0.5
                   }
                 },
                 {
@@ -3479,6 +3575,10 @@
                       "smoothing": 0.03
                     },
                     "weightSmoothing": 0.04
+                  },
+                  "reactions": {
+                    "force": 0.6,
+                    "shove": 0.5
                   }
                 },
                 {
@@ -3506,7 +3606,11 @@
                   "speed": 1,
                   "x": 612,
                   "y": 425,
-                  "footLock": false
+                  "footLock": false,
+                  "reactions": {
+                    "force": 0.6,
+                    "shove": 0.5
+                  }
                 },
                 {
                   "name": "Rifle CrouchTurn90R",
@@ -3515,7 +3619,11 @@
                   "speed": 1,
                   "x": 612,
                   "y": 713,
-                  "footLock": false
+                  "footLock": false,
+                  "reactions": {
+                    "force": 0.6,
+                    "shove": 0.5
+                  }
                 },
                 {
                   "name": "Pistol JumpStand",
@@ -3610,7 +3718,11 @@
                   "speed": 1.5,
                   "footLock": false,
                   "x": 612,
-                  "y": 521
+                  "y": 521,
+                  "reactions": {
+                    "force": 0.6,
+                    "shove": 0.5
+                  }
                 },
                 {
                   "name": "Pistol KneelUp",
@@ -3619,7 +3731,11 @@
                   "speed": 1.6,
                   "footLock": false,
                   "x": 612,
-                  "y": 233
+                  "y": 233,
+                  "reactions": {
+                    "force": 0.6,
+                    "shove": 0.5
+                  }
                 },
                 {
                   "name": "CrouchStand",
@@ -3627,10 +3743,54 @@
                   "loop": false,
                   "speed": 1.8,
                   "x": 306,
-                  "y": 69
+                  "y": 69,
+                  "reactions": {
+                    "force": 0.6,
+                    "shove": 0.5
+                  }
+                },
+                {
+                  "name": "Ragdoll",
+                  "clipName": "",
+                  "loop": true,
+                  "speed": 1,
+                  "ragdoll": {
+                    "start": "trip"
+                  },
+                  "triggers": [
+                    {
+                      "trigger": "Trip",
+                      "blendTime": 0.1
+                    }
+                  ],
+                  "x": 0,
+                  "y": 0
+                },
+                {
+                  "name": "Get Up",
+                  "clipName": "",
+                  "loop": false,
+                  "speed": 1,
+                  "getUp": {
+                    "faceUp": "Stand Up",
+                    "faceDown": "Getting Up"
+                  },
+                  "x": 306,
+                  "y": 0
                 }
               ],
               "transitions": [
+                {
+                  "from": "*",
+                  "to": "Ragdoll",
+                  "conditions": [
+                    {
+                      "param": "Ragdolled",
+                      "op": "true"
+                    }
+                  ],
+                  "blendTime": 0.1
+                },
                 {
                   "from": "Idle",
                   "to": "Crouch Down",
@@ -6622,6 +6782,36 @@
                   "hasExitTime": true,
                   "exitTime": 0.88,
                   "blendTime": 0.3
+                },
+                {
+                  "from": "Ragdoll",
+                  "to": "Get Up",
+                  "conditions": [
+                    {
+                      "param": "CanGetUp",
+                      "op": "true"
+                    }
+                  ],
+                  "blendTime": 0
+                },
+                {
+                  "from": "Ragdoll",
+                  "to": "Pick Idle",
+                  "conditions": [
+                    {
+                      "param": "Ragdolled",
+                      "op": "false"
+                    }
+                  ],
+                  "blendTime": 0.2
+                },
+                {
+                  "from": "Get Up",
+                  "to": "Pick Idle",
+                  "conditions": [],
+                  "hasExitTime": true,
+                  "exitTime": 0.95,
+                  "blendTime": 0.25
                 }
               ],
               "groups": [
@@ -6760,6 +6950,15 @@
                   "entry": "Pick Locomotion",
                   "x": 330,
                   "y": 448
+                },
+                {
+                  "name": "Down",
+                  "states": [
+                    "Ragdoll",
+                    "Get Up"
+                  ],
+                  "x": 990,
+                  "y": 244
                 }
               ],
               "forks": [
@@ -6920,7 +7119,10 @@
                       "meshSpace": 0.5,
                       "isEntry": true,
                       "x": 0,
-                      "y": 240
+                      "y": 240,
+                      "reactions": {
+                        "busyHands": "right"
+                      }
                     },
                     {
                       "name": "Crouch",
@@ -6929,7 +7131,10 @@
                       "speed": 1,
                       "meshSpace": 0.5,
                       "x": 306,
-                      "y": 0
+                      "y": 0,
+                      "reactions": {
+                        "busyHands": "right"
+                      }
                     },
                     {
                       "name": "Sprint",
@@ -6939,7 +7144,10 @@
                       "meshSpace": 0.5,
                       "syncGroup": "Gait",
                       "x": 306,
-                      "y": 96
+                      "y": 96,
+                      "reactions": {
+                        "busyHands": "right"
+                      }
                     },
                     {
                       "name": "Aim",
@@ -7151,6 +7359,9 @@
                             "rotation": [0.639856, 0.000672, 0.043725, 0.76725]
                           }
                         ]
+                      },
+                      "reactions": {
+                        "busyHands": "both"
                       }
                     }
                   ],
@@ -7758,7 +7969,10 @@
                       "meshSpace": 0.5,
                       "isEntry": true,
                       "x": 0,
-                      "y": 240
+                      "y": 240,
+                      "reactions": {
+                        "busyHands": "right"
+                      }
                     },
                     {
                       "name": "Crouch",
@@ -7767,7 +7981,10 @@
                       "speed": 1,
                       "meshSpace": 0.5,
                       "x": 306,
-                      "y": 0
+                      "y": 0,
+                      "reactions": {
+                        "busyHands": "right"
+                      }
                     },
                     {
                       "name": "Sprint",
@@ -7777,7 +7994,10 @@
                       "meshSpace": 0.5,
                       "syncGroup": "Gait",
                       "x": 306,
-                      "y": 96
+                      "y": 96,
+                      "reactions": {
+                        "busyHands": "right"
+                      }
                     },
                     {
                       "name": "Aim",
@@ -7804,7 +8024,10 @@
                       "speed": 0.75,
                       "meshSpace": 0.5,
                       "x": 306,
-                      "y": 384
+                      "y": 384,
+                      "reactions": {
+                        "busyHands": "both"
+                      }
                     }
                   ],
                   "transitions": [
@@ -8410,7 +8633,10 @@
                       "meshSpace": 0.5,
                       "isEntry": true,
                       "x": 0,
-                      "y": 240
+                      "y": 240,
+                      "reactions": {
+                        "busyHands": "right"
+                      }
                     },
                     {
                       "name": "Crouch",
@@ -8419,7 +8645,10 @@
                       "speed": 1,
                       "meshSpace": 0.5,
                       "x": 306,
-                      "y": 0
+                      "y": 0,
+                      "reactions": {
+                        "busyHands": "right"
+                      }
                     },
                     {
                       "name": "Sprint",
@@ -8429,7 +8658,10 @@
                       "meshSpace": 0.5,
                       "syncGroup": "Gait",
                       "x": 306,
-                      "y": 96
+                      "y": 96,
+                      "reactions": {
+                        "busyHands": "right"
+                      }
                     },
                     {
                       "name": "Aim",
@@ -8456,7 +8688,10 @@
                       "speed": 0.917,
                       "meshSpace": 0.5,
                       "x": 306,
-                      "y": 384
+                      "y": 384,
+                      "reactions": {
+                        "busyHands": "both"
+                      }
                     }
                   ],
                   "transitions": [
@@ -12555,6 +12790,133 @@
                       }
                     ]
                   }
+                },
+                {
+                  "name": "Hit Reaction",
+                  "blend": "additive",
+                  "weightParam": "HasControl",
+                  "maskId": "e76aae1a8ce74349a3dccb9e08eacae9",
+                  "mask": {
+                    "mixamorig1:Spine": 1,
+                    "mixamorig1:Spine1": 1,
+                    "mixamorig1:Spine2": 1,
+                    "mixamorig1:Neck": 1,
+                    "mixamorig1:Head": 1,
+                    "mixamorig1:LeftShoulder": 1,
+                    "mixamorig1:LeftArm": 1,
+                    "mixamorig1:LeftForeArm": 1,
+                    "mixamorig1:RightShoulder": 1,
+                    "mixamorig1:RightArm": 1,
+                    "mixamorig1:RightForeArm": 1
+                  },
+                  "states": [
+                    {
+                      "name": "Off",
+                      "clipName": "",
+                      "loop": true,
+                      "speed": 1,
+                      "isEntry": true,
+                      "x": 40,
+                      "y": 40
+                    },
+                    {
+                      "name": "Hit",
+                      "clipName": "",
+                      "fieldId": "b442e68a49204a43986791fe7de3bea3",
+                      "field": {
+                        "mode": "2d",
+                        "xAxis": {
+                          "name": "Angle",
+                          "min": -180,
+                          "max": 180,
+                          "smoothing": 0
+                        },
+                        "samples": [
+                          {
+                            "clipName": "Hit Front",
+                            "x": 0,
+                            "y": 0.6
+                          },
+                          {
+                            "clipName": "Hit Left",
+                            "x": 90,
+                            "y": 0.6
+                          },
+                          {
+                            "clipName": "Hit Right",
+                            "x": -90,
+                            "y": 0.6
+                          },
+                          {
+                            "clipName": "Hit Back",
+                            "x": 180,
+                            "y": 0.6
+                          },
+                          {
+                            "clipName": "Hit Back",
+                            "x": -180,
+                            "y": 0.6
+                          },
+                          {
+                            "clipName": "Hit Head Front",
+                            "x": 0,
+                            "y": 0.92
+                          },
+                          {
+                            "clipName": "Hit Head Left",
+                            "x": 90,
+                            "y": 0.92
+                          },
+                          {
+                            "clipName": "Hit Head Right",
+                            "x": -90,
+                            "y": 0.92
+                          },
+                          {
+                            "clipName": "Hit Head Back",
+                            "x": 180,
+                            "y": 0.92
+                          },
+                          {
+                            "clipName": "Hit Head Back",
+                            "x": -180,
+                            "y": 0.92
+                          }
+                        ],
+                        "yAxis": {
+                          "name": "Height",
+                          "min": 0,
+                          "max": 1,
+                          "smoothing": 0
+                        },
+                        "weightSmoothing": 0
+                      },
+                      "fieldInputs": {
+                        "x": "HitAngle",
+                        "y": "HitHeight"
+                      },
+                      "loop": false,
+                      "speed": 1,
+                      "triggers": [
+                        {
+                          "trigger": "Hit",
+                          "blendTime": 0.03
+                        }
+                      ],
+                      "x": 306,
+                      "y": 40
+                    }
+                  ],
+                  "transitions": [
+                    {
+                      "from": "Hit",
+                      "to": "Off",
+                      "conditions": [],
+                      "hasExitTime": true,
+                      "exitTime": 0.9,
+                      "blendTime": 0.15
+                    }
+                  ]
                 },
                 {
                   "name": "Look",

@@ -537,7 +537,8 @@
           "targetNodeIndex": 100,
           "targetPath": "rotation"
         }
-      ]
+      ],
+      "rootMotion": true
     }
   ],
   "sourceSkin": {

@@ -1,6 +1,6 @@
 import { Game, Input, MathUtils, lerp } from 'cleo'
 import type { ColliderNode, Node, UIPanelNode, UITextNode } from 'cleo'
-import { attribute, child } from 'cleo/decorators'
+import { animTrigger, attribute, child } from 'cleo/decorators'
 import SandboxCharacterNode from '@/Characters/Mannequin/Scripts/SandboxCharacter'
 
 /**
@@ -33,7 +33,8 @@ import SandboxCharacterNode from '@/Characters/Mannequin/Scripts/SandboxCharacte
  *     down the sights (`ads`, a narrower lens and a slower mouse, the background softened), the Fire, AimFire, Pump,
  *     Equip and Reload clips, the viewmodel kept out of walls; the body faces the camera, sprinting only ahead;
  *   - the CAR: it is the one character that drives (`canDrive`);
- *   - its REACTIONS, for trying them out: Trip (T) knocks its feet from under it, Shove (G) pushes it back off balance.
+ *   - its REACTIONS, for trying them out: Trip (T) fires the animator's Trip trigger, whose Ragdoll state takes its feet
+ *     from under it (the graph has the body until its Get Up state stands it up), Shove (G) pushes it back off balance.
  *     Shots do not move it (`reactsToShots` false): an enemy's rounds would take the game from the hands playing it.
  */
 /** The weapons' viewmodels under the camera: 1 the pistol, 2 the rifle, 3 the shotgun. */
@@ -284,12 +285,19 @@ export default class SandboxPlayerNode extends SandboxCharacterNode {
 
     /** Trip (T) knocks its feet from under it, Shove (G) pushes it back off balance: for trying the reactions out. */
     protected provoke(reactions: any): void {
-        if (Input.started('Trip')) reactions.trip()
+        if (Input.started('Trip')) this._trip()
         else if (Input.started('Shove')) {
             const f = this.worldForward
             reactions.push([-f[0] * 1.3, 0.1, -f[2] * 1.3])
         }
     }
+
+    /**
+     * Trip: the animator's Ragdoll state, entered on its Trip trigger, takes the feet from under the character as it
+     * is entered (its Starts), and keeps the body until the graph's Get Up state stands it up.
+     */
+    @animTrigger('Trip')
+    private _trip() {}
 
     /** The viewmodel of the weapon in the hands, or null. */
     private get _view(): any {
