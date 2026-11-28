@@ -1,7 +1,8 @@
 import { describe, it, expect } from 'vitest'
 import { parseBehaviorMachine, parseFuzzyModel, parseGoalGraph } from 'cleo'
 import {
-  behaviorLinkKey, behaviorLinks, flattenAndTerm, hasWildcardTransitions, renameFuzzySet,
+  behaviorLinkKey, behaviorLinks, behaviorNameProblem, flattenAndTerm, hasWildcardTransitions, removeBehaviorLayer,
+  removeBehaviorState, renameBehaviorLayer, renameBehaviorParameter, renameBehaviorState, renameFuzzySet,
   renameFuzzyVariable, renameGoal, termUsesVariable,
 } from '../src/utils/aiGraphEdits'
 
@@ -225,5 +226,95 @@ describe('behaviorLinks', () => {
 
   it('has nothing to draw for a machine with no transitions', () => {
     expect(behaviorLinks(machine([]))).toHaveLength(0)
+  })
+})
+
+// A brain's behaviour machine names its states in transitions (top level and every layer), names them again in its
+// parameters' Layer state sources, and names parameters in every condition. The Sandbox's Enemy Brain: a Health
+// layer whose Hurt state the Weapon layer reads through "Is Hurt" (Pistol while hurt).
+const BRAIN = parseBehaviorMachine({
+  parameters: [
+    { name: 'Knock', type: 'trigger', default: false, source: { kind: 'reaction', name: 'knockCount' } },
+    { name: 'Hurt For', type: 'number', default: 0, source: { kind: 'layerTime', layer: 'Health' } },
+    { name: 'Is Hurt', type: 'boolean', default: false, source: { kind: 'layerState', layer: 'Health', state: 'Hurt' } },
+    { name: 'Patrolling', type: 'boolean', default: false, source: { kind: 'layerState', layer: '', state: 'patrol' } },
+    { name: 'Distance', type: 'number', default: 0, source: { kind: 'sense', name: 'distanceToTarget' } },
+  ],
+  states: [{ name: 'patrol', goal: 'idle', isEntry: true }, { name: 'Hurt', goal: 'idle' }],
+  transitions: [{ from: 'patrol', to: 'Hurt', condition: { op: 'and', children: [{ param: 'Distance', op: 'lt', value: 3 }] } }],
+  layers: [
+    {
+      name: 'Health',
+      states: [{ name: 'Fine', goal: 'idle', isEntry: true }, { name: 'Hurt', goal: 'idle', outputs: [{ field: 'hurt', value: true }] }],
+      transitions: [
+        { from: '*', to: 'Hurt', restart: true, condition: { op: 'and', children: [{ param: 'Knock', op: 'trigger' }] } },
+        { from: 'Hurt', to: 'Fine', condition: { op: 'and', children: [{ param: 'Hurt For', op: 'gt', value: 12 }] } },
+      ],
+    },
+    {
+      name: 'Weapon',
+      states: [{ name: 'Rifle', goal: 'idle', isEntry: true }, { name: 'Pistol', goal: 'idle' }],
+      transitions: [
+        { from: '*', to: 'Pistol', condition: { op: 'and', children: [{ param: 'Is Hurt', op: 'true' }] } },
+        { from: 'Pistol', to: 'Rifle', condition: { op: 'or', children: [{ op: 'and', children: [{ param: 'Is Hurt', op: 'false' }, { param: 'Distance', op: 'gt', value: 4 }] }] } },
+      ],
+    },
+  ],
+})
+
+describe('behaviour machine renames', () => {
+  it("renames a layer's state, carrying its transitions and the Layer state sources reading it, nothing else", () => {
+    const m = parseBehaviorMachine(renameBehaviorState(BRAIN, 'Health', 'Hurt', 'Hurting'))
+    const health = m.layers!.find(l => l.name === 'Health')!
+    expect(health.states.map(s => s.name)).toEqual(['Fine', 'Hurting'])
+    // Its outputs ride on the state.
+    expect(health.states[1].outputs).toEqual([{ field: 'hurt', value: true }])
+    expect(health.transitions.map(t => `${t.from}>${t.to}`)).toEqual(['*>Hurting', 'Hurting>Fine'])
+    expect(m.parameters.find(p => p.name === 'Is Hurt')!.source).toEqual({ kind: 'layerState', layer: 'Health', state: 'Hurting' })
+    // The top level's own Hurt state is another state: untouched.
+    expect(m.states.map(s => s.name)).toEqual(['patrol', 'Hurt'])
+    expect(m.transitions.map(t => `${t.from}>${t.to}`)).toEqual(['patrol>Hurt'])
+  })
+
+  it('renames a top-level state with its Base Layer state sources; a layer state of the same name is left', () => {
+    const m = parseBehaviorMachine(renameBehaviorState(BRAIN, '', 'patrol', 'walk'))
+    expect(m.states.map(s => s.name)).toEqual(['walk', 'Hurt'])
+    expect(m.transitions[0].from).toBe('walk')
+    expect(m.parameters.find(p => p.name === 'Patrolling')!.source).toEqual({ kind: 'layerState', layer: '', state: 'walk' })
+    const other = parseBehaviorMachine(renameBehaviorState(BRAIN, '', 'Hurt', 'Down'))
+    expect(other.parameters.find(p => p.name === 'Is Hurt')!.source).toEqual({ kind: 'layerState', layer: 'Health', state: 'Hurt' })
+    expect(other.layers![0].states[1].name).toBe('Hurt')
+  })
+
+  it('renames a parameter in every condition, nested, on the top level and in every layer', () => {
+    const m = parseBehaviorMachine(renameBehaviorParameter(BRAIN, 'Is Hurt', 'Wounded'))
+    const weapon = m.layers!.find(l => l.name === 'Weapon')!
+    expect(JSON.stringify(weapon.transitions)).not.toContain('Is Hurt')
+    expect(JSON.stringify(weapon.transitions).match(/Wounded/g)).toHaveLength(2)
+    const d = parseBehaviorMachine(renameBehaviorParameter(BRAIN, 'Distance', 'Range'))
+    expect(JSON.stringify(d)).not.toContain('"Distance"')
+    expect(d.transitions[0].condition).toEqual({ op: 'and', children: [{ param: 'Range', op: 'lt', value: 3 }] })
+    expect(JSON.stringify(d.layers![1].transitions)).toContain('Range')
+  })
+
+  it('renames a layer with its sources, and removing a layer or a state points their sources at constants', () => {
+    const r = parseBehaviorMachine(renameBehaviorLayer(BRAIN, 'Health', 'Body'))
+    expect(r.parameters.find(p => p.name === 'Hurt For')!.source).toEqual({ kind: 'layerTime', layer: 'Body' })
+    expect(r.parameters.find(p => p.name === 'Is Hurt')!.source).toEqual({ kind: 'layerState', layer: 'Body', state: 'Hurt' })
+    const gone = parseBehaviorMachine(removeBehaviorLayer(BRAIN, 'Health'))
+    expect(gone.layers!.map(l => l.name)).toEqual(['Weapon'])
+    expect(gone.parameters.find(p => p.name === 'Hurt For')!.source).toEqual({ kind: 'const', value: 0 })
+    expect(gone.parameters.find(p => p.name === 'Is Hurt')!.source).toEqual({ kind: 'const', value: false })
+    const noState = parseBehaviorMachine(removeBehaviorState(BRAIN, 'Health', 'Hurt'))
+    expect(noState.layers![0].states.map(s => s.name)).toEqual(['Fine'])
+    expect(noState.layers![0].transitions).toEqual([])
+    expect(noState.parameters.find(p => p.name === 'Is Hurt')!.source).toEqual({ kind: 'const', value: false })
+  })
+
+  it('says what is wrong with a name: empty, the wildcard, taken', () => {
+    expect(behaviorNameProblem('  ', [], 'state')).toMatch(/needs a name/)
+    expect(behaviorNameProblem('*', [], 'state')).toMatch(/any state/)
+    expect(behaviorNameProblem(' Fine ', ['Fine'], 'state')).toMatch(/Another state/)
+    expect(behaviorNameProblem('Hurting', ['Fine'], 'state')).toBeNull()
   })
 })

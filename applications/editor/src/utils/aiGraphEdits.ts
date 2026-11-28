@@ -1,4 +1,6 @@
-import type { BehaviorMachine, BehaviorTransition, FuzzyModel, FuzzyTermNode, GoalGraph } from 'cleo'
+import type {
+    BehaviorLayer, BehaviorMachine, BehaviorParameter, BehaviorTransition, ConditionNode, FuzzyModel, FuzzyTermNode, GoalGraph,
+} from 'cleo'
 
 /**
  * Renames inside the AI graphs, as pure functions.
@@ -169,4 +171,113 @@ export function behaviorLinks(machine: BehaviorMachine): BehaviorLink[] {
 /** Whether a machine has any transition that the graph cannot draw. */
 export function hasWildcardTransitions(machine: BehaviorMachine): boolean {
     return machine.transitions.some(t => t.from === '*')
+}
+
+// ---- behaviour machines: names that other things refer to ----
+//
+// A behaviour machine names its states in its transitions (from, to), and a brain's parameters name them too: a
+// Layer state source reads "is layer L in state S", a Layer time source reads layer L. Conditions name parameters.
+// The tolerant reader drops a transition whose state is gone, and a source whose state is gone silently reads false
+// forever: every rename and removal below rewrites the references in the same pass.
+
+/** What is wrong with a name for a state, a parameter or a layer, or null when it is fine. */
+export function behaviorNameProblem(name: string, taken: readonly string[], what: 'state' | 'parameter' | 'layer'): string | null {
+    const n = name.trim()
+    if (!n) return `A ${what} needs a name.`
+    if (n === '*') return '"*" stands for any state.'
+    if (taken.includes(n)) return `Another ${what} is called "${n}".`
+    return null
+}
+
+type States = BehaviorMachine['states']
+
+/** The machine `layer` names ('' the top level), and how to put an edited one back. */
+function machineOf(m: BehaviorMachine, layer: string): { states: States; transitions: BehaviorTransition[]; put: (states: States, transitions: BehaviorTransition[]) => BehaviorMachine } | null {
+    if (!layer) return { states: m.states, transitions: m.transitions, put: (states, transitions) => ({ ...m, states, transitions }) }
+    const l = m.layers?.find(x => x.name === layer)
+    if (!l) return null
+    return {
+        states: l.states, transitions: l.transitions,
+        put: (states, transitions) => ({ ...m, layers: m.layers!.map(x => (x === l ? { ...x, states, transitions } : x)) }),
+    }
+}
+
+const mapParams = (m: BehaviorMachine, f: (p: BehaviorParameter) => BehaviorParameter): BehaviorParameter[] => m.parameters.map(f)
+
+/**
+ * Rename a state of the top-level machine (`layer` '') or of a layer: its transitions follow (a wildcard `*` is
+ * never one), and so does every Layer state source reading it.
+ */
+export function renameBehaviorState(m: BehaviorMachine, layer: string, from: string, to: string): BehaviorMachine {
+    if (from === to) return m
+    const at = machineOf(m, layer)
+    if (!at) return m
+    const next = at.put(
+        at.states.map(s => (s.name === from ? { ...s, name: to } : s)),
+        at.transitions.map(t => ({ ...t, from: t.from === from ? to : t.from, to: t.to === from ? to : t.to })),
+    )
+    return {
+        ...next,
+        parameters: mapParams(next, p => (p.source.kind === 'layerState' && p.source.layer === layer && p.source.state === from
+            ? { ...p, source: { ...p.source, state: to } } : p)),
+    }
+}
+
+/** Remove a state, every transition touching it, and point a Layer state source reading it at a constant false. */
+export function removeBehaviorState(m: BehaviorMachine, layer: string, name: string): BehaviorMachine {
+    const at = machineOf(m, layer)
+    if (!at) return m
+    const next = at.put(at.states.filter(s => s.name !== name), at.transitions.filter(t => t.from !== name && t.to !== name))
+    return {
+        ...next,
+        parameters: mapParams(next, p => (p.source.kind === 'layerState' && p.source.layer === layer && p.source.state === name
+            ? { ...p, source: { kind: 'const', value: false } } : p)),
+    }
+}
+
+/** A condition tree with every leaf reading `from` reading `to`. */
+export function renameParamInCondition<T extends ConditionNode>(node: T, from: string, to: string): T {
+    if ('children' in node) return { ...node, children: node.children.map(c => renameParamInCondition(c, from, to)) }
+    return node.param === from ? { ...node, param: to } : node
+}
+
+const renameInTransitions = (ts: BehaviorTransition[], from: string, to: string): BehaviorTransition[] =>
+    ts.map(t => (t.condition ? { ...t, condition: renameParamInCondition(t.condition, from, to) } : t))
+
+/** Rename a parameter, carrying every condition that reads it: the top level's and every layer's. */
+export function renameBehaviorParameter(m: BehaviorMachine, from: string, to: string): BehaviorMachine {
+    if (from === to) return m
+    return {
+        ...m,
+        parameters: m.parameters.map(p => (p.name === from ? { ...p, name: to } : p)),
+        transitions: renameInTransitions(m.transitions, from, to),
+        ...(m.layers ? { layers: m.layers.map(l => ({ ...l, transitions: renameInTransitions(l.transitions, from, to) })) } : {}),
+    }
+}
+
+/** Rename a layer, carrying the Layer time and Layer state sources that read it. */
+export function renameBehaviorLayer(m: BehaviorMachine, from: string, to: string): BehaviorMachine {
+    if (from === to || !m.layers?.some(l => l.name === from)) return m
+    return {
+        ...m,
+        layers: m.layers.map(l => (l.name === from ? { ...l, name: to } : l)),
+        parameters: mapParams(m, p => ((p.source.kind === 'layerTime' || p.source.kind === 'layerState') && p.source.layer === from
+            ? { ...p, source: { ...p.source, layer: to } } : p)),
+    }
+}
+
+/**
+ * Remove a layer. A source reading it reads a constant (false for its state, 0 for its time) rather than keep a
+ * dangling name: a later layer of the same name would quietly take it over.
+ */
+export function removeBehaviorLayer(m: BehaviorMachine, name: string): BehaviorMachine {
+    const layers: BehaviorLayer[] = (m.layers ?? []).filter(l => l.name !== name)
+    const next: BehaviorMachine = {
+        ...m,
+        parameters: mapParams(m, p => (p.source.kind === 'layerState' && p.source.layer === name ? { ...p, source: { kind: 'const', value: false } }
+            : p.source.kind === 'layerTime' && p.source.layer === name ? { ...p, source: { kind: 'const', value: 0 } } : p)),
+    }
+    if (layers.length) next.layers = layers
+    else delete next.layers
+    return next
 }

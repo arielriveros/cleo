@@ -1,7 +1,9 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react'
-import { ControllerNode } from 'cleo'
+import { ControllerNode, parseBehaviorMachine } from 'cleo'
+import type { BehaviorMachine } from 'cleo'
 import { useCleoEngine } from '../EngineContext'
 import { AiBrainAsset, toRuntimeBrain } from '../../utils/aiBrains'
+import { removeBehaviorLayer, removeBehaviorState, renameBehaviorLayer, renameBehaviorParameter, renameBehaviorState } from '../../utils/aiGraphEdits'
 
 /**
  * The AI-brain tab's working copy, and what is selected inside it.
@@ -71,12 +73,22 @@ interface AiEditorSession {
   commit: () => void
   /** Rename the asset in place. Saved with everything else. */
   rename: (name: string) => void
+  /**
+   * Rename or remove a state of the machine shown (the top level or the layer), or rename a parameter, on the whole
+   * brain: transitions, conditions and Layer state sources follow wherever they are (a parameter's conditions sit in
+   * every layer, which the layer's own view does not hold). Null outside a brain tab: an editor applies the edit to
+   * its own machine then.
+   */
+  renameState: ((from: string, to: string) => void) | null
+  removeState: ((name: string) => void) | null
+  renameParameter: ((from: string, to: string) => void) | null
 }
 
 const EMPTY: AiEditorSession = {
   asset: null, target: null, view: 'graph', setView: () => {},
   selection: null, setSelection: () => {}, version: 0, commit: () => {}, rename: () => {},
   layer: '', setLayer: () => {}, layers: [], baseStates: [], addLayer: () => {}, removeLayer: () => {}, renameLayer: () => {}, setLayerEnabled: () => {},
+  renameState: null, removeState: null, renameParameter: null,
 }
 
 const AiEditorContext = createContext<AiEditorSession>(EMPTY)
@@ -175,6 +187,37 @@ export function AiEditorProvider({ children }: { children: React.ReactNode }) {
     markTabDirty(activeTab.id)
   }, [asset, activeTab.id, markTabDirty])
 
+  /**
+   * An edit of the whole brain's machine (a rename, a removal): the layer view folded in first and rebuilt after, the
+   * selection carried along by `select`.
+   */
+  const editMachine = useCallback((change: (m: BehaviorMachine) => BehaviorMachine, select?: (s: AiSelection) => AiSelection) => {
+    const node = targetRef.current?.node
+    if (!asset || !node || asset.kind === 'goals') return
+    const view = layerRef.current
+    if (layer && view && view.key === `${node.id}|${layer}`) {
+      const v = view.node.behavior
+      node.behavior = {
+        ...node.behavior,
+        parameters: v.parameters,
+        layers: (node.behavior.layers ?? []).map(l => l.name === layer ? { ...l, states: v.states, transitions: v.transitions } : l),
+      }
+    }
+    node.behavior = parseBehaviorMachine(change(node.behavior))
+    asset.machine = node.behavior
+    layerRef.current = null
+    if (select) setSelection(select)
+    setVersion(v => v + 1)
+    markTabDirty(activeTab.id)
+  }, [asset, layer, activeTab.id, markTabDirty])
+  const renameState = useCallback((from: string, to: string) => editMachine(m => renameBehaviorState(m, layer, from, to), s =>
+    s?.kind === 'state' && s.name === from ? { kind: 'state', name: to }
+      : s?.kind === 'transition' && (s.a === from || s.b === from) ? { kind: 'transition', a: s.a === from ? to : s.a, b: s.b === from ? to : s.b }
+        : s), [editMachine, layer])
+  const removeState = useCallback((name: string) => editMachine(m => removeBehaviorState(m, layer, name), s =>
+    (s?.kind === 'state' && s.name === name) || (s?.kind === 'transition' && (s.a === name || s.b === name)) ? null : s), [editMachine, layer])
+  const renameParameter = useCallback((from: string, to: string) => editMachine(m => renameBehaviorParameter(m, from, to)), [editMachine])
+
   const setLayer = useCallback((name: string) => { layerRef.current = null; setSelection(null); setLayerState(name) }, [])
   const addLayer = useCallback(() => {
     const taken = new Set((targetRef.current?.node.behavior.layers ?? []).map(l => l.name))
@@ -182,18 +225,18 @@ export function AiEditorProvider({ children }: { children: React.ReactNode }) {
     for (let i = 2; taken.has(name); i++) name = `Layer ${i}`
     editLayers(ls => [...ls, { name, states: [{ name: 'State', goal: 'idle', isEntry: true }], transitions: [] }], name)
   }, [editLayers])
-  const removeLayer = useCallback((name: string) => editLayers(ls => ls.filter(l => l.name !== name), ''), [editLayers])
+  // A source reading a removed layer reads a constant; a renamed layer's sources follow it (aiGraphEdits).
+  const removeLayer = useCallback((name: string) => {
+    const node = targetRef.current?.node
+    if (node) node.behavior = { ...removeBehaviorLayer(node.behavior, name), layers: node.behavior.layers }
+    editLayers(ls => ls.filter(l => l.name !== name), '')
+  }, [editLayers])
   const renameLayer = useCallback((from: string, to: string) => {
     const next = to.trim()
     const taken = new Set((targetRef.current?.node.behavior.layers ?? []).map(l => l.name))
-    if (!next || next === from || taken.has(next)) return
-    // A source reading the layer (Layer time, Layer state) follows it to its new name.
+    if (!next || next === from || next === '*' || taken.has(next)) return
     const node = targetRef.current?.node
-    if (node) node.behavior = {
-      ...node.behavior,
-      parameters: node.behavior.parameters.map(p => (p.source.kind === 'layerTime' || p.source.kind === 'layerState') && p.source.layer === from
-        ? { ...p, source: { ...p.source, layer: next } } : p),
-    }
+    if (node) node.behavior = { ...renameBehaviorLayer(node.behavior, from, next), layers: node.behavior.layers }
     editLayers(ls => ls.map(l => l.name === from ? { ...l, name: next } : l), next)
   }, [editLayers])
   const setLayerEnabled = useCallback((name: string, on: boolean) =>
@@ -229,7 +272,11 @@ export function AiEditorProvider({ children }: { children: React.ReactNode }) {
   const value = useMemo<AiEditorSession>(() => ({
     asset, target, view, setView, selection, setSelection, version, commit, rename,
     layer, setLayer, layers, baseStates, addLayer, removeLayer, renameLayer, setLayerEnabled,
-  }), [asset, target, view, selection, version, commit, rename, layer, setLayer, layers, baseStates, addLayer, removeLayer, renameLayer, setLayerEnabled])
+    renameState: asset && asset.kind !== 'goals' ? renameState : null,
+    removeState: asset && asset.kind !== 'goals' ? removeState : null,
+    renameParameter: asset && asset.kind !== 'goals' ? renameParameter : null,
+  }), [asset, target, view, selection, version, commit, rename, layer, setLayer, layers, baseStates, addLayer, removeLayer, renameLayer,
+    setLayerEnabled, renameState, removeState, renameParameter])
 
   return <AiEditorContext.Provider value={value}>{children}</AiEditorContext.Provider>
 }

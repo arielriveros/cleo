@@ -8,8 +8,9 @@ import { useAiEditor } from '../../ai/AiEditorContext'
 import ConditionTreeView, { emptyConditionGroup } from '../../../components/ConditionTreeView'
 import ParamSourcePicker from './ParamSourcePicker'
 import type { ConditionParam } from '../../../components/ConditionTreeView'
+import { behaviorNameProblem, removeBehaviorState, renameBehaviorParameter, renameBehaviorState } from '../../../utils/aiGraphEdits'
 import {
-  Button, ButtonWithConfirm, DocScope, SectionTitle, Select, Slider, TextInput, Toggle, hintClass, labelClass,
+  Button, ButtonWithConfirm, DocScope, NameInput, SectionTitle, Select, Slider, TextInput, Toggle, hintClass, labelClass,
 } from '@cleo/app-kit/ui'
 
 /**
@@ -40,7 +41,7 @@ export default function BehaviorEditor({ node, onChange }: Props) {
   const [version, setVersion] = useState(0)
   const machine = node.behavior
   // A brain's layers, for the source picker's Layer time and Layer state (the AI Brain tab's; none elsewhere).
-  const { layers: brainLayers, baseStates: brainBase, asset: brainAsset } = useAiEditor()
+  const { layers: brainLayers, baseStates: brainBase, asset: brainAsset, renameState, removeState, renameParameter } = useAiEditor()
   const layers = brainAsset ? brainLayers : (machine.layers ?? []).map(l => ({ name: l.name, states: l.states.map(s => s.name) }))
   const baseStates = brainAsset ? brainBase : machine.states.map(s => s.name)
 
@@ -69,6 +70,21 @@ export default function BehaviorEditor({ node, onChange }: Props) {
 
   const patchTransition = (index: number, patch: Partial<BehaviorTransition>) =>
     apply({ ...machine, transitions: machine.transitions.map((t, i) => (i === index ? { ...t, ...patch } : t)) })
+
+  // Names are what transitions, conditions and Layer state sources reference: in a brain the session renames them on
+  // the whole brain (every layer); a controller's own machine has no layers, so the edit applies to it here.
+  const onRenameState = (from: string, to: string) => {
+    if (brainAsset && renameState) { renameState(from, to); onChange(); }
+    else apply(renameBehaviorState(machine, '', from, to))
+  }
+  const onRemoveState = (name: string) => {
+    if (brainAsset && removeState) { removeState(name); onChange(); }
+    else apply(removeBehaviorState(machine, '', name))
+  }
+  const onRenameParameter = (from: string, to: string) => {
+    if (brainAsset && renameParameter) { renameParameter(from, to); onChange(); }
+    else apply(renameBehaviorParameter(machine, from, to))
+  }
 
   /** A name nothing is using yet. State names are what transitions reference, so they must be unique. */
   const uniqueName = (base: string, taken: string[]) => {
@@ -100,8 +116,9 @@ export default function BehaviorEditor({ node, onChange }: Props) {
         {machine.parameters.map((p, i) => (
           <div key={i} className='rounded border border-border bg-control/30 p-1.5 flex flex-col gap-1'>
             <div className='flex items-center gap-1'>
-              <TextInput className='flex-1 min-w-0' value={p.name}
-                onChange={(name) => patchParam(i, { name })} />
+              <NameInput className='flex-1 min-w-0' value={p.name}
+                validate={(name) => behaviorNameProblem(name, machine.parameters.filter((_, x) => x !== i).map(x => x.name), 'parameter')}
+                onCommit={(name) => onRenameParameter(p.name, name)} />
               <Select className='w-[86px]' value={p.type}
                 onChange={(e) => patchParam(i, { type: e.target.value as BehaviorParameterType })}>
                 {PARAM_TYPES.map(t => <option key={t} value={t}>{t}</option>)}
@@ -127,36 +144,19 @@ export default function BehaviorEditor({ node, onChange }: Props) {
 
       <SectionTitle title='States' className='mt-3 mb-1' />
       <div className='flex flex-col gap-1'>
-        {machine.states.map(s => (
-          <div key={s.name} className='rounded border border-border bg-control/30 p-1.5 flex flex-col gap-1'>
+        {machine.states.map((s, si) => (
+          // Keyed by position: a rename must not remount the row it is typed in.
+          <div key={si} className='rounded border border-border bg-control/30 p-1.5 flex flex-col gap-1'>
             <div className='flex items-center gap-1'>
-              <TextInput className='flex-1 min-w-0' value={s.name}
-                onChange={(name) => {
-                  const trimmed = name.trim()
-                  if (!trimmed || trimmed === s.name) return
-                  const unique = uniqueName(trimmed, machine.states.filter(x => x.name !== s.name).map(x => x.name))
-                  // Transitions address states BY NAME, so a rename has to carry them along or every
-                  // transition touching this state is silently dropped by the tolerant reader.
-                  apply({
-                    ...machine,
-                    states: machine.states.map(x => (x.name === s.name ? { ...x, name: unique } : x)),
-                    transitions: machine.transitions.map(t => ({
-                      ...t,
-                      from: t.from === s.name ? unique : t.from,
-                      to: t.to === s.name ? unique : t.to,
-                    })),
-                  })
-                }} />
+              <NameInput className='flex-1 min-w-0' value={s.name}
+                validate={(name) => behaviorNameProblem(name, machine.states.filter(x => x.name !== s.name).map(x => x.name), 'state')}
+                onCommit={(name) => onRenameState(s.name, name)} />
               <Select className='w-[92px]' value={s.goal}
                 onChange={(e) => patchState(s.name, { goal: e.target.value as AiGoal })}>
                 {AI_GOALS.map(g => <option key={g} value={g}>{g}</option>)}
               </Select>
               <ButtonWithConfirm variant='remove'
-                onClick={() => apply({
-                  ...machine,
-                  states: machine.states.filter(x => x.name !== s.name),
-                  transitions: machine.transitions.filter(t => t.from !== s.name && t.to !== s.name),
-                })}>✕</ButtonWithConfirm>
+                onClick={() => onRemoveState(s.name)}>✕</ButtonWithConfirm>
             </div>
             <div className='flex items-center gap-2'>
               <Toggle label='Entry' checked={s.isEntry === true} title={ENTRY_HINT}

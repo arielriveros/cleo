@@ -103,6 +103,62 @@ export const TextInput = React.forwardRef<HTMLInputElement, TextInputProps>(func
   );
 });
 
+/**
+ * What a name field commits when it is left (Enter or blur): the trimmed draft when it is valid and different, else
+ * null (nothing to commit: the field goes back to `value`). `validate` returns why a name will not do, or null.
+ */
+export function nameCommit(value: string, draft: string, validate?: (name: string) => string | null): string | null {
+  const next = draft.trim();
+  if (next === value) return null;
+  if (validate?.(next)) return null;
+  return next || null;
+}
+
+export interface NameInputProps
+  extends Omit<React.InputHTMLAttributes<HTMLInputElement>, 'onChange' | 'value' | 'type' | 'onBlur' | 'onKeyDown'> {
+  value: string;
+  /** The new name, once it is committed (Enter, or leaving the field) and valid. */
+  onCommit: (name: string) => void;
+  /** Why a draft will not do (taken, empty...), or null. Shown on the field while it is typed. */
+  validate?: (name: string) => string | null;
+}
+
+/**
+ * A field for a NAME that other things refer to (a state, a parameter, a layer). Typing edits a draft only: the
+ * name changes once, on Enter or on leaving the field, so a rename is not run per keystroke (half-typed names
+ * colliding with others, the row keyed by the name remounting under the caret). Escape puts the name back. An
+ * invalid draft is marked and says why; left invalid, the field goes back to the name.
+ */
+export function NameInput({ value, onCommit, validate, className, title, ...rest }: NameInputProps) {
+  const [draft, setDraft] = React.useState<string | null>(null);
+  // Escape leaves the field without committing: blur would commit otherwise.
+  const cancelled = React.useRef(false);
+  const shown = draft ?? value;
+  const problem = draft !== null && draft.trim() !== value ? validate?.(draft) ?? null : null;
+  return (
+    <input
+      type='text'
+      value={shown}
+      onChange={(e) => setDraft(e.target.value)}
+      onBlur={() => {
+        const was = draft;
+        setDraft(null);
+        if (cancelled.current) { cancelled.current = false; return; }
+        const next = was === null ? null : nameCommit(value, was, validate);
+        if (next !== null) onCommit(next);
+      }}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter') e.currentTarget.blur();
+        else if (e.key === 'Escape') { cancelled.current = true; e.currentTarget.blur(); }
+      }}
+      aria-invalid={problem ? true : undefined}
+      title={problem ?? title}
+      className={cn(controlClass, 'w-full', problem && 'border-warning focus-visible:border-warning', className)}
+      {...rest}
+    />
+  );
+}
+
 export interface SelectProps extends React.SelectHTMLAttributes<HTMLSelectElement> {}
 
 /** Styled native `<select>`. Pass `<option>`s as children. */

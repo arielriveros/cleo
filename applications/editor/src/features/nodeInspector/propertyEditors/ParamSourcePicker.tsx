@@ -1,6 +1,6 @@
 import { BEHAVIOR_SENSES, REACTION_VALUES } from 'cleo'
 import type { BehaviorParameterSource } from 'cleo'
-import { Select, TextInput } from '@cleo/app-kit/ui'
+import { Select, TextInput, cn } from '@cleo/app-kit/ui'
 
 /**
  * Where a value comes from: the one picker for every readable in the AI layer.
@@ -111,9 +111,10 @@ export default function ParamSourcePicker({ source, onChange, fuzzyOutputs = [],
         </Select>
       )}
       {source.kind === 'layerState' && (
-        <Select className='w-[92px]' value={source.state}
+        <Select className={cn('w-[92px]', !layerStates(source.layer).includes(source.state) && 'border-warning')} value={source.state}
+          title={layerStates(source.layer).includes(source.state) ? undefined : `No state "${source.state}" in this layer: it reads false`}
           onChange={(e) => onChange({ kind: 'layerState', layer: source.layer, state: e.target.value })}>
-          {!layerStates(source.layer).includes(source.state) && <option value={source.state}>{source.state || '(none)'}</option>}
+          {!layerStates(source.layer).includes(source.state) && <option value={source.state}>{source.state ? `${source.state} (missing)` : '(none)'}</option>}
           {layerStates(source.layer).map(s => <option key={s} value={s}>{s}</option>)}
         </Select>
       )}

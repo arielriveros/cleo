@@ -121,8 +121,14 @@ The inspector holds the machine's detail:
   state) or **Layer state** (whether a layer holds a state), or a constant.
 - **States** — each state's name and goal, **Entry** (the state the machine starts in, and the one it
   falls back to if the held state is deleted), a target key (empty uses the controller's own) and a
-  **Speed** throttle. Renaming a state carries its transitions along. A **strafe** state also has its **Side**
-  (**Auto** steps off the target's path; **Left**, **Right**) and the distance it **Keep**s.
+  **Speed** throttle. A **strafe** state also has its **Side** (**Auto** steps off the target's path; **Left**,
+  **Right**) and the distance it **Keep**s.
+- **Names** — a state's, a parameter's or a layer's name changes once you press Enter or leave the field (Escape
+  puts it back); a name already taken, empty or `*` is marked and not taken. Everything that names it follows:
+  renaming a state carries its transitions and every **Layer state** parameter reading it; renaming a parameter,
+  every condition that reads it, in every layer; renaming a layer, its **Layer time** and **Layer state**
+  parameters. Deleting a state or a layer turns the parameters reading it into constants (false, 0), and a
+  **Layer state** naming a state its layer does not have shows it as *(missing)*.
 - **Outputs** — on any state, of any layer: fields of the pawn it sets while it is held (**+ Output**: the
   field, a number or `true`/`false`, and **held**). A script's field is set as its script reads it
   (`preferredWeapon`, `hurt`), a property through its setter, anything else as a custom variable. Held, it

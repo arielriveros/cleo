@@ -1,6 +1,7 @@
 import { useAiEditor } from './AiEditorContext'
 import BehaviorEditor from '../nodeInspector/propertyEditors/BehaviorEditor'
-import { Button, SectionTitle, TextInput, Toggle, hintClass } from '@cleo/app-kit/ui'
+import { Button, NameInput, SectionTitle, Toggle, hintClass } from '@cleo/app-kit/ui'
+import { behaviorNameProblem } from '../../utils/aiGraphEdits'
 import GoalsEditor from '../nodeInspector/propertyEditors/GoalsEditor'
 import FuzzyEditor from '../nodeInspector/propertyEditors/FuzzyEditor'
 
@@ -31,8 +32,9 @@ function LayerRows() {
     <div className='mb-2'>
       <SectionTitle title={`Layer — ${layer}`} className='mt-2 mb-1' />
       <div className='flex items-center gap-1'>
-        <TextInput className='flex-1 min-w-0' value={layer} title='Layer name (a Layer time or Layer state source names it)'
-          onChange={v => renameLayer(layer, v)} />
+        <NameInput className='flex-1 min-w-0' value={layer} title='Layer name (a Layer time or Layer state source names it)'
+          validate={v => behaviorNameProblem(v, (asset.machine.layers ?? []).map(l => l.name).filter(n => n !== layer), 'layer')}
+          onCommit={v => renameLayer(layer, v)} />
         <span title='Off: the layer is kept but does not run'>
           <Toggle label='runs' checked={data.enabled !== false} onChange={on => setLayerEnabled(layer, on)} />
         </span>
