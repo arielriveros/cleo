@@ -71,6 +71,41 @@ describe.each(BACKENDS)('drives on %s', kind => {
         expect(Math.abs(swingOf(w, r.rod))).toBeLessThan(0.5 * DEG);
     });
 
+    // On Jolt, where reactions run: cannon's native motors are velocity constraints that hold their spring's motion
+    // against any torque from outside, and Rapier's shared spring meets one at a softer equilibrium.
+    if (kind === 'jolt') it("adds a torque asked on top of its spring, in B's frame: the rod swings out by about τ/k", () => {
+        // A hinge rod held straight down by a soft spring (k = I·Ω² ≈ 0.67 × (2π·2)² ≈ 106 N·m/rad); 10 N·m about Z on
+        // top swings it out by about 0.09 rad, and the other way round the other way.
+        const w = make();
+        const r = rod(w, 'hinge');
+        w.setJointDrive(r.joint, { frequency: 2, damping: 1, maxTorque: 200, gravityCompensation: 1 }, [r.rod]);
+        w.setJointTarget(r.joint, IDENTITY, null, [0, 0, 10]);
+        run(w, 180);
+        expect(swingOf(w, r.rod)).toBeGreaterThan(0.06);
+        expect(swingOf(w, r.rod)).toBeLessThan(0.14);
+        w.setJointTarget(r.joint, IDENTITY, null, [0, 0, -10]);
+        run(w, 180);
+        expect(swingOf(w, r.rod)).toBeLessThan(-0.06);
+        // None asked, none added.
+        w.setJointTarget(r.joint, IDENTITY);
+        run(w, 180);
+        expect(Math.abs(swingOf(w, r.rod))).toBeLessThan(0.02);
+    });
+
+    it('sizes its spring to an inertia named outright: ten times the inertia, a far firmer hold', () => {
+        const sag = (inertia?: number) => {
+            const w = make();
+            const r = rod(w, 'hinge');
+            w.setJointDrive(r.joint, { frequency: 1, damping: 1, maxTorque: 500, gravityCompensation: 0, ...(inertia ? { inertia } : {}) }, [r.rod]);
+            w.setJointTarget(r.joint, aboutZ(60 * DEG));
+            run(w, 240);
+            return Math.abs(swingOf(w, r.rod) - 60 * DEG);
+        };
+        // The rod about its end: 2 kg, 1 m, ~0.67 kg·m². Named 6.7, its spring is ten times as stiff, and gravity pulls
+        // it off its target by a tenth as much.
+        expect(sag(6.7)).toBeLessThan(sag() * (kind === 'rapier' ? 0.75 : 0.3));
+    });
+
     it('sags under gravity without its compensation, less the stiffer it is', () => {
         const sag = (frequency: number, gravityCompensation: number) => {
             const w = make();

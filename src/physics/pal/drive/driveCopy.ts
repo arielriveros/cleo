@@ -13,15 +13,16 @@ import type { DriveBodies, DriveSolver } from './driveSolver';
 export interface DriveChanges {
     /**
      * Per drive: [id, slotA, slotB, kind (0 swing, 1 hinge), anchorB×3, axisB×3, frequency, damping, maxTorque,
-     * friction, gravityCompensation, target×4, omega×3, n, n subtree slots].
+     * friction, gravityCompensation, inertia (0: the joint's own), target×4, omega×3, torque×3, n, n subtree slots,
+     * m, m chain slots].
      */
     drives: Float64Array;
     /** Per pin: [slot, order, linearFrequency, angularFrequency, damping, maxForce, maxTorque, target×7, velocity×6]. */
     pins: Float64Array;
 }
 
-/** A drive row's fixed part: its subtree's slots follow it. */
-const DRIVE_HEAD = 23;
+/** A drive row's fixed part: its subtree's slots follow it, then its chain's (counted). */
+const DRIVE_HEAD = 27;
 const PIN_ROW = 20;
 
 /** The main thread's end: what the world's drives and pins are this frame. */
@@ -45,14 +46,16 @@ export class DriveMirror {
         for (const e of solver.drives()) {
             const r = e.record, a = this._slotOf(r.a), b = this._slotOf(r.b);
             if (a === undefined || b === undefined) continue;
-            const subtree: number[] = [];
+            const subtree: number[] = [], chain: number[] = [];
             let whole = true;
             for (const h of r.subtree) { const s = this._slotOf(h); if (s === undefined) { whole = false; break; } subtree.push(s); }
             if (!whole) continue;
+            for (const h of r.chain ?? []) { const s = this._slotOf(h); if (s === undefined) { chain.length = 0; break; } chain.push(s); }
             const d = e.drive;
             rows.push(e.id, a, b, r.kind === 'hinge' ? 1 : 0, r.anchorB[0], r.anchorB[1], r.anchorB[2], r.axisB[0], r.axisB[1], r.axisB[2],
-                d.frequency, d.damping, d.maxTorque, d.friction ?? 0, d.gravityCompensation ?? 0,
-                e.target[0], e.target[1], e.target[2], e.target[3], e.omega[0], e.omega[1], e.omega[2], subtree.length, ...subtree);
+                d.frequency, d.damping, d.maxTorque, d.friction ?? 0, d.gravityCompensation ?? 0, d.inertia ?? 0,
+                e.target[0], e.target[1], e.target[2], e.target[3], e.omega[0], e.omega[1], e.omega[2], e.torque[0], e.torque[1], e.torque[2],
+                subtree.length, ...subtree, chain.length, ...chain);
         }
         const pins: number[] = [];
         for (const p of solver.pins()) {
@@ -71,6 +74,7 @@ export class DriveMirror {
 export class DriveReplica {
     private readonly _target = [0, 0, 0, 1];
     private readonly _omega = [0, 0, 0];
+    private readonly _torque = [0, 0, 0];
     private readonly _pose = [0, 0, 0, 0, 0, 0, 1];
     private readonly _vel = [0, 0, 0, 0, 0, 0];
 
@@ -88,27 +92,32 @@ export class DriveReplica {
         for (let i = 0; i + DRIVE_HEAD <= rows.length;) {
             const id = rows[i], n = rows[i + DRIVE_HEAD - 1];
             const at = i;
-            i += DRIVE_HEAD + n;
+            const m = rows[i + DRIVE_HEAD + n];
+            i += DRIVE_HEAD + n + 1 + m;
             const a = this._handleOf(rows[at + 1]), b = this._handleOf(rows[at + 2]);
             if (a === undefined || b === undefined) continue;
-            const subtree: BodyHandle[] = [];
+            const subtree: BodyHandle[] = [], chain: BodyHandle[] = [];
             for (let k = 0; k < n; k++) { const h = this._handleOf(rows[at + DRIVE_HEAD + k]); if (h !== undefined) subtree.push(h); }
+            for (let k = 0; k < m; k++) { const h = this._handleOf(rows[at + DRIVE_HEAD + n + 1 + k]); if (h !== undefined) chain.push(h); }
             const record = {
                 a, b, kind: rows[at + 3] === 1 ? 'hinge' as const : 'swing' as const,
                 anchorB: [rows[at + 4], rows[at + 5], rows[at + 6]], axisB: [rows[at + 7], rows[at + 8], rows[at + 9]], subtree,
+                ...(chain.length ? { chain } : {}),
             };
             const drive = {
                 frequency: rows[at + 10], damping: rows[at + 11], maxTorque: rows[at + 12],
                 friction: rows[at + 13], gravityCompensation: rows[at + 14],
+                ...(rows[at + 15] > 0 ? { inertia: rows[at + 15] } : {}),
             };
             const joint = this._jointOf?.(id) ?? id;
             const entry = solver.drive(id);
             if (entry && entry.joint !== joint) solver.setDrive(id, null, null);
             solver.setDrive(id, record, drive, this._world, joint);
-            const t = this._target, o = this._omega;
-            for (let k = 0; k < 4; k++) t[k] = rows[at + 15 + k];
-            for (let k = 0; k < 3; k++) o[k] = rows[at + 19 + k];
-            solver.writeTarget(id, t, o);
+            const t = this._target, o = this._omega, q = this._torque;
+            for (let k = 0; k < 4; k++) t[k] = rows[at + 16 + k];
+            for (let k = 0; k < 3; k++) o[k] = rows[at + 20 + k];
+            for (let k = 0; k < 3; k++) q[k] = rows[at + 23 + k];
+            solver.writeTarget(id, t, o, q);
             seen.add(id);
         }
         for (const e of [...solver.drives()]) if (!seen.has(e.id)) solver.setDrive(e.id, null, null);

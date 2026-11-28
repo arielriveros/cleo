@@ -44,6 +44,11 @@ export interface RagdollPartInfo {
     readonly radius: number;
     readonly mass: number;
     readonly layout: RagdollLayoutPart;
+    /**
+     * A knee's or an elbow's planned joint (one cone-twist whose twist is the bend): where its bend is zero (A's
+     * rotation in B's frame, Jolt's rest), the hinge axis in A's frame, and the bend's range (radians, from that rest).
+     */
+    readonly hingeJoint?: { readonly rest: readonly number[]; readonly axis: readonly number[]; readonly lo: number; readonly hi: number };
 }
 
 /** Where a hit landed on a ragdoll: the part and how far from its surface. */
@@ -543,7 +548,7 @@ export class Ragdoll implements PhysicsMappingSource {
                 // Hands and feet are light, short and round: on the ground they rock on their caps for
                 // seconds after everything else is still. Damping their spin costs nothing visible.
                 angularDamping: lp.mass < 0.02 ? Math.max(profile.angularDamping, 0.6) : profile.angularDamping,
-                friction: profile.friction ?? 0.8,
+                friction: /^foot\./.test(roleOf.get(lp.node) ?? '') || /foot/i.test(lp.part.name) ? profile.footFriction ?? 2 : profile.friction ?? 0.8,
                 restitution: profile.restitution ?? 0.05,
                 group: RAGDOLL_GROUP,
                 mask: boneMask(profile.selfCollision),
@@ -595,6 +600,7 @@ export class Ragdoll implements PhysicsMappingSource {
             return [out[0], out[1], out[2]];
         };
         const driveJoint: (JointHandle | null)[] = layout.parts.map(() => null);
+        const hinges: ({ rest: number[]; axis: number[]; lo: number; hi: number } | undefined)[] = layout.parts.map(() => undefined);
         const pivots: { self: [number, number, number]; parent: [number, number, number] }[] = layout.parts.map(() => ({ self: [0, 0, 0], parent: [0, 0, 0] }));
         for (const lp of layout.parts) {
             if (lp.parent < 0) continue;
@@ -618,13 +624,16 @@ export class Ragdoll implements PhysicsMappingSource {
                 const jt = lp.part.joint!;
                 const lo = Math.min(jt.hingeMin, jt.hingeMax) * DEG2RAD, hi = Math.max(jt.hingeMin, jt.hingeMax) * DEG2RAD;
                 const axisA = local(lp.rotation, lp.hingeAxis, null, 1);
+                const rest = hingeRest(pp.rotation, lp.rotation, b.quaternion, a.quaternion, axisA);
                 driveJoint[lp.index] = this._add(a, b, {
                     kind: 'coneTwist', anchorA: pivotA, anchorB: pivotB,
                     axisA, axisB: local(pp.rotation, lp.hingeAxis, null, 1),
                     coneAngle: HINGE_CONE, twistAngle: Math.PI, twistMin: lo, twistMax: hi,
-                    rest: hingeRest(pp.rotation, lp.rotation, b.quaternion, a.quaternion, axisA),
+                    rest,
                     maxForce, collideConnected: false, ...planned,
                 }, lp.index);
+                const an = Math.hypot(axisA[0], axisA[1], axisA[2]) || 1;
+                hinges[lp.index] = { rest: [...rest], axis: [axisA[0] / an, axisA[1] / an, axisA[2] / an], lo, hi };
                 continue;
             }
             if (type === 'hinge' && lp.hingeAxis) {
@@ -654,7 +663,7 @@ export class Ragdoll implements PhysicsMappingSource {
 
         this.solverIterations = Math.max(0, Math.round(profile.solverIterations));
         this._skin = skin;
-        this._buildParts(skin, layout.parts, bodies, scales, driveJoint, pivots);
+        this._buildParts(skin, layout.parts, bodies, scales, driveJoint, pivots, hinges);
         if (this.powered) animator.enablePhysicsMapping(this);
         else animator.enableRagdoll(this._bodies);
         // AFTER the skin is bound to the bodies, so the mesh rises with them rather than staying buried. Not a
@@ -745,13 +754,14 @@ export class Ragdoll implements PhysicsMappingSource {
     private _forgetSent(): void { this._sentMuscle?.fill(NaN); this._sentPin?.fill(NaN); }
     private _sizeSent(): void {
         const n = this._parts.length;
-        if (this._sentMuscle.length !== n * 5) { this._sentMuscle = new Float64Array(n * 5).fill(NaN); this._sentPin = new Float64Array(n * 5).fill(NaN); }
+        if (this._sentMuscle.length !== n * 6) { this._sentMuscle = new Float64Array(n * 6).fill(NaN); this._sentPin = new Float64Array(n * 5).fill(NaN); }
     }
 
     /** The parts' table, and which part carries each joint of the skin (what the animator's mapping reads). */
     private _buildParts(
         skin: Skin, layout: RagdollLayoutPart[], bodies: PhysicsBody[], scales: number[],
         driveJoint: (JointHandle | null)[], pivots: { self: [number, number, number]; parent: [number, number, number] }[],
+        hinges: ({ rest: number[]; axis: number[]; lo: number; hi: number } | undefined)[] = [],
     ): void {
         const roleOf = new Map<number, string>();
         for (const [slot, node] of humanoidRigOf(skin)) if (!roleOf.has(node)) roleOf.set(node, slot);
@@ -767,6 +777,7 @@ export class Ragdoll implements PhysicsMappingSource {
                 joint: lp.parent >= 0 ? driveJoint[lp.index] : null, hinge: (lp.part.joint?.type ?? 'cone') === 'hinge' && !!lp.hingeAxis,
                 subtree: below(lp.index, []), pivotSelf: pivots[lp.index].self, pivotParent: pivots[lp.index].parent,
                 halfLength: lp.length * scales[lp.index] / 2, radius: lp.radius * scales[lp.index], mass: bodies[lp.index].mass, layout: lp,
+                ...(hinges[lp.index] ? { hingeJoint: hinges[lp.index] } : {}),
             };
         });
         this._mapping = new Float32Array(layout.length).fill(1);
@@ -826,19 +837,25 @@ export class Ragdoll implements PhysicsMappingSource {
         const p = this._parts[i];
         if (!p || p.joint === null || this._frozen) return;
         this._sizeSent();
-        const s = this._sentMuscle, k = i * 5;
+        const s = this._sentMuscle, k = i * 6;
         const f = drive ? drive.frequency : -1, d = drive ? drive.damping : -1, t = drive ? drive.maxTorque : -1;
-        const g = drive ? drive.gravityCompensation ?? 0 : -1, r = drive ? drive.friction ?? 0 : -1;
-        if (s[k] === f && s[k + 1] === d && s[k + 2] === t && s[k + 3] === g && s[k + 4] === r) return;
-        s[k] = f; s[k + 1] = d; s[k + 2] = t; s[k + 3] = g; s[k + 4] = r;
-        this._physics.setJointDrive(p.joint, drive, p.subtree);
+        const g = drive ? drive.gravityCompensation ?? 0 : -1, r = drive ? drive.friction ?? 0 : -1, m = drive ? drive.inertia ?? 0 : -1;
+        if (s[k] === f && s[k + 1] === d && s[k + 2] === t && s[k + 3] === g && s[k + 4] === r && s[k + 5] === m) return;
+        s[k] = f; s[k + 1] = d; s[k + 2] = t; s[k + 3] = g; s[k + 4] = r; s[k + 5] = m;
+        // The whole body as the joint's chain: a muscle's spring is sized to what it holds up against the rest of the
+        // body (see DriveSolver), not against its parent part alone.
+        this._physics.setJointDrive(p.joint, drive, p.subtree, this._chainBodies ??= this._parts.map(q => q.body));
     }
+    private _chainBodies: PhysicsBody[] | null = null;
 
-    /** Where part `i`'s muscle turns it: its rotation in its parent's frame, inv(qParent)·qPart, and that target's spin. */
-    public setTarget(i: number, rotation: ArrayLike<number>, angularVelocity?: ArrayLike<number> | null): void {
+    /**
+     * Where part `i`'s muscle turns it: its rotation in its parent's frame, inv(qParent)·qPart, that target's spin,
+     * and a torque to add on top (its parent's frame, N·m: a balance controller's).
+     */
+    public setTarget(i: number, rotation: ArrayLike<number>, angularVelocity?: ArrayLike<number> | null, torque?: ArrayLike<number> | null): void {
         const p = this._parts[i];
         if (!p || p.joint === null || this._frozen) return;
-        this._physics.setJointTarget(p.joint, rotation, angularVelocity);
+        this._physics.setJointTarget(p.joint, rotation, angularVelocity, torque);
     }
 
     /** What part `i`'s muscle did in the last substep: [torque N·m, saturation 0..1, angle to go rad]. */
@@ -958,6 +975,7 @@ export class Ragdoll implements PhysicsMappingSource {
     // PhysicsMappingSource
     public get partCount(): number { return this._parts.length; }
     public mappingWeight(i: number): number { return this._mapping[i] ?? 0; }
+    public partParent(i: number): number { return this._parts[i]?.parent ?? -1; }
     public simulatedPose(i: number, out: number[]): void {
         const b = this._parts[i].body, p = b.position, q = b.quaternion;
         out[0] = p.x; out[1] = p.y; out[2] = p.z; out[3] = q.x; out[4] = q.y; out[5] = q.z; out[6] = q.w;

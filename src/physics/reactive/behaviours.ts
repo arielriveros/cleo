@@ -75,6 +75,8 @@ export interface ReactionContext {
     knock: readonly number[];
     /** Whether a hand may leave what it is doing to hold a wound (a hand on a weapon may not). */
     handFree(side: 'L' | 'R'): boolean;
+    /** Per part: how loose hits have left it (0 none, up to 2), easing off over the set's Recover in. */
+    loose: ArrayLike<number>;
     /** Out cold (a knock-out, a limp Ragdoll state): its muscles keep a third of their strength until it lies still. */
     outCold: boolean;
     /** Rolling onto its back before it gets up (the Roll over behaviour), and which way: +1 its left side up. */
@@ -134,21 +136,23 @@ const hitReact: ReactionBehaviour = {
     update(ctx, c, w) {
         const P = c.params, body = ctx.body;
         const flinch = slotPose(ctx, c, 'flinch');
+        // A struck part loses strength by how loose its hits have left it (looseness adds up round by round and wears
+        // off over Recover in), never below the floor: on its feet the hit reads as a sway on what the animation is
+        // doing, off them its neighbours give a little too.
+        const floor = Math.max(0, Math.min(1, P.weaknessFloor ?? 0.1));
+        for (let i = 0; i < ctx.loose.length && i < body.parts.length; i++) {
+            const L = ctx.loose[i];
+            if (!(L > 0)) continue;
+            const k = Math.max(floor, 1 - (1 - P.weakness) * L);
+            body.torque[i] *= k;
+            body.frequency[i] *= 0.5 + 0.5 * k;
+            body.pin[i] *= k;
+        }
         for (const wound of ctx.wounds) {
             const age = ctx.time - wound.at;
             const part = body.parts[wound.part];
             if (!part) continue;
             zoneReaction(ctx, P, wound, age, w);
-            // The struck part loses strength for a moment, then gets it back: on its feet only that part gives, so the
-            // hit reads as a sway on what the animation is doing. Off them its neighbours give a little too.
-            const keep = P.weakness + (1 - P.weakness) * smooth(age / Math.max(1e-3, P.weaknessTime));
-            for (const i of ctx.standing ? [wound.part] : [wound.part, part.parent, ...part.children]) {
-                if (i < 0) continue;
-                const k = i === wound.part ? keep : 0.5 + 0.5 * keep;
-                body.torque[i] *= k;
-                body.frequency[i] *= 0.5 + 0.5 * k;
-                body.pin[i] *= k;
-            }
             // A snap of the spine and neck away from the hit.
             const kick = Math.hypot(...wound.impulse);
             if (P.snap > 0 && age < 0.2 && kick > 0) {
@@ -162,13 +166,15 @@ const hitReact: ReactionBehaviour = {
             // The head turns to it.
             // On its feet a glance, the head alone and not far (the chest stays on what the animation does); off them
             // the chest turns with it.
-            const glance = w * (1 - smooth((age - P.lookTime * 0.6) / (P.lookTime * 0.4)));
-            if (age < P.lookTime) body.look(point, ctx.standing ? glance * 0.6 : glance, ctx.standing ? 0.5 : 1.1, ctx.standing ? 0 : 0.35);
+            // After a moment (lookDelay: the head turns at about a tenth of a second), for Look for.
+            const lookAge = age - (P.lookDelay ?? 0);
+            const glance = w * smooth(lookAge / 0.12) * (1 - smooth((lookAge - P.lookTime * 0.6) / (P.lookTime * 0.4)));
+            if (lookAge > 0 && lookAge < P.lookTime) body.look(point, ctx.standing ? glance * 0.6 : glance, ctx.standing ? 0.5 : 1.1, ctx.standing ? 0 : 0.35);
             // A hand to it, after a moment, for a while: a free hand (one on a weapon stays there).
             if (wound.hand && ctx.handFree(wound.hand) && age > P.reachDelay && age < P.reachDelay + P.holdTime) {
                 const arm = body.arms[wound.hand];
                 if (!arm) continue;
-                const ramp = smooth((age - P.reachDelay) / 0.25) * (1 - smooth((age - P.reachDelay - P.holdTime + 0.3) / 0.3));
+                const ramp = smooth((age - P.reachDelay) / 0.25) * (1 - smooth((age - P.reachDelay - P.holdTime + RELEASE) / RELEASE));
                 // A wounded arm is brought in front of the chest to meet the hand that holds it.
                 const hurtArm = (part.region === 'arms' || part.region === 'hands') && part.side && ctx.handFree(part.side) ? body.arms[part.side] : undefined;
                 if (hurtArm && body.chest >= 0) {
@@ -197,7 +203,7 @@ const hitReact: ReactionBehaviour = {
                 body.reach(arm, toWrist, w * ramp, pole);
                 // And a string to land the hand there, however the backend's muscles carry the arm; the forearm and
                 // the hand pass through the chest they cross on the way (its contacts would hold them off it).
-                body.pull(arm.end, palmAt, P.reachPull * w * ramp);
+                body.pull(arm.end, palmAt, P.reachPull * w * ramp, body.pointVelocity(wound.part, point));
                 if (ramp > 0.05) body.passThrough[arm.mid] = body.passThrough[arm.end] = 1;
                 // The chest turns a little toward the reach, as a body does reaching across itself.
                 // About the body's own up (its pelvis's), so a body lying down does not twist its spine for it.
@@ -213,6 +219,9 @@ const hitReact: ReactionBehaviour = {
         }
     },
 };
+
+/** How long a hand holding a wound takes to let it go (s): back to its animation without a jerk. */
+const RELEASE = 0.45;
 
 /** 0 → 1 over `rise` seconds, held to `hold`, back to 0 over `fall`: a reflex's envelope. */
 function envelope(age: number, rise: number, hold: number, fall: number): number {
@@ -230,7 +239,8 @@ function envelope(age: number, rise: number, hold: number, fall: number): number
 function zoneReaction(ctx: ReactionContext, P: Record<string, number>, wound: ReactionWound, age: number, w: number): void {
     const body = ctx.body, sev = wound.severity, spine = body.partsOf(['spine']);
     const per = (amount: number) => amount / Math.max(1, spine.length);
-    const pain = P.painLean * sev * envelope(age, 0.2, 1.0, 1.5);
+    // The pain lean is felt, not a reflex: from about 0.15 s on.
+    const pain = P.painLean * sev * envelope(age - 0.15, 0.2, 1.0, 1.5);
     switch (wound.zone) {
         case 'head': {
             // The neck goes loose and comes back over 0.4 s; the snap is the neck's.
@@ -303,6 +313,51 @@ const stepBalance: ReactionBehaviour = {
         const amount = P.leanInto * Math.min(1, flat / Math.max(0.1, ctx.set.thresholds.stumbleSpeed));
         const spine = body.partsOf(['spine']);
         for (const i of spine) body.turnWorld(i, axisAngle(axis, amount / Math.max(1, spine.length)), w);
+    },
+};
+
+/** When each body last had cause to put its arms out (reaction clock). */
+const ARMS_OUT = new WeakMap<ReactionBody, number>();
+
+/**
+ * Shoved, or its trunk turning fast, on its feet: the free arms go out to the sides to keep its balance, and circle
+ * when it turns faster still (Euphoria's bodyBalance arms out and ArmsWindmill). A hand on a weapon stays there; a
+ * hand holding a wound holds it (hitReact composes after this).
+ */
+const armsOut: ReactionBehaviour = {
+    id: 'armsOut', states: ['stagger', 'hitReact'], fade: 0.15,
+    wants(ctx, c) {
+        const P = c.params, body = ctx.body;
+        const wv = body.parts[body.chest].body.angularVelocity, spin = Math.hypot(wv.x, wv.y, wv.z);
+        if (spin > P.spin || Math.hypot(ctx.knock[0], ctx.knock[2]) > P.shove) ARMS_OUT.set(body, ctx.time);
+        const last = ARMS_OUT.get(body);
+        return last !== undefined && ctx.time - last < P.hold;
+    },
+    update(ctx, c, w) {
+        const P = c.params, body = ctx.body, s = ctx.sensors;
+        const wv = body.parts[body.chest].body.angularVelocity, spin = Math.hypot(wv.x, wv.y, wv.z);
+        const mill = P.windmill > 0 && spin > P.windmill;
+        for (const side of ['L', 'R'] as const) {
+            const arm = body.arms[side];
+            if (!arm || !ctx.handFree(side)) continue;
+            const sign = side === 'L' ? 1 : -1;
+            const shoulder = body.pivot(arm.root);
+            const length = 2 * (body.parts[arm.root].halfLength + body.parts[arm.mid].halfLength) * Math.cos(P.elbow / 2);
+            const out = [s.left[0] * sign, 0, s.left[2] * sign];
+            let hand: number[];
+            if (mill) {
+                // Circling forward, the two arms half a turn apart, in a plane just out from the sides.
+                const a = ctx.time * 6.3 + (side === 'L' ? 0 : Math.PI);
+                const f = s.forward;
+                hand = [shoulder[0] + out[0] * 0.25 + (f[0] * Math.cos(a)) * length * 0.8, shoulder[1] + Math.sin(a) * length * 0.8, shoulder[2] + out[2] * 0.25 + (f[2] * Math.cos(a)) * length * 0.8];
+            } else {
+                // Out from the side by Out, down the rest of the way.
+                hand = [shoulder[0] + out[0] * Math.sin(P.abduct) * length, shoulder[1] - Math.cos(P.abduct) * length, shoulder[2] + out[2] * Math.sin(P.abduct) * length];
+            }
+            const pole = [shoulder[0] + out[0] * 0.2 - s.forward[0] * 0.3, shoulder[1] - 0.25, shoulder[2] + out[2] * 0.2 - s.forward[2] * 0.3];
+            body.reach(arm, hand, w, pole);
+            body.tuneAll([arm.root, arm.mid, arm.end], w, { frequency: P.stiffness, damping: 1, holdUp: 1 });
+        }
     },
 };
 
@@ -701,4 +756,4 @@ const getUp: ReactionBehaviour = {
 };
 
 /** Every behaviour, in the order they compose (later ones win where they overlap). */
-export const BEHAVIOURS: readonly ReactionBehaviour[] = [relax, writhe, airborne, tumble, landing, vehicleBail, struck, catchFall, protectHead, stepBalance, rollOver, getUp, hitReact];
+export const BEHAVIOURS: readonly ReactionBehaviour[] = [relax, writhe, airborne, tumble, landing, vehicleBail, struck, catchFall, protectHead, stepBalance, armsOut, rollOver, getUp, hitReact];

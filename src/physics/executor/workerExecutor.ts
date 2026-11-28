@@ -196,6 +196,9 @@ export class WorkerExecutor implements PhysicsExecutor {
         this._post(0);
     }
 
+    /** A step is out and not back: the poses here are the last one's, a step behind the world it is stepping. */
+    public get stepInFlight(): boolean { return this._inFlight; }
+
     /** Deliver what has arrived; whether the worker has answered at least once (see prime). */
     public poll(): boolean {
         this._port.poll();

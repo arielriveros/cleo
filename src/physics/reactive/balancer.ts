@@ -7,6 +7,14 @@ import type { Limb } from './reactionBody';
 // the body will be a moment ahead, no longer and no wider than a stumbling step, the legs tiring step by step, and
 // it gives up and falls when it cannot catch itself. Nothing here refers to where the animation has the character in
 // the world: the character's capsule follows the body (CharacterNode.followBody), never the other way round.
+//
+// Between the steps it stands on its own legs: a planted leg's muscles are sized to the weight it carries (its knee
+// and ankle to the body above them, not to the shin and the foot), its foot gripping (RagdollProfile.footFriction),
+// and the foot it steps with is the one whose step best catches the body (a foot may cross over the other a little to
+// catch a push to the side). The upper body holds the pose it had when it was shoved rather than whatever the
+// locomotion under it does (a walk swinging its arms as the capsule follows the body). A helping hand (Euphoria's
+// StayUpright and its resistAcc) keeps the trunk upright, the hips up and the body slowing over its feet while a foot
+// is down, less as the legs tire.
 
 export type BalanceOutcome = 'falling' | 'recovered' | null;
 type Side = 'L' | 'R';
@@ -17,6 +25,8 @@ export type GiveUp = 'steps' | 'capture' | 'height' | 'tilt' | 'air' | 'time' | 
 const smooth = (v: number) => { const t = v < 0 ? 0 : v > 1 ? 1 : v; return t * t * (3 - 2 * t); };
 /** How far outside its feet the capture point may be (m) and the body still count as caught: no step for that. */
 const CAUGHT = 0.08;
+/** Feet farther apart than the hips' width by this much (m) are brought back under it (Euphoria's legsApartRestep). */
+const LEGS_APART_RESTEP = 0.2;
 const other = (s: Side): Side => (s === 'L' ? 'R' : 'L');
 
 export class Balancer {
@@ -38,13 +48,16 @@ export class Balancer {
     /** Where each planted foot's ankle is held (world), latched as it came down. */
     private readonly _planted: Record<Side, number[] | null> = { L: null, R: null };
     private _height0 = 0;
+    private _hipWidth = 0.18;
     private _tiltFor = 0;
     private _airFor = 0;
     private _stableFor = 0;
     private _sinceLanded = Infinity;
     private _started = false;
+    /** The upper body's targets when it was shoved: what it holds while it steps. */
+    private _upper: { part: number; target: number[] }[] = [];
 
-    /** Compose the legs' targets and the helping hand for this step, by `w` (0..1); P: the Stagger's numbers. */
+    /** Compose the legs' targets, their torques and the trunk's for this step, by `w` (0..1); P: the Stagger's numbers. */
     public update(ctx: ReactionContext, P: Record<string, number>, w: number): void {
         const body = ctx.body, s = ctx.sensors, dt = ctx.dt;
         const legs = { L: body.legs.L, R: body.legs.R };
@@ -55,6 +68,9 @@ export class Balancer {
             this._started = true;
             this._height0 = Math.max(0.3, pelvis[1] - ground);
             for (const side of ['L', 'R'] as const) this._planted[side] = body.pivot(legs[side]!.end);
+            const a = body.pivot(legs.L.root), b = body.pivot(legs.R.root);
+            this._hipWidth = Math.max(0.1, Math.hypot(a[0] - b[0], a[2] - b[2]));
+            for (const i of body.partsOf(['spine', 'neck', 'arms', 'hands'])) this._upper.push({ part: i, target: [...body.target[i]] });
         }
         this._time += dt;
 
@@ -79,22 +95,23 @@ export class Balancer {
         if (this._stableFor > P.recoverTime) { this.outcome = 'recovered'; return; }
 
         const tire = Math.pow(Math.max(0.05, P.tire), Math.max(0, this.steps - 2));
-        const left = s.left;
 
-        // ---- a step: the foot farther from where the body is going, once the last has settled ----
+        // ---- the upper body: the pose it had when it was shoved, not the walk under it ----
+        for (const u of this._upper) body.blend(u.part, u.target, w);
+
+        // ---- a step: the better foot to catch it with, once the last has settled and it has had time to start one ----
         this._sinceLanded += dt;
-        if (!this._swing && this._time > 0.08 && this._sinceLanded > 0.12) {
+        if (!this._swing && this._time > (P.firstStep ?? 0.12) && this._sinceLanded > 0.12) {
             const a = this._planted.L!, b = this._planted.R!;
             const apart = Math.hypot(a[0] - b[0], a[2] - b[2]);
-            const crossed = ((a[0] - b[0]) * left[0] + (a[2] - b[2]) * left[2]) < 0.04;
-            if (s.captureMargin > CAUGHT || crossed || apart < P.widthMin * 0.6) {
-                const cp = s.capture;
-                const d = (p: number[]) => Math.hypot(p[0] - cp[0], p[2] - cp[1]);
-                this._swing = d(a) > d(b) ? 'L' : 'R';
+            const left = s.left;
+            const crossed = ((a[0] - b[0]) * left[0] + (a[2] - b[2]) * left[2]) < -(P.crossMax ?? 0.08);
+            if (s.captureMargin > CAUGHT || crossed || apart < P.widthMin * 0.6 || apart > this._hipWidth + LEGS_APART_RESTEP) {
+                this._swing = this._chooseFoot(ctx, P);
                 this._swingT = 0;
                 const at = body.pivot(legs[this._swing]!.end);
                 this._from[0] = at[0]; this._from[1] = at[1]; this._from[2] = at[2];
-                this._aim(ctx, P, true);
+                this._aim(ctx, P, this._swing, this._to, true);
             }
         }
 
@@ -102,7 +119,7 @@ export class Balancer {
         if (this._swing) {
             const side = this._swing, leg = legs[side]!;
             const progress = Math.min(1, this._swingT / Math.max(0.05, P.stepTime));
-            if (progress < 0.6) this._aim(ctx, P, false);
+            if (progress < 0.6) this._aim(ctx, P, side, this._to, false);
             const k = smooth(progress), arc = P.stepHeight * Math.sin(Math.PI * progress);
             const foot = [this._from[0] + (this._to[0] - this._from[0]) * k, this._from[1] + (this._to[1] - this._from[1]) * k + arc, this._from[2] + (this._to[2] - this._from[2]) * k];
             body.reach(leg, foot, w, kneePole(ctx, leg), flatFoot(ctx, leg));
@@ -120,23 +137,31 @@ export class Balancer {
 
         // ---- the planted feet: held where they came down, the leg reaching from where the hip should be ----
         // Solved as though the hips stood at the height they started at (the foot's target lowered by as much as
-        // they have sunk), so a planted leg pushes the body back up rather than folding under it.
+        // they have sunk), its muscles sized to the weight the leg carries rather than to the leg: a planted knee
+        // holds the body above it.
         const sunk = Math.max(0, this._height0 - (pelvis[1] - ground));
+        let mass = 0;
+        for (const p of body.parts) mass += p.mass;
+        const com = s.com;
         for (const side of ['L', 'R'] as const) {
             if (side === this._swing) continue;
             const leg = legs[side]!, at = this._planted[side]!;
             body.reach(leg, [at[0], at[1] - sunk * 0.9, at[2]], w, kneePole(ctx, leg), flatFoot(ctx, leg));
-            body.tuneAll([leg.root, leg.mid, leg.end], w, { frequency: 6 * Math.sqrt(tire), damping: 1, holdUp: 0.5 });
+            const f = (P.stanceStiffness ?? 1.2) * Math.sqrt(tire);
+            for (const [i, above] of [[leg.end, mass - body.parts[leg.end].mass], [leg.mid, mass - body.parts[leg.end].mass - body.parts[leg.mid].mass], [leg.root, mass - body.parts[leg.end].mass - body.parts[leg.mid].mass - body.parts[leg.root].mass]] as const) {
+                const pv = body.pivot(i), r2 = (com[0] - pv[0]) ** 2 + (com[1] - pv[1]) ** 2 + (com[2] - pv[2]) ** 2;
+                body.tune(i, w, { frequency: i === leg.root ? 0.5 * f : f, damping: 1, holdUp: 0, inertia: Math.max(0.05, above * r2) });
+            }
         }
 
-        // ---- a helping hand (Euphoria's StayUpright): the trunk kept from toppling, the hips from sinking ----
-        // Pushes on the trunk's parts, by their mass, sized to the body; weakening as the legs tire, none once it
-        // gives up. Pushes, never a velocity: with the physics worker the pose read here is a step or two old.
+        // ---- a helping hand (Euphoria's StayUpright and its resistAcc "cheat"): the trunk kept from toppling, the hips
+        // from sinking, the body slowed and drawn back over its feet while they are on the ground. Pushes on the
+        // trunk's parts, by their mass, sized to the body; weakening as the legs tire, none once it gives up. Pushes,
+        // never a velocity: with the physics worker the pose read here is a step or two old.
         const help = Math.max(0, P.assist) * tire * w;
         if (!(help > 0) || !(dt > 0)) return;
         const trunk = body.partsOf(['pelvis', 'spine', 'neck']);
-        let mass = 0, mTrunk = 0, mUpper = 0;
-        for (const p of body.parts) mass += p.mass;
+        let mTrunk = 0, mUpper = 0;
         for (const i of trunk) { mTrunk += body.parts[i].mass; if (i !== body.pelvis) mUpper += body.parts[i].mass; }
         if (!(mTrunk > 0)) return;
         const g = ctx.gravity;
@@ -150,7 +175,7 @@ export class Balancer {
         // Up: half the body's weight, and a 2 Hz spring on how far the hips have sunk below where they started.
         const wh = 2 * Math.PI * 2;
         const low = this._height0 * 0.98 - (pelvis[1] - ground);
-        const lift = Math.max(0, Math.min(mass * g, mass * g * 0.5 + mass * wh * wh * low - 2 * mass * wh * vp.y));
+        const lift = s.feetDown > 0 ? Math.max(0, Math.min(mass * g, mass * g * 0.5 + mass * wh * wh * low - 2 * mass * wh * vp.y)) : 0;
         // Slowed while a foot is down (what an ankle and a hip do against the ground), more on both: what keeps the
         // steps short.
         const brake = s.feetDown >= 2 ? mass * 3 : s.feetDown > 0 ? mass * 1.5 : 0;
@@ -176,25 +201,53 @@ export class Balancer {
         }
     }
 
-    /** Aim the step: a moment ahead of the body, beside the planted foot, no longer or wider than a stumbling step. */
-    private _aim(ctx: ReactionContext, P: Record<string, number>, first: boolean): void {
-        const s = ctx.sensors, side = this._swing!, stance = this._planted[other(side)]!;
+    /** The foot to step with: each aimed, the one whose step leaves the capture point closest to the feet it stands on. */
+    private _chooseFoot(ctx: ReactionContext, P: Record<string, number>): Side {
+        const s = ctx.sensors, cp = s.capture, best = { side: 'L' as Side, cost: Infinity };
+        const t = [0, 0, 0];
+        for (const side of ['L', 'R'] as const) {
+            const stance = this._planted[other(side)]!;
+            const crossing = this._aim(ctx, P, side, t, true);
+            // The capture point's distance to the segment between the stance foot and where this one lands.
+            const ax = stance[0], az = stance[2], bx = t[0], bz = t[2];
+            const dx = bx - ax, dz = bz - az, l2 = dx * dx + dz * dz;
+            const u = l2 > 1e-9 ? Math.max(0, Math.min(1, ((cp[0] - ax) * dx + (cp[1] - az) * dz) / l2)) : 0;
+            let cost = Math.hypot(cp[0] - ax - dx * u, cp[1] - az - dz * u) + (crossing ? 0.05 : 0);
+            // A foot carrying most of the body is slow to lift: lift the other unless that one is far the better step.
+            const mine = this._planted[side]!, d0 = Math.hypot(s.com[0] - mine[0], s.com[2] - mine[2]), d1 = Math.hypot(s.com[0] - stance[0], s.com[2] - stance[2]);
+            if (d0 < 0.4 * (d0 + d1)) cost += 0.08;
+            if (cost < best.cost) { best.cost = cost; best.side = side; }
+        }
+        return best.side;
+    }
+
+    /**
+     * Aim a step of `side` into `out`: a moment ahead of the body, beside the planted foot, no longer or wider than a
+     * stumbling step, crossing over the other by no more than crossMax (in front of it or behind, never through it).
+     * True when the step crosses over.
+     */
+    private _aim(ctx: ReactionContext, P: Record<string, number>, side: Side, out: number[], first: boolean): boolean {
+        const s = ctx.sensors, stance = this._planted[other(side)]!;
         const com = s.com, v = s.velocity, left = s.left;
         const dx = com[0] + v[0] * P.prediction + 0.5 * (com[0] - stance[0]) - stance[0];
         const dz = com[2] + v[2] * P.prediction + 0.5 * (com[2] - stance[2]) - stance[2];
-        // Across the body (to its own side of the planted foot, never across it) and along it.
+        // Across the body (to its own side of the planted foot; across it by a little, passing in front or behind) and along it.
         const sign = side === 'L' ? 1 : -1;
         const fx = left[2], fz = -left[0];
-        const lat = Math.max(P.widthMin, Math.min(P.widthMax, (dx * left[0] + dz * left[2]) * sign));
         let lon = dx * fx + dz * fz;
+        const raw = (dx * left[0] + dz * left[2]) * sign;
+        const crossMax = Math.max(0, P.crossMax ?? 0.08);
+        let lat = Math.min(P.widthMax, raw);
+        if (lat < P.widthMin) lat = Math.abs(lon) > 0.15 ? Math.max(-crossMax, lat) : P.widthMin;
         const most = Math.max(0.05, P.stepLength);
         if (Math.hypot(lat, lon) > most) lon = Math.sign(lon) * Math.sqrt(Math.max(0, most * most - lat * lat));
         const tx = stance[0] + left[0] * lat * sign + fx * lon, tz = stance[2] + left[2] * lat * sign + fz * lon;
-        if (first) { this._to[0] = tx; this._to[1] = stance[1]; this._to[2] = tz; return; }
+        if (first) { out[0] = tx; out[1] = stance[1]; out[2] = tz; return lat < 0; }
         // Re-aimed at no more than 2 m/s: a foot in the air does not dart about.
-        const ex = tx - this._to[0], ez = tz - this._to[2], e = Math.hypot(ex, ez), cap = 2 * ctx.dt;
+        const ex = tx - out[0], ez = tz - out[2], e = Math.hypot(ex, ez), cap = 2 * ctx.dt;
         const k = e > cap ? cap / e : 1;
-        this._to[0] += ex * k; this._to[2] += ez * k; this._to[1] = stance[1];
+        out[0] += ex * k; out[2] += ez * k; out[1] = stance[1];
+        return lat < 0;
     }
 
     private _give(why: GiveUp): void {
@@ -209,11 +262,19 @@ function kneePole(ctx: ReactionContext, leg: Limb): number[] {
     return [k[0] + f[0] * 0.6, k[1], k[2] + f[2] * 0.6];
 }
 
-/** A foot's world rotation flat on the ground, the way the animation turns it about the vertical. */
+/**
+ * A foot's world rotation flat on the ground, turned the way it was planted (its own heading as simulated), not the
+ * way the animation under it turns: a walk's foot yaw has no business on a stagger's step.
+ */
 function flatFoot(ctx: ReactionContext, leg: Limb): number[] {
     // Part frames: Y along the foot (heel to toe).
-    const q = ctx.body.animRotation(leg.end);
+    const q = ctx.body.simRotation(leg.end);
     const y = quatRotateTuple(q, [0, 1, 0]);
-    const n = Math.hypot(y[0], y[2]) || 1;
+    const n = Math.hypot(y[0], y[2]);
+    if (n < 0.3) {
+        // Pointing up or down: the way the body faces instead.
+        const f = ctx.sensors.forward, a = ctx.body.animRotation(leg.end), ya = quatRotateTuple(a, [0, 1, 0]);
+        return quatMultiplyTuple(quatFromToTuple(ya, [f[0], 0, f[2]]), a);
+    }
     return quatMultiplyTuple(quatFromToTuple(y, [y[0] / n, 0, y[2] / n]), q);
 }

@@ -371,14 +371,14 @@ export class CannonWorld implements PhysicsWorld {
 
     // ---- drives ----
 
-    public setJointDrive(j: JointHandle, drive: JointDrive | null, subtree?: readonly BodyHandle[]): void {
+    public setJointDrive(j: JointHandle, drive: JointDrive | null, subtree?: readonly BodyHandle[], chain?: readonly BodyHandle[]): void {
         const desc = this._jointDescs.get(j);
-        const record = drive && desc ? driveRecordOf(desc, subtree) : null;
+        const record = drive && desc ? driveRecordOf(desc, subtree, chain) : null;
         this.drives.setDrive(j, record, record ? drive : null, this);
     }
 
-    public setJointTarget(j: JointHandle, rotation: ArrayLike<number>, angularVelocity?: ArrayLike<number> | null): void {
-        this.drives.setTarget(j, rotation, angularVelocity);
+    public setJointTarget(j: JointHandle, rotation: ArrayLike<number>, angularVelocity?: ArrayLike<number> | null, torque?: ArrayLike<number> | null): void {
+        this.drives.setTarget(j, rotation, angularVelocity, torque);
     }
 
     public readJointDrive(j: JointHandle, out: Out): void { this.drives.report(j, out); }

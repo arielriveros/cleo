@@ -1216,17 +1216,21 @@ export class PhysicsSystem {
    * Give a joint a muscle (see JointDrive), or take it away (null). `subtree`: the bodies it holds up, which
    * its gravity compensation weighs. Its target starts at the rotation the bodies hold now.
    */
-  public setJointDrive(joint: JointHandle, drive: JointDrive | null, subtree?: readonly PhysicsBody[]): void {
+  public setJointDrive(joint: JointHandle, drive: JointDrive | null, subtree?: readonly PhysicsBody[], chain?: readonly PhysicsBody[]): void {
     const world = this._world;
     if (!world) return;
-    let handles: BodyHandle[] | undefined;
+    let handles: BodyHandle[] | undefined, chainHandles: BodyHandle[] | undefined;
     if (subtree) { handles = []; for (const b of subtree) if (b.world === world) handles.push(b.handle); }
-    world.setJointDrive(joint, drive, handles);
+    if (chain) { chainHandles = []; for (const b of chain) if (b.world === world) chainHandles.push(b.handle); }
+    world.setJointDrive(joint, drive, handles, chainHandles);
   }
 
-  /** Where a driven joint turns body A: A's rotation in B's frame [x y z w], and that target's spin in B's frame. */
-  public setJointTarget(joint: JointHandle, rotation: ArrayLike<number>, angularVelocity?: ArrayLike<number> | null): void {
-    this._world?.setJointTarget(joint, rotation, angularVelocity);
+  /**
+   * Where a driven joint turns body A: A's rotation in B's frame [x y z w], that target's spin in B's frame, and a
+   * torque to add on top of the spring (B's frame, N·m).
+   */
+  public setJointTarget(joint: JointHandle, rotation: ArrayLike<number>, angularVelocity?: ArrayLike<number> | null, torque?: ArrayLike<number> | null): void {
+    this._world?.setJointTarget(joint, rotation, angularVelocity, torque);
   }
 
   /** What a driven joint did in the last substep: [torque N·m, saturation 0..1, angle still to go rad]. */
@@ -1979,6 +1983,14 @@ export class PhysicsSystem {
 
   /** Where the step runs now: 'inline' (this thread) or 'worker'. */
   public get executor(): 'inline' | 'worker' { return this._executor?.kind ?? 'inline'; }
+
+  /**
+   * Whether the poses read now are a step behind the world being stepped: the worker's last step is still out
+   * (it is late). On time, or inline, they are the world's own, and nothing read from them needs carrying forward.
+   */
+  public get posesLag(): boolean {
+    return this._executor?.kind === 'worker' && (this._executor as WorkerExecutor).stepInFlight;
+  }
 
   /** The mode set with {@link setWorkerMode}. */
   public get workerMode(): PhysicsWorkerMode { return this._workerMode; }

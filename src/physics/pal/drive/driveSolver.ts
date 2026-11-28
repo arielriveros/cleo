@@ -11,9 +11,12 @@ import type { BodyHandle, BodyPin, JointDrive, MassProperties, Out, V3 } from '.
 //
 // with Ω = 2πf, e the rotation still to go, ω the relative angular velocity measured from the target's own,
 // and M the joint's effective inertia: what it actually turns, everything it holds up (the record's subtree)
-// about its pivot against the parent about the same pivot. That is the inertia the spring meets once the joint
-// carries the subtree round with it, so `frequency` and `damping` mean what they say on a hand and a thigh
-// alike. A backend with its own motors (Jolt) is handed the same stiffness and damping in N·m/rad
+// about its pivot against what it turns against about the same pivot: the rest of its chain when the record
+// names one (a ragdoll: every other part, PhysX articulation drives' way, which is what morpheme's "drive
+// compensation" amounts to; the parent alone would leave a limb under-damped in a chain whose parents are held
+// by muscles of their own), else the parent alone. That is the inertia the spring meets once the joint carries
+// the subtree round with it, so `frequency` and `damping` mean what they say on a hand and a thigh alike. A drive
+// may name its inertia outright (JointDrive.inertia: a planted leg's spring sized to the body it holds up). A backend with its own motors (Jolt) is handed the same stiffness and damping in N·m/rad
 // (k = I·Ω², c = 2ζIΩ, I along each motor axis), so the numbers mean the same there. Gravity compensation and
 // pins are applied here on every backend.
 //
@@ -52,6 +55,11 @@ export interface DriveRecord {
     axisB: readonly number[];
     /** The bodies this joint holds up (A and everything hanging from it): what gravity compensation weighs. */
     subtree: readonly BodyHandle[];
+    /**
+     * Every body of the chain the joint belongs to (a ragdoll's parts), or none: what the joint turns against is
+     * then the rest of it rather than B alone (see the header).
+     */
+    chain?: readonly BodyHandle[];
 }
 
 export interface DriveEntry {
@@ -65,6 +73,11 @@ export interface DriveEntry {
     readonly target: number[];
     /** The target's own angular velocity, in B's frame (what the spring damps relative to). */
     readonly omega: number[];
+    /**
+     * A torque the muscle adds on top of its spring, in B's frame (N·m, on A; its opposite on B): what a balance
+     * controller asks of a joint (an ankle pushing the body back over the foot). Within maxTorque.
+     */
+    readonly torque: number[];
     /** [torque N·m, saturation 0..1, angle still to go rad] after the last substep. */
     readonly report: Float64Array;
     /** Params changed since a backend that drives natively last configured its motor. */
@@ -174,7 +187,7 @@ export class DriveSolver {
         let entry = this._drives.get(id);
         if (!entry) {
             entry = {
-                id, joint, record, drive: { ...drive }, target: [0, 0, 0, 1], omega: [0, 0, 0],
+                id, joint, record, drive: { ...drive }, target: [0, 0, 0, 1], omega: [0, 0, 0], torque: [0, 0, 0],
                 report: new Float64Array(3), dirty: true,
             };
             if (bodies) this._currentRelative(bodies, record, entry.target);
@@ -190,13 +203,17 @@ export class DriveSolver {
             this._refreshMass(bodies, record.a);
             this._refreshMass(bodies, record.b);
             for (const h of record.subtree) this._refreshMass(bodies, h);
+            for (const h of record.chain ?? []) this._refreshMass(bodies, h);
         }
     }
 
     public drive(id: number): DriveEntry | undefined { return this._drives.get(id); }
 
-    /** A's rotation in B's frame to turn toward, and that target's own angular velocity (in B's frame). */
-    public setTarget(id: number, rotation: ArrayLike<number>, angularVelocity?: ArrayLike<number> | null): void {
+    /**
+     * A's rotation in B's frame to turn toward, that target's own angular velocity (in B's frame), and a torque to
+     * add on top of the spring (B's frame; none when absent).
+     */
+    public setTarget(id: number, rotation: ArrayLike<number>, angularVelocity?: ArrayLike<number> | null, torque?: ArrayLike<number> | null): void {
         const e = this._drives.get(id);
         if (!e) return;
         let x = rotation[0], y = rotation[1], z = rotation[2], w = rotation[3];
@@ -209,17 +226,23 @@ export class DriveSolver {
         } else {
             e.omega[0] = e.omega[1] = e.omega[2] = 0;
         }
+        if (torque && Number.isFinite(torque[0] + torque[1] + torque[2])) {
+            e.torque[0] = torque[0]; e.torque[1] = torque[1]; e.torque[2] = torque[2];
+        } else {
+            e.torque[0] = e.torque[1] = e.torque[2] = 0;
+        }
     }
 
     /**
      * Write a drive's target and a pin's as they are held elsewhere, already normalised: what a copy does, so
      * normalising twice cannot move a bit.
      */
-    public writeTarget(id: number, rotation: ArrayLike<number>, angularVelocity: ArrayLike<number>): void {
+    public writeTarget(id: number, rotation: ArrayLike<number>, angularVelocity: ArrayLike<number>, torque?: ArrayLike<number>): void {
         const e = this._drives.get(id);
         if (!e) return;
         for (let i = 0; i < 4; i++) e.target[i] = rotation[i];
         for (let i = 0; i < 3; i++) e.omega[i] = angularVelocity[i];
+        for (let i = 0; i < 3; i++) e.torque[i] = torque ? torque[i] : 0;
     }
 
     public writePinTarget(body: BodyHandle, pose: ArrayLike<number>, velocity: ArrayLike<number>): void {
@@ -364,9 +387,23 @@ export class DriveSolver {
         }
         if (!Number.isFinite(gx + gy + gz)) gx = gy = gz = 0;
 
+        // The torque asked on top of the spring (a balance controller's), in B's frame: on A, its opposite on B.
+        const ff = e.torque;
+        if (ff[0] !== 0 || ff[1] !== 0 || ff[2] !== 0) {
+            const t = this._t3;
+            rotate(B.q, ff[0], ff[1], ff[2], t);
+            const n = Math.hypot(t[0], t[1], t[2]), cap = Math.max(0, d.maxTorque);
+            if (n > cap && n > 0) { const s = cap / n; t[0] *= s; t[1] *= s; t[2] *= s; }
+            if (Number.isFinite(t[0] + t[1] + t[2])) {
+                this._torque(bodies, r.a, A, t[0], t[1], t[2]);
+                this._torque(bodies, r.b, B, -t[0], -t[1], -t[2]);
+                torqueSum += Math.min(n, cap);
+            }
+        }
+
         // K: the joint's effective inverse inertia (see the header).
         const K = this._k9;
-        if (!this._jointInverseInertia(bodies, r, A, B, pivot, K)) return;
+        if (!this._jointInverseInertia(bodies, r, A, B, pivot, K, d.inertia)) return;
 
         // Relative angular velocity, measured from the target's own.
         const om = this._u3;
@@ -465,16 +502,37 @@ export class DriveSolver {
 
     /**
      * K = I_A*⁻¹ + I_B*⁻¹ into `out`: I_A* the inertia of what the joint holds up (its subtree, else A alone)
-     * about the pivot, I_B* the parent's about the same point (none for an immovable parent). False when
-     * nothing can turn.
+     * about the pivot, I_B* what it turns against about the same point: the rest of its chain (none if any of it is
+     * immovable: held, it does not turn back), else the parent alone (none for an immovable parent). An inertia
+     * named outright (`inertia` > 0) is used as it is, the same about every axis. False when nothing can turn.
      */
-    private _jointInverseInertia(bodies: DriveBodies, r: DriveRecord, A: State, B: State, pivot: number[], out: number[]): boolean {
+    private _jointInverseInertia(bodies: DriveBodies, r: DriveRecord, A: State, B: State, pivot: number[], out: number[], inertia?: number): boolean {
+        if (inertia !== undefined && inertia > 0 && Number.isFinite(inertia)) {
+            for (let i = 0; i < 9; i++) out[i] = 0;
+            out[0] = out[4] = out[8] = 1 / inertia;
+            return true;
+        }
         const S = this._s9, inv = this._m9;
         for (let i = 0; i < 9; i++) S[i] = 0;
         if (r.subtree.length === 0) addAbout(S, A, pivot);
         else for (const h of r.subtree) { const s = this._state(bodies, h); if (s && s.enabled && s.mass > 0) addAbout(S, s, pivot); }
         if (!invert3(S, inv)) return false;
         for (let i = 0; i < 9; i++) out[i] = inv[i];
+        const chain = r.chain;
+        if (chain && chain.length > r.subtree.length) {
+            for (let i = 0; i < 9; i++) S[i] = 0;
+            let held = false, any = false;
+            for (const h of chain) {
+                if (h === r.a || r.subtree.includes(h)) continue;
+                const s = this._state(bodies, h);
+                if (!s || !s.enabled) continue;
+                if (!(s.invMass > 0)) { held = true; break; }
+                addAbout(S, s, pivot);
+                any = true;
+            }
+            if (!held && any && invert3(S, inv)) for (let i = 0; i < 9; i++) out[i] += inv[i];
+            return true;
+        }
         if (B.mass > 0) {
             for (let i = 0; i < 9; i++) S[i] = 0;
             addAbout(S, B, pivot);
@@ -761,12 +819,16 @@ function sameRecord(a: DriveRecord, b: DriveRecord): boolean {
     if (a.a !== b.a || a.b !== b.b || a.kind !== b.kind || a.subtree.length !== b.subtree.length) return false;
     for (let i = 0; i < 3; i++) if (a.anchorB[i] !== b.anchorB[i] || a.axisB[i] !== b.axisB[i]) return false;
     for (let i = 0; i < a.subtree.length; i++) if (a.subtree[i] !== b.subtree[i]) return false;
+    const ca = a.chain ?? [], cb = b.chain ?? [];
+    if (ca.length !== cb.length) return false;
+    for (let i = 0; i < ca.length; i++) if (ca[i] !== cb[i]) return false;
     return true;
 }
 
 function sameDrive(a: JointDrive, b: JointDrive): boolean {
     return a.frequency === b.frequency && a.damping === b.damping && a.maxTorque === b.maxTorque
-        && (a.friction ?? 0) === (b.friction ?? 0) && (a.gravityCompensation ?? 0) === (b.gravityCompensation ?? 0);
+        && (a.friction ?? 0) === (b.friction ?? 0) && (a.gravityCompensation ?? 0) === (b.gravityCompensation ?? 0)
+        && (a.inertia ?? 0) === (b.inertia ?? 0);
 }
 
 function samePin(a: BodyPin, b: BodyPin): boolean {

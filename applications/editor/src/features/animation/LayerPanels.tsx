@@ -1,7 +1,7 @@
 import { useStateMachine } from './StateMachineContext'
 import Collapsable from '@cleo/app-kit/ui/Collapsable'
 import { Button, cn, SegmentedControl, Select, Slider, TextInput, Toggle } from '@cleo/app-kit/ui'
-import { FallIcon } from '../rig/reactions/reactionIcons'
+import { FallIcon, OverlayIcon } from '../rig/reactions/reactionIcons'
 import type { AnimationBlendMode } from 'cleo'
 import type { ReactNode } from 'react'
 import { useAssetDrop } from '../../utils/useAssetDrop'
@@ -131,6 +131,16 @@ export function LayerSection() {
           <Toggle doc={false} checked={!!layer.overReactions} className='text-ui-xs'
             label={<span className='inline-block w-3.5 h-3.5 align-[-2px]'><FallIcon /></span>}
             onChange={c => setLayer(activeLayer, { overReactions: c || undefined })} />
+        </span>
+
+        {/* A reacting body's muscles reach for the pose without this layer (AnimationLayer.body 'overlay'): it is
+            drawn over the body instead. For fast additive layers: a weapon's recoil, a flinch. */}
+        <span className='self-start' title={'Drawn over the body: while the character reacts with its body (a hit, a stagger), its '
+          + 'muscles do not follow this layer; it is drawn on top of the simulated body as authored. For fast additive layers '
+          + '(a weapon’s recoil, a flinch): a muscle following one would lag it and overshoot, a wobble.'}>
+          <Toggle doc={false} checked={layer.body === 'overlay'} className='text-ui-xs'
+            label={<span className='inline-block w-3.5 h-3.5 align-[-2px]'><OverlayIcon /></span>}
+            onChange={c => setLayer(activeLayer, { body: c ? 'overlay' : undefined })} />
         </span>
 
         {/* Support-hand IK (AnimationLayer.handIk): after every layer, one hand reaches where this layer's own

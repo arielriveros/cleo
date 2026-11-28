@@ -25,6 +25,11 @@ export const TripIcon = (p: P) => (
   <Glyph {...p}><path d='M4 20h16' /><rect x='13' y='15' width='5' height='5' rx='1' /><path d='M5 15c2-1 4-1 6 0l2 1' /><circle cx='9' cy='5' r='2' /><path d='M9 7l2 4-3 3' /></Glyph>
 )
 
+/** A figure with a layer drawn over it (dashed): an animation layer drawn over the body, not followed by it. */
+export const OverlayIcon = (p: P) => (
+  <Glyph {...p}><circle cx='9' cy='5' r='2' /><path d='M9 7v7M5 10h8M9 14l-3 6M9 14l3 6' /><path d='M14 5h6v14h-6' strokeDasharray='2 2' /></Glyph>
+)
+
 /** A body over an edge: fall. */
 export const FallIcon = (p: P) => (
   <Glyph {...p}><path d='M3 9h8v12' /><circle cx='16' cy='6' r='2' /><path d='M16 8v5l3 3M16 13l-3 3M14 10l4 0' /></Glyph>

@@ -177,7 +177,89 @@ about 1–2.5 Hz (stiffness 6–16 is f = k/2π, 0.95–2.5 Hz), where Jolt's mo
 | One hit for all | A kick of at most 1.2 m/s anywhere; a leg's hit put on the chest | Shaped impulses and a reaction per zone: head, chest, gut, back, arm, leg |
 | No pain | A 0.25 s weakness; the wound forgotten after 2.3 s | A pain lean, the head looking at the wound, the hand holding it 2 s, wounds kept by severity, hurt values for the graphs |
 | Wrong get-up | The face-down slot held a clip that starts on its back; *Stand Up* lies 1.4 s before it rises | Lying classes, a roll onto the back, the clip joined where it starts to rise |
-| Wiggle | Feedback on a pose a worker step old, fast layers in the muscles' target, the animation's spin dropped | Latency-compensated reach, fast layers drawn but not followed, the spin kept |
+| Wiggle | Feedback on a pose a worker step old, the animation's spin dropped | Latency-compensated reach, the spin kept (fast layers were still in the muscles' target: see the next section) |
+
+## Muscles and a nervous system (2026-11-28)
+
+Endorphin and Euphoria are sold as simulating "the body, its muscles and the motor nervous system that drives
+them". What is public of how, and what Cleo does with it. Arms still wiggled after gunshots and balance was still
+poor after the round above; the causes found in Cleo are listed with each part.
+
+### Muscles
+
+- **Euphoria's muscle** is an angular spring-damper on every joint, mass-normalised: stiffness reads as a natural
+  frequency (default 12, range 6 to 16, about 1 to 2.5 Hz), damping as a ratio (1 critical; soft limits keep 0.9 to
+  1.1). Gravity compensation is part of it (`activePose.useGravityCompensation`, the balancer's
+  `opposeGravityLegs`/`opposeGravityAnkles`). `setMuscleStiffness` (default 1, 0 to 20) is a separate, undocumented
+  impedance knob. Per behaviour: `shot` body 11, arms 10, neck 14; `pointGun` arms 14; `bodyBalance` arms 9.
+- **The chain.** PhysX articulations, the engine Euphoria shipped on, size a joint drive's spring from the whole
+  chain; an ordinary joint "using just the mass of the two bodies connected". That is most likely what morpheme's
+  *drive compensation* amounts to (its node docs are not public). Cleo's drives were sized from a limb against its
+  parent part alone: in a chain whose parents are held by muscles of their own, an elbow asked for damping 1 got
+  about 0.6, a shoulder about 0.8, and a hit set the arm ringing. A drive now names its chain
+  (`DriveRecord.chain`, a ragdoll's parts), and its spring meets what it holds up against the rest of the body.
+- **Looseness.** A bullet adds looseness to the struck part (1 per bullet), which recovers over 0.4 s from a floor
+  of 0.1: a second round on a weak arm keeps it weak rather than restarting its ramp from nothing. Bullets are
+  scaled by balance state (both feet, one, airborne).
+- **What muscles reach for.** Euphoria's targets settle (`spineBlendZero`: the spine eased toward its neutral pose),
+  the animation's own angular velocity is scaled down (`angVelScale`), and arms are never left fighting their joint
+  limits (soft limits; targets kept inside them with a margin) or each other (self-avoidance; PuppetMaster turns
+  internal collisions off while pinned). Cleo's muscles were reaching for the whole drawn pose, a weapon's recoil
+  and a flinch clip in it, with that pose's frame-to-frame jerk fed forward as a velocity twice over: a 0.1 rad
+  recoil step became a 0.47 rad spike in an arm's target.
+- **Stable springs.** Stable PD (Tan, Liu, Turk 2011) solves a spring against the next step's state, so high gains
+  stay stable at a large time step; Jolt's motors are springs solved the same implicit way (Catto 2011), joint by
+  joint (not the whole body's mass matrix).
+
+### A nervous system
+
+- **Behaviours ask, limbs decide.** NaturalMotion's patent US9449416 (Chapman) describes behaviours ("abilities":
+  balance, hazard protection, wound response, pointing, looking) sending requests to one controller per limb type
+  (arm, leg, spine, head): desired positions, orientations and velocities with weights and gains, combined as a
+  weighted combination and solved by IK, in a reference character scaled by mass, length and the time it takes to
+  fall its own height. US20110267356 (Rennuit) adds compensating wrenches: what pushes one part pushes another
+  back, so the net force on the body is about nothing.
+- **Endorphin** began as Torsten Reil's evolved neural controllers (Reil and Husbands 2002: a 10-neuron recurrent
+  network driving PD "torsional springs" toward target angles, at 50 Hz); what shipped are timed, sensor-driven
+  behaviours. Joints a behaviour does not drive hold their pose ("leg and torso stiffness", default 0.5), and it
+  steps at 120 Hz.
+- **Timing in a body.** A muscle activates in about 10 ms and lets go in about 40 ms (Millard 2013). A stretch
+  reflex answers in 20 to 45 ms, a long-latency one in 50 to 100 ms, anything deliberate in 150 ms or more (Kurtzer
+  2015). A startle runs down the body: blink 20 to 40 ms, neck 75 to 120, shoulders 100 to 120, arms 125 to 195.
+- **Bracing.** Co-contraction makes a joint stiffer without turning it (Hogan 1984), and it is how a body braces
+  rather than by quicker reflexes, whose delays make a limb shake (Milner 1995).
+
+### Balance
+
+- **Euphoria's balancer** aims each step where the centre of mass will be (`predictionTime` 0.2 s, the hip 0.3 s),
+  re-steps when the feet end too wide (hip width plus 0.2 m), grips with its feet (friction 2.25 against 0.75
+  elsewhere), compensates gravity in hips, knees and ankles, leans at the hips and ankles before it steps, puts its
+  arms out on a push or a fast turn (`bodyBalance`: 1.2 rad/s) and windmills them (`armsWindmill`), helps itself with
+  small conditional forces (`stayUpright`, `resistAcc`: a cheat it admits to) only while a foot can support them,
+  and fails on purpose (an abort lean, a give-up height, its legs weakening ×0.7 per step).
+- **The literature.** SIMBICON (Yin 2007) tracks the torso in the world through the stance hip; Coros et al. 2010
+  compensate gravity with virtual forces through the legs' Jacobian transpose ("allows significantly lower gains")
+  and place the foot from an inverted pendulum. Tried in Cleo as torques at the joints alone (no outside force), the
+  planted legs' virtual force and the hips' trunk control made the body fall from shoves it otherwise steps out of:
+  the joint-space controller fights the stepping's targets without a whole-body solve. The joint feed-forward
+  torques it needs stay in the physics layer (`PhysicsWorld.setJointTarget`'s `torque`), for a controller that does.
+
+### What Cleo changes for it
+
+| The fault | What it was | The change |
+|---|---|---|
+| Arms ring after a hit while firing | Muscles reached for the drawn pose, recoil and flinch in it, its jerk fed forward twice | A layer can be **drawn over the body** (`AnimationLayer.body: 'overlay'`): the muscles reach for the pose without it, the layer drawn over the simulated body. The spin they follow is smoothed and scaled (**Follow spin** 0.6), led once (the motor's own lead, at most 0.3 rad) |
+| Busy arms shear at the shoulder | A hand on a weapon drawn 30% simulated in the world against a chest drawn wholly simulated | The skin drawn parents first: a part is blended against its parent as drawn |
+| Under-damped arms | Springs sized against the parent part alone | Sized against the rest of the body (`DriveRecord.chain`) |
+| Elbows press their stops | Off-hinge animation (a forearm's roll) on a 2° cone, its swing spring sized by the roll axis; twist measured from the bind pose | Knee and elbow targets turned about their hinge alone, 3° inside its range; a narrow cone's swing sized by its smaller axis; twist measured from the joint's own zero |
+| Hands and arms chatter on the body | Self-collision in weapon poses | Arms and hands pass through the body while it stands (back 0.5 s after it leaves its feet) |
+| Gains jump | Weakness and tracking switched in a frame | A nervous system (`nerves.ts`): every gain moves with a muscle's time constants (15 ms up, 50 ms down), the upper body tenses after a hit from 35 ms (**Tense**), the head turns at 0.1 s, the pain lean at 0.15 s, the hand at 0.18 s |
+| Weakness restarts per bullet | Each wound its own ramp | Looseness per part, adding up and wearing off over **Recover in**, never below **Weakest** |
+| Staggers fall to a moderate shove | The swing foot always the one farther from the capture point, never crossing: a push to the side shuffled the wrong foot; a shove counted twice; a walk's arm swing in the upper body; planted legs as soft as a hanging one; the Mannequin's thighs able to extend only 5° | The foot that best catches it steps (crossing by up to 8 cm); one shove; the upper body held as shoved; planted legs sized to the weight they carry (`JointDrive.inertia`); feet gripping at 2; **Arms out**; the Mannequin's thighs remade (58°, 32° forward) |
+
+With them, the procedural humanoid stays up to a 145 N·s shove in every direction in one or two short steps
+(`tests/reactionBalance.test.ts`), and an arm's ringing after a chest hit while a recoil fires drops by about two
+thirds with the recoil drawn over the body (`tests/reactionWiggle.test.ts`).
 
 ## How Cleo maps them
 
@@ -227,6 +309,8 @@ happens to it, and taken away once it is back on its animation.
 | `src/physics/reactive/reactionBody.ts` | Targets per part: blending, reaching (two-bone IK), looking, bending, poses |
 | `src/physics/reactive/behaviours.ts` | The behaviours and the stepping balance |
 | `src/physics/reactive/reactionController.ts` | The states, the Collider hand-off, get-up, events, the script API |
+| `src/physics/reactive/balancer.ts` | The stagger's steps: which foot, where, planted legs on the weight they carry, the helping hand |
+| `src/physics/reactive/nerves.ts` | Between the behaviours and the muscles: tension after a hit, gains moving with a muscle's time constants |
 | `applications/editor/src/features/rig/reactions/` | The Reactions tab, the test bench and its timeline |
 
 ## What the tests hold
@@ -247,10 +331,35 @@ procedural humanoid on Jolt, inline and in the worker, and checks that cannon an
 | Bailing out at 10 m/s | tumbles, comes to rest and gets up, with no NaN |
 | Killed | falls limp and never gets up |
 | With the physics worker | trips, lies and gets up as it does inline |
+| Shot in the chest while a recoil fires (`reactionWiggle.test.ts`) | with the recoil drawn over the body, the arms ring less than half as much, the elbow does not reverse more than 3 times a second, the chest still sways |
+| Shoved forward, back, left and right, 60 to 145 N·s (`reactionBalance.test.ts`) | stays up to 120 N·s, in steps no longer than 0.46 m; falls only after stepping |
 
 The golden physics traces are unchanged: a world with no drives steps exactly as before.
 
 ## Sources
+
+Muscles and a nervous system (2026-11-28):
+
+- GTA V's NaturalMotion messages: the ScriptHookVDotNet docs (one page a message, such as
+  [ShotHelper](https://nitanmarcel.github.io/shvdn-docs.github.io/class_g_t_a_1_1_natural_motion_1_1_shot_helper.html))
+  and [alexguirre's message list](https://gist.github.com/alexguirre/915f90002f44622e09dc5c793c18b3ef).
+- [The endorphin user guide](https://pdfcoffee.com/endorphin-user-guide-pdf-free.html); Torsten Reil on
+  [morpheme 2.0](https://www.gamedeveloper.com/programming/q-a-naturalmotion-s-reil-on-the-evolution-of-morpheme);
+  Reil and Husbands, [Evolution of central pattern generators for bipedal walking](https://users.sussex.ac.uk/~philh/pubs/reilhusbandsIEEE.pdf) (2002).
+- NaturalMotion patents [US20130222433 / US9449416](https://patents.google.com/patent/US20130222433) (behaviours,
+  limb controllers, weighted requests) and US20110267356 (implicit and explicit control, compensating wrenches).
+- [PhysX articulations](https://archive.docs.nvidia.com/gameworks/content/gameworkslibrary/physx/guide/3.3.4/Manual/Articulations.html):
+  drives sized from the whole chain.
+- Tan, Liu, Turk, [Stable proportional-derivative controllers](https://www.jie-tan.net/project/spd.pdf) (2011);
+  Coros, Beaudoin, van de Panne, [Generalized biped walking control](https://www.cs.ubc.ca/~van/papers/2010-TOG-gbwc/paper.pdf) (2010);
+  Yin, Loken, van de Panne, [SIMBICON](https://www.cs.ubc.ca/~van/papers/2007-siggraph-simbicon.pdf) (2007).
+- Muscle timing: Millard et al. (2013), [Flexing computational muscle](https://pmc.ncbi.nlm.nih.gov/articles/PMC3705831);
+  reflex latencies: Kurtzer (2015), [Long-latency reflexes](https://www.frontiersin.org/journals/integrative-neuroscience/articles/10.3389/fnint.2014.00099/full);
+  the [startle response](https://en.wikipedia.org/wiki/Startle_response); co-contraction: Hogan (1984), Milner (1995).
+- [PuppetMaster](http://root-motion.com/puppetmasterdox/html/class_root_motion_1_1_dynamics_1_1_puppet_master.html)
+  (internal collisions off while pinned).
+
+Earlier rounds:
 
 - ScriptHookVDotNet's NaturalMotion helpers (the GTA V message set and its defaults):
   [CatchFallHelper](https://nitanmarcel.github.io/scripthookvdotnet/scripting_v2/GTA.NaturalMotion.CatchFallHelper.html),

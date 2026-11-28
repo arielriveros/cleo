@@ -226,17 +226,24 @@ what the animation does.
 | Setting | What it does |
 |---|---|
 | **Weakness** | How much strength the struck part keeps at first, 0 to 1 (1 is none lost). On its feet only that part weakens. |
-| **Recover in** | How long the struck part takes to get its strength back. |
+| **Recover in** | How long the struck part takes to get its strength back. A round on a part still weak adds to its weakness rather than starting it over (Euphoria's looseness). |
+| **Weakest** | The least strength a struck part keeps however many rounds land on it, 0 to 1. |
 | **Tracking** | How firmly, in Hz, the upper body follows the animation while the character stands (the arms a little less, the hands less again). |
 | **Tracking strength** | The muscles' strength while it stands, as a multiple of the set's **Strength**. |
+| **Follow spin** | How much of the animation's own turning (smoothed) the muscles are given to follow, 0 to 1: less keeps a fast layer's jerk out of them (Euphoria's angVelScale). |
 | **Kick** | The most of a hit's impulse, in N·s, the struck part takes while the character stands; the whole hit still decides whether it stumbles or falls. |
 | **Snap** | An extra jolt to the spine and neck, away from the hit. |
-| **Reach after** | How long before a hand goes to the wound. |
+| **Reach after** | How long before a hand goes to the wound: a deliberate move, about 0.15 s or more after the hit. |
 | **Hold for** | How long a free hand holds the wound (a hand on a weapon does not leave it). |
 | **Reach** | The farthest a hand reaches for a wound, in metres; beyond it, it does not try. |
 | **Reach stiffness** | How firmly the reaching arm holds the wound. |
 | **Reach pull** | How firmly a string draws the hand onto the wound, as a share of the **Strings** (0: the muscles of the arm alone). While it reaches, the forearm and the hand pass through the rest of the body. |
+| **Look after** | How long before the head turns to the wound. |
 | **Look for** | How long the head turns toward the wound. |
+| **Tense** | How much the upper body tenses after a hit, from about 35 ms on (stiffer and better damped together, the struck part excepted, its pose untouched): a body bracing. |
+| **Tense for** | How long that tension takes to ease off. |
+| **On one foot** | How much of a hit a body on one foot takes (stepping): it cannot brace on both. |
+| **Off its feet** | How much of a hit a body off its feet takes: with nothing to push against it is carried rather than snapped. |
 | **Lasts** | How long a hit reaction runs before the character is back on its animation. |
 | **Pain** | How far the spine bows over a hit to the chest or the gut, in radians, for as bad as it is: up in 0.2 s, held a second, easing off over 1.5 s. |
 | **Shock spin** | How far a hit to the chest turns it, in radians, the way the hit pushes the side it struck. |
@@ -262,10 +269,15 @@ it: a bad one stays longer (its hand, its pain), and of the four wounds kept the
 ### Stagger
 
 Knocked back but on its feet: it steps to stay up, as Euphoria's balancer does. Its legs are the physics' for
-the stagger (on their muscles, not the animation's), and it takes short, quick steps: each one aimed where the
-body will be **Looks ahead** from now, beside the planted foot (never across it), no longer than **Step length**,
-a foot lifting **Step height** and landing in **Step time**. Its legs tire with each step after the second, and a
-hand keeps the trunk upright and the hips from sinking (**Help**, weakening as they tire). Caught (over its feet,
+the stagger (on their muscles, not the animation's), and it takes short, quick steps, the first after **First step
+after**: each one aimed where the body will be **Looks ahead** from now, no longer than **Step length**, a foot
+lifting **Step height** and landing in **Step time**. It steps with whichever foot catches it best (where the capture
+point ends up against its feet), and to catch a push to the side a foot may cross over the other by **Crosses by**,
+passing in front of it or behind; feet left too far apart are brought back under it. A planted leg's muscles are
+sized to the weight it carries (**Stance**), its foot gripping harder than the rest of the body (the ragdoll
+profile's foot friction), and the upper body holds the pose it had when it was shoved rather than the walk under
+it. Its legs tire with each step after the second, and a hand keeps the trunk upright, the hips from sinking and the
+body slowing over its feet (**Help**, weakening as they tire). Caught (over its feet,
 slow, for **Recovered after**), it is back on its animation where it stands. It gives up and falls after
 **Steps** steps that have not caught it, leaning past **Falls past** for **For**, sinking to half its height, or
 with its capture point far beyond its feet. It keeps its control throughout: its capsule follows the body, and
@@ -279,11 +291,14 @@ its walk still turns and aims it. Turning the behaviour off makes every hit that
 | **Step time** | How long a foot takes from lifting to landing, in seconds. |
 | **Step height** | How high a foot lifts on the way, in metres. |
 | **Step length** | The longest step it takes from the planted foot, in metres. |
-| **Feet apart** | The least it steps out to its own side of the planted foot, in metres: it never crosses its feet. |
+| **First step after** | How long before the first step, in seconds: a body takes about a tenth of a second to start one. |
+| **Feet apart** | The least it steps out to its own side of the planted foot, in metres (unless it crosses over). |
+| **Crosses by** | How far a foot may cross over the other, in metres, to catch a push to the side. |
+| **Stance** | How firmly a planted leg holds, in Hz, on the weight it carries (its knee and ankle sized to the body above them). |
 | **Widest step** | The most it steps out to the side, in metres. |
 | **Steps** | How many steps it takes before it gives up and falls, if they have not caught it. |
 | **Tires to** | The strength its legs keep with each step after the second (0.7: 70% of the step before). |
-| **Help** | A hand keeping the trunk upright and the hips from sinking while it steps (0: its legs alone). |
+| **Help** | A hand keeping the trunk upright, the hips from sinking and the body slowing over its feet while a foot is down (Euphoria's StayUpright and resistAcc), on top of what its legs do (0: those alone). |
 | **Falls above** | A shove faster than this (m/s) knocks it straight down: no step could catch it. |
 | **Falls past** | How far, in radians, the trunk may lean from upright before it falls. |
 | **For** | How long it must lean that far to fall. |
@@ -296,6 +311,22 @@ stagger is a flinch: it never slides the character along the ground. The bench's
 body's centre of mass and its **capture point** (where a body must put its foot to stop: its centre of mass plus
 its velocity times √(height ÷ g)). Scripts read the steps on `reactions.balance` (`steps`, `stepLengths`,
 `swinging`, `gaveUp`), and `reactions.knockCount` counts every stagger and every fall from its feet.
+
+### Arms out
+
+Shoved, or its trunk turning fast, on its feet: the free arms go out to the sides to keep its balance, and circle
+when it turns faster still (Euphoria's bodyBalance arms out and ArmsWindmill). A hand on a weapon stays there, and a
+hand holding a wound holds it.
+
+| Setting | What it does |
+|---|---|
+| **After a turn of** | The trunk turning faster than this (rad/s) puts the arms out. |
+| **Or a shove of** | A shove at least this fast (m/s) puts the arms out. |
+| **Out** | How far the arms go out from the sides, in radians. |
+| **Elbows** | How far the elbows bend, in radians. |
+| **Stiffness** | How firmly the arms are held out, in Hz. |
+| **Circle above** | Turning faster than this (rad/s), the arms circle. |
+| **Hold for** | How long the arms stay out after it has steadied, in seconds. |
 
 ### Catch the fall
 

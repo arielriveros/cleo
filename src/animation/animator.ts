@@ -5,7 +5,7 @@ import {
     axisSmoothing, axisDeadzone, axisWrapSpan, weightSmoothing,
 } from './animationField';
 import { resolveTablePose, type AnimationPose, type AnimationPoseBone } from './animationPose';
-import { clamp, dampTime, dampWrapped, decomposeTRS, DEG2RAD, planarSignedAngle, wrapSpan } from '../core/math';
+import { clamp, dampTime, dampWrapped, decomposeTRS, DEG2RAD, planarSignedAngle, poseLerpInto, poseMultiplyInto, poseRelativeInto, wrapSpan } from '../core/math';
 import { skeletonTopology, SkeletonTopology, isAncestorJoint, subtreeOrder } from './skeletonTopology';
 import { findKey, findKeyLinear, isSorted } from './keyframes';
 import { bakeCubicSpline } from './samplerBake';
@@ -73,6 +73,11 @@ export interface PhysicsMappingSource {
      * on the animated hips without a tear at the waist.
      */
     readonly anchorPart?: number;
+    /**
+     * Part `i`'s parent part, -1 for the root. Given, a part drawn partly simulated is blended relative to its parent
+     * as drawn (forward kinematics, parents first) rather than in the world.
+     */
+    partParent?(part: number): number;
 }
 
 /** Trigger-based animation playback. Superseded by the state machine below. */
@@ -623,6 +628,13 @@ export interface AnimationLayer {
      * transition in and back over the one out: an aim or a weapon pose must not pull at a body getting up.
      */
     overReactions?: boolean;
+    /**
+     * What a reacting body's muscles make of the layer (a powered ragdoll following the animation). `'follow'`
+     * (default): it is part of the pose they reach for. `'overlay'`: it is drawn over the body but the muscles never
+     * see it: a fast additive layer (a weapon's recoil, a flinch clip) a muscle would follow late and overshoot, a
+     * wobble, where drawn on top of the simulated body it reads exactly as authored.
+     */
+    body?: 'follow' | 'overlay';
 }
 
 /** A layer's support-hand IK (see {@link AnimationLayer.handIk}). */
@@ -735,6 +747,8 @@ interface Overlay {
     handIk: AnimationHandIk | null;
     /** The layer plays over Ragdoll and Get Up states (AnimationLayer.overReactions). */
     overReactions: boolean;
+    /** Drawn over a reacting body, never in its muscles' target (AnimationLayer.body 'overlay'). */
+    bodyOverlay: boolean;
 }
 
 /**
@@ -3288,14 +3302,26 @@ export class Animator {
             globalTransforms.set(nodeIndex, global);
         }
 
+        // A reacting body's muscles reach for the pose WITHOUT the layers drawn over it (AnimationLayer.body): its
+        // locals where such a layer touches a bone, the drawn ones elsewhere (taken before IK; see _poseBody).
+        const bodyPass = this._physicsMapping !== null && this._bodyOverlaysActive();
+        if (bodyPass) {
+            const bodyLocals = this._bodyLocals;
+            bodyLocals.clear();
+            for (const [nodeIndex, local] of localTransforms) bodyLocals.set(nodeIndex, this._bodyTouches(nodeIndex) ? this._resolveLocalBody(nodeIndex) : local);
+        }
+
         // After the pose is accumulated and before the bind matrices fold in: IK needs to know where the
         // feet ended up, and writing corrected LOCALS lets the loop above be re-run verbatim.
         // Each IK change re-accumulates the subtree it moved, so nothing is left to redo afterwards.
         // The support hands first: foot IK's pelvis drop then carries both hands together.
         this._handIkActive = null;
         if (this._overlays.length) this._applyHandIk(localTransforms, globalTransforms, topo);
+        if (bodyPass) { this._preFootIk.clear(); for (const [n, l] of localTransforms) this._preFootIk.set(n, l); }
         this._applyFootIk(localTransforms, globalTransforms, topo);
         this._ikDelta = 0;
+        this._bodyPosed = bodyPass;
+        if (bodyPass) this._poseBody(localTransforms, topo);
 
         // finalMatrix = globalTransform × inverseBindMatrix. NO `inverse(globalTransform(meshNode))` term:
         // glTF includes one only for implementations that also apply the mesh node's transform, and this
@@ -3333,16 +3359,84 @@ export class Animator {
      * foot IK share. Never caches the skin's rest matrix by reference: globals are written in place.
      */
     private _accumulate(out: mat4, jointIndex: number, topo: SkeletonTopology): void {
+        this._accumulateFrom(out, jointIndex, topo, this._poseLocals, this._poseGlobals);
+    }
+
+    private _accumulateFrom(out: mat4, jointIndex: number, topo: SkeletonTopology, locals: Map<number, mat4>, globals: Map<number, mat4>): void {
         const skin = this._skin!;
         const parentJoint = topo.parentJoint[jointIndex];
-        if (parentJoint >= 0) mat4.copy(out, this._poseGlobals.get(skin.joints[parentJoint].nodeIndex)!);
+        if (parentJoint >= 0) mat4.copy(out, globals.get(skin.joints[parentJoint].nodeIndex)!);
         else mat4.identity(out);
         for (const nodeIndex of topo.parentChain[jointIndex]) {
-            const local = this._poseLocals.get(nodeIndex) ?? skin.nodeTransforms?.get(nodeIndex);
+            const local = locals.get(nodeIndex) ?? skin.nodeTransforms?.get(nodeIndex);
             if (local) mat4.multiply(out, out, local);
         }
         const nodeIndex = skin.joints[jointIndex].nodeIndex;
-        mat4.multiply(out, out, this._poseLocals.get(nodeIndex) ?? skin.nodeTransforms?.get(nodeIndex) ?? IDENTITY);
+        mat4.multiply(out, out, locals.get(nodeIndex) ?? skin.nodeTransforms?.get(nodeIndex) ?? IDENTITY);
+    }
+
+    // ---- The body's pose: what a reacting body's muscles reach for ------------------------------------------------
+    // The drawn pose less the layers drawn over the body (AnimationLayer.body 'overlay'), with the drawn pose's foot
+    // IK and its own support-hand IK. Built only while the physics mapping is on and such a layer plays.
+
+    private readonly _bodyLocals = new Map<number, mat4>();
+    private readonly _bodyGlobals = new Map<number, mat4>();
+    private readonly _bodyGlobalPool = new Map<number, mat4>();
+    private readonly _preFootIk = new Map<number, mat4>();
+    private readonly _bodyBones: mat4[] = [];
+    private readonly _bodyModel: mat4[] = [];
+    /** This frame's target for the muscles is the body's pose (`_bodyBones`), not the drawn one. */
+    private _bodyPosed = false;
+
+    private _bodyOverlaysActive(): boolean {
+        for (const o of this._overlays) if (o.bodyOverlay && o.presence > 0 && this._overlayWeight(o) > 0) return true;
+        return false;
+    }
+
+    /** Whether a layer drawn over the body may move this bone (its mask holds it). */
+    private _bodyTouches(nodeIndex: number): boolean {
+        for (const o of this._overlays) {
+            if (!o.bodyOverlay || o.presence <= 0) continue;
+            const mask = this._overlayMask(o);
+            if (!mask || (mask.get(nodeIndex) ?? 0) > 0) return true;
+        }
+        return false;
+    }
+
+    private _resolveLocalBody(nodeIndex: number): mat4 {
+        const override = this._boneOverrides?.get(nodeIndex);
+        if (override) return override;
+        const base = this._sourceLocal(nodeIndex) ?? this._skin!.nodeTransforms?.get(nodeIndex) ?? IDENTITY;
+        return this._applyOverlays(nodeIndex, base, this._overlays.length, true);
+    }
+
+    /** The body's bones, from its locals (`_bodyLocals`) and the drawn pose's foot IK (`drawn` against `_preFootIk`). */
+    private _poseBody(drawn: Map<number, mat4>, topo: SkeletonTopology): void {
+        const skin = this._skin!, locals = this._bodyLocals, globals = this._bodyGlobals;
+        // What foot IK moved (the legs, the hips) as drawn: no layer drawn over a body should move those.
+        for (const [n, l] of drawn) if (this._preFootIk.get(n) !== l) locals.set(n, l);
+        globals.clear();
+        for (const jointIndex of topo.order) {
+            const nodeIndex = skin.joints[jointIndex].nodeIndex;
+            let g = this._bodyGlobalPool.get(nodeIndex);
+            if (!g) { g = mat4.create(); this._bodyGlobalPool.set(nodeIndex, g); }
+            this._accumulateFrom(g, jointIndex, topo, locals, globals);
+            globals.set(nodeIndex, g);
+        }
+        // The support hand on its grip in the body's own pose: the muscles reach for it there.
+        if (this._overlays.length) {
+            const active = this._handIkActive;
+            this._applyHandIk(locals, globals, topo);
+            this._handIkActive = active;
+        }
+        const n = skin.joints.length;
+        for (let j = 0; j < n; j++) {
+            const g = globals.get(skin.joints[j].nodeIndex) ?? IDENTITY;
+            mat4.multiply(this._bodyBones[j] ??= mat4.create(), g, skin.joints[j].inverseBindMatrix);
+            mat4.copy(this._bodyModel[j] ??= mat4.create(), g);
+        }
+        this._bodyBones.length = n;
+        this._bodyModel.length = n;
     }
 
     // ---- Support-hand IK --------------------------------------------------------------------------
@@ -4372,6 +4466,7 @@ export class Animator {
             o.weightParam = layer.weightParam;
             o.handIk = layer.handIk ?? null;
             o.overReactions = !!layer.overReactions;
+            o.bodyOverlay = layer.body === 'overlay';
             const child = o.animator;
             child._stateMachine = { parameters: [], states: layer.states, transitions: layer.transitions, groups: layer.groups, forks: layer.forks, events: sm.events };
             child._rebindCurrentState();
@@ -5246,6 +5341,7 @@ export class Animator {
                 order: i + 1,
                 presence: present, presenceTarget: present, fadeSeconds: this._blendTime,
                 action: null, entries: null, steadyNow: 0, handIk: layer.handIk ?? null, overReactions: !!layer.overReactions,
+                bodyOverlay: layer.body === 'overlay',
             });
         });
         for (const slot of sm.slots ?? []) this._addSlot(slot, sm.layers?.length ?? 0);
@@ -5272,7 +5368,7 @@ export class Animator {
             maskSpec: def.mask ?? null, mask: null,
             weight: 1, order: after + 0.5,
             presence: 0, presenceTarget: 0, fadeSeconds: 0.15,
-            action: null, entries: null, steadyNow: 0, handIk: null, overReactions: true,
+            action: null, entries: null, steadyNow: 0, handIk: null, overReactions: true, bodyOverlay: false,
         };
         this._overlays.push(overlay);
         return overlay;
@@ -5387,11 +5483,12 @@ export class Animator {
 
     // Blend every overlay onto a bone's base local, in order.
     // Blend the overlays below `upTo` (all of them by default) onto a bone's base local, in order.
-    private _applyOverlays(nodeIndex: number, base: mat4, upTo: number = this._overlays.length): mat4 {
+    // `body`: the pose a reacting body's muscles reach for, without the layers drawn over it (AnimationLayer.body).
+    private _applyOverlays(nodeIndex: number, base: mat4, upTo: number = this._overlays.length, body = false): mat4 {
         let local = base;
         for (let k = 0; k < upTo; k++) {
             const o = this._overlays[k];
-            if (o.presence <= 0) continue;
+            if (o.presence <= 0 || (body && o.bodyOverlay)) continue;
             const mask = this._overlayMask(o);
             const maskWeight = mask ? (mask.get(nodeIndex) ?? 0) : 1;
             if (maskWeight <= 0) continue;
@@ -5911,6 +6008,7 @@ export class Animator {
     public disablePhysicsMapping(): void {
         if (!this._physicsMapping) return;
         this._physicsMapping = null;
+        this._bodyPosed = false;
         this.ikSuppressed = false;
         this.handIkSuppressed = false;
         this.footLockSuppressed = false;
@@ -5932,12 +6030,17 @@ export class Animator {
      * next pose.
      */
     public getTargetBoneMatrices(): mat4[] {
-        return this._physicsMapping && this._targetBones.length === this._finalBoneMatrices.length ? this._targetBones : this._finalBoneMatrices;
+        if (!this._physicsMapping) return this._finalBoneMatrices;
+        // Without the layers drawn over the body (AnimationLayer.body): those the muscles never follow.
+        // (Indexed by joint: the skinning array may be padded past the skin's joints.)
+        if (this._bodyPosed && this._bodyBones.length > 0 && this._bodyBones.length <= this._finalBoneMatrices.length) return this._bodyBones;
+        return this._targetBones.length === this._finalBoneMatrices.length ? this._targetBones : this._finalBoneMatrices;
     }
 
     /** A joint's model-space transform as the ANIMATION poses it (see getTargetBoneMatrices). */
     public getTargetJointModelMatrix(jointIndex: number): mat4 | null {
         if (!this._physicsMapping) return this.getJointModelMatrix(jointIndex);
+        if (this._bodyPosed && this._bodyModel[jointIndex]) return this._bodyModel[jointIndex];
         return this._targetModel[jointIndex] ?? this.getJointModelMatrix(jointIndex);
     }
 
@@ -5960,6 +6063,10 @@ export class Animator {
     private readonly _mapInv = mat4.create();
     private readonly _mapA = mat4.create();
     private readonly _mapB = mat4.create();
+    private readonly _mapPoses: { a: number[]; ab: number[]; s: number[]; b: number[]; ok: boolean; done: boolean }[] = [];
+    private readonly _mapT1 = [0, 0, 0, 0, 0, 0, 1];
+    private readonly _mapT2 = [0, 0, 0, 0, 0, 0, 1];
+    private readonly _mapT3 = [0, 0, 0, 0, 0, 0, 1];
 
     /**
      * Skinning matrices carried from the animation to the bodies: per part, D = inv(N)·B·inv(A)·N in model
@@ -5990,28 +6097,72 @@ export class Animator {
             X[3] = qx[0]; X[4] = qx[1]; X[5] = qx[2]; X[6] = qx[3];
             anchored = X.every(v => Number.isFinite(v));
         }
-        for (let p = 0; p < parts; p++) {
+        // Per part: A as drawn (every layer), Ab as the body's muscles had it (without the layers drawn over the body),
+        // S as simulated (on the anchor), and B as it is drawn. Parents first (FK): a part drawn partly simulated
+        // is blended RELATIVE TO ITS PARENT as drawn, so a busy arm drawn 0.3 simulated rides a swaying chest rather
+        // than staying where the animation put it in the world (the shoulder shearing between them). A layer drawn
+        // over the body adds, on the simulated part, what it adds to the animation (Δ = inv(Ab)·A, in the parent's
+        // frame): recoil drawn over the body as authored.
+        const parentOf = src.partParent ? (p: number) => src.partParent!(p) : null;
+        const body = this._bodyPosed && this._bodyBones.length > 0 && this._bodyBones.length <= n ? this._bodyBones : null;
+        while (this._mapPoses.length < parts) this._mapPoses.push({ a: [0, 0, 0, 0, 0, 0, 1], ab: [0, 0, 0, 0, 0, 0, 1], s: [0, 0, 0, 0, 0, 0, 1], b: [0, 0, 0, 0, 0, 0, 1], ok: false, done: false });
+        const P = this._mapPoses;
+        for (let p = 0; p < parts; p++) P[p].done = false;
+        const t1 = this._mapT1, t2 = this._mapT2, t3 = this._mapT3;
+        const draw = (p: number): void => {
+            const e = P[p];
+            if (e.done) return;
+            e.done = true;
+            const par = parentOf ? parentOf(p) : -1;
+            if (par >= 0 && par < parts) draw(par);
+            src.animatedPose(p, this._targetBones, nodeWorld, e.a);
             const w = src.mappingWeight(p);
-            active[p] = w > 0;
-            if (!active[p]) continue;
-            src.animatedPose(p, this._targetBones, nodeWorld, anim);
-            src.simulatedPose(p, sim);
-            if (anchored && p !== anchor) {
-                const q = [X[3], X[4], X[5], X[6]] as quat;
-                const at = vec3.transformQuat(vec3.create(), [sim[0], sim[1], sim[2]], q);
-                const r = quat.multiply(quat.create(), q, [sim[3], sim[4], sim[5], sim[6]] as quat);
-                sim[0] = at[0] + X[0]; sim[1] = at[1] + X[1]; sim[2] = at[2] + X[2];
-                sim[3] = r[0]; sim[4] = r[1]; sim[5] = r[2]; sim[6] = r[3];
+            e.ok = false;
+            for (let i = 0; i < 7; i++) e.b[i] = e.a[i];
+            // The pose a child is drawn against needs the simulation of its parent even when the parent is drawn as
+            // animated (the legs and hips of a character on its feet): S and Ab for every part.
+            src.simulatedPose(p, e.s);
+            if (anchored) poseMultiplyInto(X, e.s, e.s);
+            let finite = true;
+            for (let i = 0; i < 7; i++) if (!Number.isFinite(e.s[i])) finite = false;
+            if (body) src.animatedPose(p, body, nodeWorld, e.ab);
+            else for (let i = 0; i < 7; i++) e.ab[i] = e.a[i];
+            if (!(w > 0) || !finite) return;
+            e.ok = true;
+            const pe = par >= 0 && par < parts ? P[par] : null;
+            if (pe && parentOf) {
+                let sane = true;
+                for (let i = 0; i < 7; i++) if (!Number.isFinite(pe.s[i])) sane = false;
+                if (sane) {
+                    // rel = blend(inv(A_par)·A, inv(S_par)·S · Δ, w), Δ = inv(inv(Ab_par)·Ab) · inv(A_par)·A; B = B_par · rel.
+                    poseRelativeInto(pe.a, e.a, t1);                 // relA
+                    if (body) {
+                        poseRelativeInto(pe.ab, e.ab, t2);           // relAb
+                        poseRelativeInto(t2, t1, t3);                // Δ
+                        poseRelativeInto(pe.s, e.s, t2);             // relS
+                        poseMultiplyInto(t2, t3, t2);                // relS · Δ
+                    } else poseRelativeInto(pe.s, e.s, t2);
+                    poseLerpInto(t1, t2, Math.min(1, w), t3);
+                    poseMultiplyInto(pe.b, t3, e.b);
+                    return;
+                }
             }
-            let ok = true;
-            for (let i = 0; i < 7; i++) if (!Number.isFinite(sim[i])) ok = false;
-            if (!ok) { active[p] = false; continue; }
-            const qa = [anim[3], anim[4], anim[5], anim[6]] as quat;
-            const qb = w >= 1 ? [sim[3], sim[4], sim[5], sim[6]] as quat : quat.slerp(quat.create(), qa, [sim[3], sim[4], sim[5], sim[6]] as quat, w);
-            const pb: vec3 = w >= 1 ? [sim[0], sim[1], sim[2]] : [anim[0] + (sim[0] - anim[0]) * w, anim[1] + (sim[1] - anim[1]) * w, anim[2] + (sim[2] - anim[2]) * w];
-            mat4.fromRotationTranslation(this._mapA, qa, [anim[0], anim[1], anim[2]]);
+            // A root (or no parents known): in the world, as before; a layer drawn over the body on top.
+            if (body) {
+                poseRelativeInto(e.ab, e.a, t3);                     // Δ in the part's frame
+                poseMultiplyInto(e.s, t3, t2);
+            } else for (let i = 0; i < 7; i++) t2[i] = e.s[i];
+            poseLerpInto(e.a, t2, Math.min(1, w), e.b);
+        };
+        for (let p = 0; p < parts; p++) {
+            draw(p);
+            const e = P[p];
+            active[p] = e.ok;
+            if (!e.ok) continue;
+            const qa = [e.a[3], e.a[4], e.a[5], e.a[6]] as quat;
+            mat4.fromRotationTranslation(this._mapA, qa, [e.a[0], e.a[1], e.a[2]]);
             mat4.invert(this._mapA, this._mapA);
-            mat4.fromRotationTranslation(this._mapB, qb, pb);
+            mat4.fromRotationTranslation(this._mapB, [e.b[3], e.b[4], e.b[5], e.b[6]] as quat, [e.b[0], e.b[1], e.b[2]]);
             const d = this._mapParts[p];
             // D = inv(N) · B · inv(A) · N
             mat4.multiply(d, this._mapB, this._mapA);

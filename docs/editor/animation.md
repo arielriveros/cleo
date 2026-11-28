@@ -459,6 +459,7 @@ the layer's name. It holds that layer's own settings:
 | **Weight** | `0`–`1` from the slider, or **param…** to read it from a parameter every frame. |
 | **Mask** | A [bone mask](#bone-masks), or **Whole body**. |
 | **Plays over Ragdoll and Get Up** (the falling-figure toggle) | Off (the default), the layer fades out while the base layer is in a [Ragdoll or Get Up state](#ragdoll-and-get-up-states), and back in after: an aim or a weapon pose must not pull at a body lying or getting up. On, it keeps playing. |
+| **Drawn over the body** (the figure with a dashed layer) | While the character reacts with its body (a hit, a stagger), its muscles reach for the pose without this layer, and the layer is drawn over the simulated body as authored. For fast additive layers: a weapon's recoil, a flinch clip. A muscle following one lags it and overshoots: arms that wobble. The **Hit reaction** preset's layer has it on. In data, `AnimationLayer.body: 'overlay'`. |
 | **Hand IK** | **Left** or **Right**: after every layer, that hand reaches where this layer's own pose has it relative to the other hand, so a weapon held in the other hand keeps both hands on it whatever the layers above do to that hand (an aim, recoil). **Reach** is how firmly, `0`–`1` or from a parameter (`0` lets go: a sprint). **Socket**: reach a socket on the other hand instead. |
 
 Three rules worth knowing:

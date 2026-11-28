@@ -91,7 +91,8 @@ export function addHitLayer(sm: AnimationStateMachine, opts: { fieldId?: string;
   const hit = linkedTrigger(parameters, 'Hit', 'hitCount')
   const name = freeName('Hit Reaction', (sm.layers ?? []).map(l => l.name))
   const layer: AnimationLayer = {
-    name, blend: 'additive', weightParam: control,
+    // Drawn over the body: a flinch clip followed by the muscles would be a second, late flinch on top of the body's.
+    name, blend: 'additive', weightParam: control, body: 'overlay',
     ...(opts.mask?.maskId ? { maskId: opts.mask.maskId } : {}), ...(opts.mask?.mask ? { mask: opts.mask.mask } : {}),
     states: [
       { name: 'Off', clipName: '', loop: true, speed: 1, isEntry: true, x: 40, y: 40 },

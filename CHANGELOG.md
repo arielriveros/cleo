@@ -136,6 +136,30 @@ in a hand. Turn-in-place picks the right clip when the camera swings behind.
   - The player driving, in sight, an enemy strafes off the car's path, away from where it is going, keeping 9 m and
     firing at the cabin (**car engage**).
   - Every body gets up on Mixamo's *Stand Up*, rolling onto its back first when it lies on its front.
+- **Reactions with muscles and a nervous system: arms that no longer wobble after a hit, and a stagger that stays up.**
+  What Endorphin and Euphoria publish of their muscles and their "motor nervous system", and what Cleo does with it,
+  is in the Reactive ragdolls reference.
+  - An animator layer can be **drawn over the body** (`AnimationLayer.body: 'overlay'`): while a character reacts,
+    its muscles reach for the pose without it and the layer is drawn over the simulated body. Recoil and flinch clips
+    no longer set the arms ringing. The Hit reaction preset's layer has it on.
+  - The animation's own turning reaches the muscles smoothed and scaled (**Follow spin**), led once instead of twice;
+    a part drawn partly simulated is blended against its parent as drawn, so a hand on a weapon rides a swaying chest.
+  - Muscles are sized to what they hold up against the rest of the body (PhysX articulations' way, morpheme's "drive
+    compensation"), knee and elbow targets turn about their hinge alone, inside their range, and arms pass through
+    the body while it stands.
+  - A nervous system (`nerves.ts`): gains move with a muscle's time constants, the upper body tenses after a hit
+    (**Tense**), and the look, the pain and the reaching hand come at a body's latencies. Hits add up as looseness on
+    the struck part, and a body on one foot or in the air takes less of a hit.
+  - The stagger steps with whichever foot best catches it (crossing over a little for a push to the side), on planted
+    legs sized to the weight they carry, gripping feet, and the upper body held as shoved; a new **Arms out**
+    behaviour puts the free arms out, and circles them, on a shove or a fast turn. A shove is counted once.
+  - Joint drives take a chain to be sized against, an inertia named outright, and a torque on top of their spring
+    (`PhysicsWorld.setJointDrive`, `setJointTarget`).
+- **Fix: renaming an AI brain's state, parameter or layer.** The name changes on Enter or on leaving the field, not
+  on every key (the field lost focus after one character), and everything that names it follows: a state's
+  transitions and the Layer state parameters reading it, a parameter's conditions in every layer.
+- **The Sandbox: a slower rifle, no sparks on bodies.** The AK-47 fires 450 rounds a minute, and enemies fire shorter
+  bursts with longer gaps. A round hitting a character throws nothing; sparks and dust are for hard surfaces.
 - **Fix: saving a base template and reloading the scene drew the player as a ball and the NPCs in the base's
   colour.** A model inside a placed template copy, rebuilt from its changed model asset (as a Reload rebuilds every
   one), took the asset's own material instead of the one its template gave it (a variant's colour), and the rebuilt

@@ -2117,3 +2117,72 @@ export function capturePoint(com: ArrayLike<number>, velocity: ArrayLike<number>
     const t = Math.sqrt(Math.max(0, height) / Math.max(1e-6, gravity));
     return [com[0] + velocity[0] * t, com[2] + velocity[2] * t];
 }
+
+// Rigid poses [px py pz qx qy qz qw], written into `out` (no allocation: a skin drawn from its bodies every frame).
+// `out` may be `a` or `b`.
+
+/** The pose `b` (in `a`'s frame) carried into `a`'s parent frame: a · b. */
+export function poseMultiplyInto(a: ArrayLike<number>, b: ArrayLike<number>, out: number[]): number[] {
+    const ax = a[3], ay = a[4], az = a[5], aw = a[6], bx = b[3], by = b[4], bz = b[5], bw = b[6];
+    // a's rotation applied to b's position.
+    const px = b[0], py = b[1], pz = b[2];
+    const tx = 2 * (ay * pz - az * py), ty = 2 * (az * px - ax * pz), tz = 2 * (ax * py - ay * px);
+    const rx = px + aw * tx + (ay * tz - az * ty), ry = py + aw * ty + (az * tx - ax * tz), rz = pz + aw * tz + (ax * ty - ay * tx);
+    out[0] = a[0] + rx; out[1] = a[1] + ry; out[2] = a[2] + rz;
+    out[3] = aw * bx + ax * bw + ay * bz - az * by;
+    out[4] = aw * by - ax * bz + ay * bw + az * bx;
+    out[5] = aw * bz + ax * by - ay * bx + az * bw;
+    out[6] = aw * bw - ax * bx - ay * by - az * bz;
+    return out;
+}
+
+/** The pose `b` in `a`'s frame: inv(a) · b. */
+export function poseRelativeInto(a: ArrayLike<number>, b: ArrayLike<number>, out: number[]): number[] {
+    const ax = -a[3], ay = -a[4], az = -a[5], aw = a[6], bx = b[3], by = b[4], bz = b[5], bw = b[6];
+    const px = b[0] - a[0], py = b[1] - a[1], pz = b[2] - a[2];
+    const tx = 2 * (ay * pz - az * py), ty = 2 * (az * px - ax * pz), tz = 2 * (ax * py - ay * px);
+    out[0] = px + aw * tx + (ay * tz - az * ty); out[1] = py + aw * ty + (az * tx - ax * tz); out[2] = pz + aw * tz + (ax * ty - ay * tx);
+    out[3] = aw * bx + ax * bw + ay * bz - az * by;
+    out[4] = aw * by - ax * bz + ay * bw + az * bx;
+    out[5] = aw * bz + ax * by - ay * bx + az * bw;
+    out[6] = aw * bw - ax * bx - ay * by - az * bz;
+    return out;
+}
+
+/** From pose `a` (t = 0) toward `b` (t = 1): the positions lerped, the rotations slerped the short way round. */
+export function poseLerpInto(a: ArrayLike<number>, b: ArrayLike<number>, t: number, out: number[]): number[] {
+    let bx = b[3], by = b[4], bz = b[5], bw = b[6];
+    let cos = a[3] * bx + a[4] * by + a[5] * bz + a[6] * bw;
+    if (cos < 0) { cos = -cos; bx = -bx; by = -by; bz = -bz; bw = -bw; }
+    let k0: number, k1: number;
+    if (cos > 0.9995) { k0 = 1 - t; k1 = t; }
+    else { const omega = Math.acos(Math.min(1, cos)), sin = Math.sin(omega); k0 = Math.sin((1 - t) * omega) / sin; k1 = Math.sin(t * omega) / sin; }
+    const x = a[3] * k0 + bx * k1, y = a[4] * k0 + by * k1, z = a[5] * k0 + bz * k1, w = a[6] * k0 + bw * k1;
+    const n = Math.hypot(x, y, z, w) || 1;
+    out[0] = a[0] + (b[0] - a[0]) * t; out[1] = a[1] + (b[1] - a[1]) * t; out[2] = a[2] + (b[2] - a[2]) * t;
+    out[3] = x / n; out[4] = y / n; out[5] = z / n; out[6] = w / n;
+    return out;
+}
+
+/**
+ * A unit quaternion [x y z w] split about a unit `axis`: its twist (the turn about the axis, the short way round, as a
+ * quaternion and a signed angle) and its swing (what is left, q = swing · twist). A hinge keeps the twist alone.
+ */
+export function quatSwingTwistTuple(q: ArrayLike<number>, axis: ArrayLike<number>): { swing: [number, number, number, number]; twist: [number, number, number, number]; angle: number } {
+    let x = q[0], y = q[1], z = q[2], w = q[3];
+    if (w < 0) { x = -x; y = -y; z = -z; w = -w; }
+    const d = x * axis[0] + y * axis[1] + z * axis[2];
+    let tx = axis[0] * d, ty = axis[1] * d, tz = axis[2] * d, tw = w;
+    const n = Math.hypot(tx, ty, tz, tw);
+    if (n < 1e-9) { tx = 0; ty = 0; tz = 0; tw = 1; }
+    else { tx /= n; ty /= n; tz /= n; tw /= n; }
+    const angle = 2 * Math.atan2(tx * axis[0] + ty * axis[1] + tz * axis[2], tw);
+    // swing = q · inv(twist)
+    const swing: [number, number, number, number] = [
+        w * -tx + x * tw + y * -tz - z * -ty,
+        w * -ty - x * -tz + y * tw + z * -tx,
+        w * -tz + x * -ty - y * -tx + z * tw,
+        w * tw - x * -tx - y * -ty - z * -tz,
+    ];
+    return { swing, twist: [tx, ty, tz, tw], angle };
+}

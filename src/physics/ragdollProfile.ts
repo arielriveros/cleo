@@ -82,6 +82,11 @@ export interface RagdollProfile {
      */
     friction?: number;
     restitution?: number;
+    /**
+     * The feet's grip, above the rest's: a foot that slips cannot step (Euphoria gives its feet 2.25 to the other
+     * parts' 0.75). Default 2.
+     */
+    footFriction?: number;
 }
 
 export const RAGDOLL_PROFILE_DEFAULTS: Omit<RagdollProfile, 'parts'> = {
@@ -93,6 +98,7 @@ export const RAGDOLL_PROFILE_DEFAULTS: Omit<RagdollProfile, 'parts'> = {
     solverIterations: 20,
     friction: 0.8,
     restitution: 0.05,
+    footFriction: 2,
 };
 
 export function defaultJoint(type: RagdollJointType = 'cone'): RagdollJoint {
@@ -592,5 +598,6 @@ export function parseRagdollProfile(raw: unknown): RagdollProfile | undefined {
         solverIterations: finiteOr(r.solverIterations, RAGDOLL_PROFILE_DEFAULTS.solverIterations),
         friction: finiteOr(r.friction, RAGDOLL_PROFILE_DEFAULTS.friction!),
         restitution: finiteOr(r.restitution, RAGDOLL_PROFILE_DEFAULTS.restitution!),
+        footFriction: finiteOr(r.footFriction, RAGDOLL_PROFILE_DEFAULTS.footFriction!),
     };
 }

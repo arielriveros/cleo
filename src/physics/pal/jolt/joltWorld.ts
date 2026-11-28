@@ -102,7 +102,9 @@ export type JoltJointRecord = {
 const TWIST_SIGN = -1;
 
 /** The most a cone motor's target is led along its spin (rad): past it, a turn that fast is not one to follow. */
-const MAX_LEAD = 0.6;
+const MAX_LEAD = 0.3;
+/** A cone this narrow (rad) is a hinge's: a planned knee or elbow (see _nativeDrive). */
+const NARROW_CONE = 5 * Math.PI / 180;
 
 interface Entry {
     readonly handle: BodyHandle;
@@ -672,15 +674,15 @@ export class JoltWorld implements DescribedWorld<JoltJointRecord> {
 
     // ---- drives ----
 
-    public setJointDrive(j: JointHandle, drive: JointDrive | null, subtree?: readonly BodyHandle[]): void {
+    public setJointDrive(j: JointHandle, drive: JointDrive | null, subtree?: readonly BodyHandle[], chain?: readonly BodyHandle[]): void {
         const entry = this._joints.get(j), r = entry?.record;
         const record = !drive || !r || r.kind === 'fixed' ? null
-            : driveRecord(r.a, r.b, r.kind === 'hinge' ? 'hinge' : 'swing', r.anchorB, r.kind === 'hinge' ? rotate(r.frameB, 1, 0, 0, [0, 0, 0]) : null, subtree);
+            : driveRecord(r.a, r.b, r.kind === 'hinge' ? 'hinge' : 'swing', r.anchorB, r.kind === 'hinge' ? rotate(r.frameB, 1, 0, 0, [0, 0, 0]) : null, subtree, chain);
         this.drives.setDrive(j, record, record ? drive : null, this);
     }
 
-    public setJointTarget(j: JointHandle, rotation: ArrayLike<number>, angularVelocity?: ArrayLike<number> | null): void {
-        this.drives.setTarget(j, rotation, angularVelocity);
+    public setJointTarget(j: JointHandle, rotation: ArrayLike<number>, angularVelocity?: ArrayLike<number> | null, torque?: ArrayLike<number> | null): void {
+        this.drives.setTarget(j, rotation, angularVelocity, torque);
     }
 
     public readJointDrive(j: JointHandle, out: Out): void { this.drives.report(j, out); }
@@ -722,7 +724,12 @@ export class JoltWorld implements DescribedWorld<JoltJointRecord> {
         const frame = multiply(qA, record.frameA, [0, 0, 0, 1]);
         const along = (x: number, y: number, z: number) => { const a = rotate(frame, x, y, z, [0, 0, 0]); const q = quadratic(K, a); return q > 0 ? 1 / q : 0; };
         const iTwist = along(1, 0, 0);
-        const iSwing = record.kind === 'cone' ? 0.5 * (along(0, 1, 0) + along(0, 0, 1)) : 0;
+        // A cone's swing motor turns both swing axes with one spring. A cone of a few degrees is a hinge's (a planned
+        // knee or elbow, its twist the bend): its swing axes are the bone's own roll and a sideways bend, the roll's
+        // inertia a fraction of the other's, and the average made the roll's spring many times too stiff for it,
+        // a motor pressing on the cone's edge. The smaller one there; the mean of the two on a full cone.
+        const iSwing = record.kind !== 'cone' ? 0
+            : record.cone <= NARROW_CONE ? Math.min(along(0, 1, 0), along(0, 0, 1)) : 0.5 * (along(0, 1, 0) + along(0, 0, 1));
         const gains = this._gains.get(e.joint) ?? [NaN, NaN];
         const changed = (was: number, now: number) => !(Math.abs(now - was) <= 0.02 * Math.abs(was));
         if (changed(gains[0], iTwist) || changed(gains[1], iSwing)) {

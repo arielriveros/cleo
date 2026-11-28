@@ -238,6 +238,12 @@ export interface JointDrive {
      * muscle cancels on its own, so a soft spring holds its pose instead of sagging. Default 0.
      */
     gravityCompensation?: number;
+    /**
+     * kg·m²: the inertia the spring is sized for, the same about every axis, in place of the joint's own (what it
+     * holds up against what it turns against). A planted leg's knee sized to the body above it rather than to the
+     * shin. Default: the joint's own.
+     */
+    inertia?: number;
 }
 
 /**

@@ -206,12 +206,14 @@ describe.each(BACKENDS)('reactions on %s', backend => {
         expect(pushes[3].fell).toBe(true);
     });
 
-    it('gives up and falls when its steps cannot catch it: one step allowed, shoved hard', () => {
+    it('gives up and falls when its steps cannot catch it: one short step allowed, shoved hard', () => {
         const s = setup();
+        // One step, and a short one: a shove just under a fall's that it could otherwise walk out of.
         s.r.set.behaviours.stepBalance.params.maxSteps = 1;
+        s.r.set.behaviours.stepBalance.params.stepLength = 0.15;
         let gaveUp: string | null = null, fell = false;
         run(s, 240, f => {
-            if (f === 5) s.r.push([0, 0, -1.9]);
+            if (f === 5) s.r.push([0, 0, -2.1]);
             gaveUp = s.r.balance?.gaveUp ?? gaveUp;
             if (s.r.state === 'falling') fell = true;
         });

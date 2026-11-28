@@ -129,12 +129,12 @@ export interface PhysicsWorld {
      * hangs from it — which the drive's gravity compensation weighs. Calling again changes the gains and keeps
      * the target. A fixed joint is never driven.
      */
-    setJointDrive(joint: JointHandle, drive: JointDrive | null, subtree?: readonly BodyHandle[]): void;
+    setJointDrive(joint: JointHandle, drive: JointDrive | null, subtree?: readonly BodyHandle[], chain?: readonly BodyHandle[]): void;
     /**
      * Where a driven joint's muscle turns body A: A's rotation in B's frame, `inv(qB)·qA` [x y z w], and that
      * target's own angular velocity [3] in B's frame (what the spring damps relative to; default still).
      */
-    setJointTarget(joint: JointHandle, rotation: ArrayLike<number>, angularVelocity?: ArrayLike<number> | null): void;
+    setJointTarget(joint: JointHandle, rotation: ArrayLike<number>, angularVelocity?: ArrayLike<number> | null, torque?: ArrayLike<number> | null): void;
     /** What a driven joint did in the last substep: [torque N·m, saturation 0..1, angle still to go rad] into `out`. */
     readJointDrive(joint: JointHandle, out: Out): void;
     /** Pin a dynamic body to a pose in the world with puppet strings (see BodyPin), or let it go (null). */

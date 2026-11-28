@@ -31,7 +31,7 @@ export interface MuscleSettings {
 /** What a behaviour can be: the reflexes a reaction is made of. */
 export type BehaviourId =
     | 'hitReact' | 'stepBalance' | 'catchFall' | 'protectHead' | 'landing' | 'airborne' | 'tumble' | 'vehicleBail'
-    | 'struck' | 'writhe' | 'relax' | 'rollOver' | 'getUp';
+    | 'struck' | 'writhe' | 'relax' | 'rollOver' | 'getUp' | 'armsOut';
 
 /** A pose a behaviour reaches for (a slot): a pose asset in the editor, its bones embedded for the game. */
 export interface ReactionPoseSlot {
@@ -142,17 +142,24 @@ export const BEHAVIOUR_SPECS: readonly BehaviourSpec[] = [
         id: 'hitReact', label: 'Hit reaction', doc: 'A hit staying on its feet: the struck part goes weak and snaps away, the head turns to it and the free hand reaches for the wound.',
         params: [
             p('weakness', 'Weakness', 0.5, 0, 1, 0.05, undefined, 'How much strength the struck part keeps at first (1 = none lost).'),
-            p('weaknessTime', 'Recover in', 0.25, 0, 5, 0.05, 's', 'How long the struck part takes to get its strength back.'),
+            p('weaknessTime', 'Recover in', 0.4, 0, 5, 0.05, 's', 'How long the struck part takes to get its strength back (a round on a part still weak adds to the weakness, rather than starting it over).'),
+            p('weaknessFloor', 'Weakest', 0.1, 0, 1, 0.01, undefined, 'The least strength a struck part keeps however many rounds land on it.'),
             p('trackStiffness', 'Tracking', 6, 0, 30, 0.1, 'Hz', 'How firmly the upper body follows the animation while the character stands: a hit is a sway on what it is doing, not a pull away from it.'),
             p('trackStrength', 'Tracking strength', 3, 0, 10, 0.05, undefined, 'The muscles\' strength while it stands, as a multiple of the set\'s.'),
+            p('followSpin', 'Follow spin', 0.6, 0, 1, 0.05, undefined, 'How much of the animation\'s own turning the muscles are given to follow (smoothed): less keeps a fast layer\'s jerk out of them.'),
             p('maxKick', 'Kick', 6, 0, 100, 0.5, 'N·s', 'The most of a hit\'s impulse the struck part takes while the character stands (the whole hit still decides whether it stumbles or falls).'),
             p('snap', 'Snap', 0.4, 0, 3, 0.05, undefined, 'An extra jolt to the spine and neck, away from the hit.'),
-            p('reachDelay', 'Reach after', 0.1, 0, 2, 0.05, 's', 'How long before a hand goes to the wound.'),
+            p('reachDelay', 'Reach after', 0.18, 0, 2, 0.01, 's', 'How long before a hand goes to the wound (a voluntary move: about 0.15 s or more).'),
             p('holdTime', 'Hold for', 2, 0, 10, 0.1, 's', 'How long a free hand holds the wound (a hand on a weapon does not leave it).'),
             p('maxReach', 'Reach', 0.65, 0, 1.5, 0.01, 'm', 'The farthest a hand reaches for a wound (beyond, it does not try).'),
             p('reachStiffness', 'Reach stiffness', 3, 0, 20, 0.1, 'Hz', 'How firmly the reaching arm holds the wound.'),
             p('reachPull', 'Reach pull', 0.5, 0, 1, 0.05, undefined, 'How firmly a string draws the hand onto the wound, as a share of the strings (0: the muscles of the arm alone).'),
+            p('lookDelay', 'Look after', 0.1, 0, 1, 0.01, 's', 'How long before the head turns to the wound.'),
             p('lookTime', 'Look for', 0.8, 0, 5, 0.05, 's', 'How long the head turns toward the wound.'),
+            p('tone', 'Tense', 0.35, 0, 2, 0.05, undefined, 'How much the upper body tenses after a hit (stiffer and better damped, the struck part excepted), from about 35 ms on.'),
+            p('toneTime', 'Tense for', 0.3, 0, 3, 0.05, 's', 'How long that tension takes to ease off.'),
+            p('impulseOneFoot', 'On one foot', 0.8, 0, 2, 0.05, undefined, 'How much of a hit a body on one foot takes (a stepping one): it cannot brace on both.'),
+            p('impulseAirborne', 'Off its feet', 0.5, 0, 2, 0.05, undefined, 'How much of a hit a body off its feet takes: with nothing to push against it is carried rather than snapped.'),
             p('duration', 'Lasts', 1.4, 0.1, 10, 0.05, 's', 'How long a hit reaction runs before the character is back on its animation.'),
             p('painLean', 'Pain', 0.25, 0, 1, 0.01, 'rad', 'How far the spine bows over a hit to the chest or the gut, for as bad as it is: up in 0.2 s, easing off over 1.5 s.'),
             p('shockSpin', 'Shock spin', 0.3, 0, 1.5, 0.01, 'rad', 'How far a hit to the chest turns it, the way the hit pushes the side it struck.'),
@@ -178,11 +185,27 @@ export const BEHAVIOUR_SPECS: readonly BehaviourSpec[] = [
             p('widthMax', 'Widest step', 0.4, 0.1, 1, 0.01, 'm', 'The most it steps out to the side.'),
             p('maxSteps', 'Steps', 4, 1, 12, 1, undefined, 'How many steps it takes before it gives up and falls, if they have not caught it.'),
             p('tire', 'Tires to', 0.7, 0.1, 1, 0.01, undefined, 'The strength its legs keep with each step after the second.'),
-            p('assist', 'Help', 1, 0, 2, 0.05, undefined, 'A hand keeping the trunk upright and the hips from sinking while it steps (0: its legs alone).'),
+            p('assist', 'Help', 1, 0, 2, 0.05, undefined, 'A hand keeping the trunk upright, the hips from sinking and the body slowing over its feet while a foot is down (Euphoria\'s StayUpright and resistAcc), on top of what its legs, hips and ankles do (0: those alone).'),
+            p('firstStep', 'First step after', 0.12, 0, 1, 0.01, 's', 'How long before the first step: a body takes about a tenth of a second to start one.'),
+            p('crossMax', 'Crosses by', 0.08, 0, 0.3, 0.01, 'm', 'How far a foot may cross over the other to catch a push to the side.'),
+            p('stanceStiffness', 'Stance', 1.2, 0, 6, 0.05, 'Hz', 'How firmly a planted leg holds, on the weight it carries.'),
             p('maxShove', 'Falls above', 3, 0.5, 10, 0.1, 'm/s', 'A shove faster than this knocks it straight down: no step could catch it.'),
             p('giveUpTilt', 'Falls past', 0.6, 0.1, 1.5, 0.01, 'rad', 'How far the trunk may lean from upright before it falls.'),
             p('giveUpTime', 'For', 0.15, 0, 1, 0.01, 's', 'How long it must lean that far to fall.'),
             p('recoverTime', 'Recovered after', 0.4, 0, 3, 0.05, 's', 'How long it must stand over its feet, slow, before it is back on its animation.'),
+        ],
+        poses: [], clips: [],
+    },
+    {
+        id: 'armsOut', label: 'Arms out', doc: 'Shoved or spun on its feet: the free arms go out to the sides to keep its balance, circling when it turns fast (Euphoria\'s bodyBalance arms and ArmsWindmill).',
+        params: [
+            p('spin', 'After a turn of', 1.2, 0, 10, 0.05, 'rad/s', 'The trunk turning faster than this (or a shove faster than Shove) puts the arms out.'),
+            p('shove', 'Or a shove of', 1.2, 0, 10, 0.05, 'm/s', 'A shove at least this fast puts the arms out.'),
+            p('abduct', 'Out', 0.9, 0, 1.6, 0.05, 'rad', 'How far the arms go out from the sides.'),
+            p('elbow', 'Elbows', 0.4, 0, 1.5, 0.05, 'rad', 'How far the elbows bend.'),
+            p('stiffness', 'Stiffness', 4, 0, 20, 0.1, 'Hz', 'How firmly the arms are held out.'),
+            p('windmill', 'Circle above', 3, 0, 20, 0.1, 'rad/s', 'Turning faster than this, the arms circle.'),
+            p('hold', 'Hold for', 1.1, 0, 5, 0.05, 's', 'How long the arms stay out after it has steadied.'),
         ],
         poses: [], clips: [],
     },

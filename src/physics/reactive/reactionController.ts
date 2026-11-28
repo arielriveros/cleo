@@ -19,6 +19,7 @@ import { BAILS, BEHAVIOURS, rollAngle, STRUCK, type HitZone, type ReactionBehavi
 import { NO_REACTION_EFFECTS, type AnimationRagdollStart, type AnimatorReactionLink, type GetUpClock, type ReactionEffectsNow } from '../../animation/reactionLink';
 import { pickReactionSet, parseReactionSets, type ReactionSet } from './reactionSet';
 import { Balancer } from './balancer';
+import { Nerves, reflexEnvelope, TONE_DELAY } from './nerves';
 
 export type { HitZone, ReactionState, ReactionWound } from './behaviours';
 
@@ -113,6 +114,9 @@ const MAX_CATCH_UP_SPIN = 6;
 const KINEMATIC_CATCH_UP_WORKER = 0.5;
 const MAX_CATCH_UP_SPEED_WORKER = 0.5;
 const MAX_CATCH_UP_SPIN_WORKER = 2;
+/** The fastest the animation itself moves and turns a kinematic part (m/s, rad/s): past it, a jump, not a motion. */
+const KINEMATIC_MAX_SPEED = 7;
+const KINEMATIC_MAX_SPIN = 8;
 function clampLength(v: number[], max: number): number[] {
     const n = Math.hypot(v[0], v[1], v[2]);
     if (!Number.isFinite(n)) return [0, 0, 0];
@@ -429,11 +433,14 @@ export class ReactionController implements AnimatorReactionLink {
             const lower = LOWER(p.region) && !!this._body?.kinematic[part];
             const kickPart = lower ? this._body!.chest : part;
             const q = r.parts[kickPart], P = this.set.behaviours.hitReact.params;
-            const kick = Math.min(impulse, P.maxKick, MAX_KICK_SPEED * q.mass);
+            const kick = Math.min(impulse, P.maxKick, MAX_KICK_SPEED * q.mass) * this._braced();
             const at = lower ? [q.body.position.x, q.body.position.y, q.body.position.z] : point;
             r.applyImpulse([dir[0] * kick * 0.6, dir[1] * kick * 0.6, dir[2] * kick * 0.6], at, kickPart);
             this._spread(dir, kick * 0.4);
-        } else r.applyImpulse([dir[0] * impulse, dir[1] * impulse, dir[2] * impulse], point, part);
+        } else {
+            const m = impulse * this._braced();
+            r.applyImpulse([dir[0] * m, dir[1] * m, dir[2] * m], point, part);
+        }
         const zone = this._wound(part, point, dir, impulse);
         const before = this._state;
         this._emit('Hit', { part, partName: r.parts[part].name, impulse, point: point as [number, number, number], zone });
@@ -442,6 +449,20 @@ export class ReactionController implements AnimatorReactionLink {
         if (this._state !== before) return;
         if (kept && !this._standingState()) this._go('hitReact');
         if (staggers) { this._go('stagger'); this._knockBack(dir, impulse); }
+    }
+
+    /**
+     * How much of a hit the body takes, by how it is standing (Euphoria's bullet multipliers by balance state): all of
+     * it on both feet (or its legs on the animation), less on one foot (stepping), less again in the air, where there
+     * is nothing to push against and a full hit would fling it rather than snap it. The hit still counts in full
+     * toward a stagger or a fall.
+     */
+    private _braced(): number {
+        const H = this.set.behaviours.hitReact.params, s = this.sensors;
+        if (this._standingState() && !this._stepping) return 1;
+        if (s.feetDown >= 2) return 1;
+        if (s.feetDown === 1) return Math.max(0, H.impulseOneFoot ?? 0.8);
+        return s.grounded ? 1 : Math.max(0, H.impulseAirborne ?? 0.5);
     }
 
     /** A free hand still holding a wound (its reach under way). */
@@ -658,11 +679,14 @@ export class ReactionController implements AnimatorReactionLink {
             return;
         }
         if (!this._standingState()) this._go('hitReact');
+        const staggers = full && impulse >= T.staggerImpulse;
         // The upper body sways (no part changed by more than a kick); the capsule carries the rest (flinching only,
-        // it is not shoved).
-        const v = Math.min(speed, MAX_KICK_SPEED), k = speed > 0 ? v / speed : 0;
-        for (const p of parts) if (!this._body?.kinematic[p.index]) p.body.applyImpulse([velocity[0] * k * p.mass, velocity[1] * k * p.mass, velocity[2] * k * p.mass]);
-        if (!full || impulse < T.staggerImpulse) return;
+        // it is not shoved). Not before a stagger: its shove is the whole of it (a sway on top counted it twice).
+        if (!staggers || !(this._stepping || this._canStep())) {
+            const v = Math.min(speed, MAX_KICK_SPEED), k = speed > 0 ? v / speed : 0;
+            for (const p of parts) if (!this._body?.kinematic[p.index]) p.body.applyImpulse([velocity[0] * k * p.mass, velocity[1] * k * p.mass, velocity[2] * k * p.mass]);
+        }
+        if (!staggers) return;
         // Shoved hard enough to stagger: it steps to stay up, the shove on its body (or, with no legs to step on, on
         // its capsule, its legs walking it out). A softer shove is a flinch only: it never slides it along the ground.
         this._go('stagger');
@@ -914,11 +938,16 @@ export class ReactionController implements AnimatorReactionLink {
         if (!r || !body || r.destroyed || r.frozen) return;
         // The get-up clip waits on its first frame while the skin blends onto it.
         if (this._state === 'getUp' && this._getUpAction && this._stateTime < this._getUpHold()) this._getUpAction.seek(0);
-        body.begin(dt, this._physics.executor === 'worker' ? dt : 0);
+        // Read a step late (the worker's last step not back yet), the poses are carried on to where the world is.
+        body.followSpin = Math.max(0, Math.min(1, this.set.behaviours.hitReact.params.followSpin ?? 1));
+        body.begin(dt, this._physics.posesLag ? dt : 0);
         if (this._split) this._driveKinematic(body, dt);
         // A stagger's shove, the step after its legs went dynamic (a body switched and pushed in one step keeps neither).
         if (this._stepping && this._shoveWait-- <= 0) this._applyShove();
         this._applySpread(body, dt);
+        // Looseness wears off at the rate the set's Recover in says (a part as weak as a hit leaves it, back in that time).
+        const H = this.set.behaviours.hitReact.params, ease = dt / Math.max(1e-3, H.weaknessTime);
+        for (let i = 0; i < this._loose.length; i++) if (this._loose[i] > 0) this._loose[i] = Math.max(0, this._loose[i] - ease);
         this._evolveRef(body, dt);
         this._base(body, dt);
         const ctx = this._context(dt);
@@ -928,6 +957,9 @@ export class ReactionController implements AnimatorReactionLink {
         }
         // Off its feet every muscle is at least critically damped: a soft limb that rings reads as jelly.
         if (OFF_FEET_REF(this._state)) for (const p of body.parts) if (body.damping[p.index] < 1) body.damping[p.index] = 1;
+        // The nervous system (nerves.ts): the body tensing after a hit, and no gain jumping in a step.
+        this._nerves.tone(body, this._toneNow(), this._loose);
+        this._nerves.filter(body, dt);
         this._upload(body, dt);
     }
 
@@ -960,10 +992,13 @@ export class ReactionController implements AnimatorReactionLink {
                 continue;
             }
             const c = clampLength([ex * k, ey * k, ez * k], maxSpeed);
-            b.velocity.set(v[0] + c[0], v[1] + c[1], v[2] + c[2]);
+            // The animation's own velocity capped too: a hop of the animated hips (a step up, a capsule placed) is a
+            // frame's jump, not a motion, and as a velocity it jolts everything jointed to them.
+            const va = clampLength([v[0], v[1], v[2]], KINEMATIC_MAX_SPEED), wa = clampLength([v[3], v[4], v[5]], KINEMATIC_MAX_SPIN);
+            b.velocity.set(va[0] + c[0], va[1] + c[1], va[2] + c[2]);
             const e = quatToRotationVector(quatMultiplyTuple(qt, quatConjugateTuple([s[3], s[4], s[5], s[6]])));
             const w = clampLength([e[0] * k, e[1] * k, e[2] * k], maxSpin);
-            b.angularVelocity.set(v[3] + w[0], v[4] + w[1], v[5] + w[2]);
+            b.angularVelocity.set(wa[0] + w[0], wa[1] + w[1], wa[2] + w[2]);
         }
     }
 
@@ -1199,6 +1234,8 @@ export class ReactionController implements AnimatorReactionLink {
         this._stateTime = 0;
         this._balancedFor = 0;
         this._letGo = false;
+        // Onto a clip (getting up) or gone: the muscles as they are told at once, no ramp from what they were.
+        if (next === 'getUp' || next === 'dead') this._nerves.snap();
         // Off the ground's rest: its bodies back in the world (they left it lying still).
         if (from === 'down' && next !== 'dead' && this.ragdoll?.frozen) this.ragdoll.unfreeze();
         if (from === 'down') this._riseAsked = false;
@@ -1306,6 +1343,9 @@ export class ReactionController implements AnimatorReactionLink {
         this.owners.fill(null);
         this.sensors.reset();
         this._time = 0;
+        this._nerves.snap();
+        this._selfOffUntil = [];
+        this._loose = new Float64Array(r.parts.length);
         this._split = false;
         this._mapNow = new Float64Array(r.parts.length);
         // Where the feet are below the Collider's origin: what following the hips puts back.
@@ -1495,38 +1535,42 @@ export class ReactionController implements AnimatorReactionLink {
         const n = body.parts.length;
         const total = body.parts.reduce((s, p) => s + p.mass, 0) || 1;
         while (this._prevAnim.length < n) this._prevAnim.push(body.anim[this._prevAnim.length].slice());
-        const lead = this._split ? dt : 0;
         for (const p of body.parts) {
             const i = p.index;
             if (p.joint !== null) {
-                // A frame ahead along the animation's own motion: the animator poses after the physics steps, so the
-                // pose read is a frame old, and a muscle aimed at it would trail a swinging arm.
-                const s = body.spin[i];
-                if (lead > 0 && (s[0] !== 0 || s[1] !== 0 || s[2] !== 0)) {
-                    const t = body.target[i], q = quatMultiplyTuple(rotationVectorToQuat([s[0] * lead, s[1] * lead, s[2] * lead]), t);
-                    t[0] = q[0]; t[1] = q[1]; t[2] = q[2]; t[3] = q[3];
-                }
+                // The target goes as it is, with its (smoothed) spin: the motor leads it along that spin by as much as
+                // its spring would trail it (joltWorld), once. A second lead here (a frame) doubled every jerk of the
+                // pose (a recoil, a flinch) into the muscles.
                 body.clampTarget(i);
                 d.frequency = Math.max(0, body.frequency[i]);
                 d.damping = Math.max(0, body.damping[i]);
                 d.maxTorque = Math.max(0, body.torque[i] * massScale);
                 d.gravityCompensation = Math.max(0, Math.min(1, body.holdUp[i]));
                 d.friction = Math.max(0, body.friction[i]);
+                // A spring sized to a load named outright (a planted leg's, the body it carries), else the joint's own.
+                if (body.inertia[i] > 0) d.inertia = body.inertia[i]; else delete d.inertia;
                 r.setMuscle(i, d);
-                r.setTarget(i, body.target[i], body.spin[i]);
+                // A torque asked of the joint (the balancer's), into the parent's frame the drive takes it in.
+                const jt = body.jointTorque[i];
+                if (jt[0] !== 0 || jt[1] !== 0 || jt[2] !== 0) {
+                    const ps = body.sim[p.parent];
+                    const local = quatRotateTuple([-ps[3], -ps[4], -ps[5], ps[6]], jt);
+                    r.setTarget(i, body.target[i], body.spin[i], local);
+                } else r.setTarget(i, body.target[i], body.spin[i]);
             }
             const w = body.kinematic[i] ? 0 : body.pin[i], gw = body.kinematic[i] ? 0 : body.goalWeight[i];
             if (gw > 1e-3) {
-                // A string to a point (a hand onto a wound): position only, still.
+                // A string to a point (a hand onto a wound): position only, moving as the point does.
                 pin.linearFrequency = pins.frequency * gw;
                 pin.angularFrequency = 0;
                 pin.damping = pins.damping;
                 pin.maxForce = pins.maxForce * gw * p.mass * n / total * massScale;
                 pin.maxTorque = 0;
                 r.setPin(i, pin);
-                const g = body.goal[i], s = body.sim[i], t = this._goalPose;
+                const g = body.goal[i], s = body.sim[i], t = this._goalPose, gv = body.goalVel[i], v = this._vel6;
                 t[0] = g[0]; t[1] = g[1]; t[2] = g[2]; t[3] = s[3]; t[4] = s[4]; t[5] = s[5]; t[6] = s[6];
-                r.setPinTarget(i, t, null);
+                v[0] = gv[0]; v[1] = gv[1]; v[2] = gv[2]; v[3] = v[4] = v[5] = 0;
+                r.setPinTarget(i, t, v);
             } else if (w > 1e-3) {
                 pin.linearFrequency = pins.frequency * w;
                 pin.angularFrequency = pins.frequency * w;
@@ -1549,8 +1593,15 @@ export class ReactionController implements AnimatorReactionLink {
             // Self-collision off for a part that asks to pass through the body (and back on after), and for the legs
             // and hips while they are the animation's: kinematic, they would shove an arm hanging beside them out of
             // the way with no give at all (the animation's own arm passes them by).
+            // And the arms and hands while it stands (Euphoria's self-avoidance; PuppetMaster turns internal collisions
+            // off while pinned): a hand on a grip beside the other, a forearm across the chest, are where the animation
+            // puts them, and contacts there are a chatter the muscles fight. Back on half a second after it leaves its
+            // feet, once the arms have come away.
+            const arm = p.region === 'arms' || p.region === 'hands';
+            if (arm && this._standingState()) this._selfOffUntil[i] = this._time + 0.5;
             const b = p.body, own = this._ownMask[i] ??= b.collisionFilterMask;
-            const mask = body.passThrough[i] || body.kinematic[i] ? own & ~LAYER.RAGDOLL : own;
+            const avoid = arm && this._time < (this._selfOffUntil[i] ?? -Infinity);
+            const mask = body.passThrough[i] || body.kinematic[i] || avoid ? own & ~LAYER.RAGDOLL : own;
             if (b.collisionFilterMask !== mask) b.collisionFilterMask = mask;
             const prev = this._prevAnim[i];
             for (let k = 0; k < 7; k++) prev[k] = body.anim[i][k];
@@ -1570,6 +1621,24 @@ export class ReactionController implements AnimatorReactionLink {
     }
 
     private readonly _goalPose = [0, 0, 0, 0, 0, 0, 1];
+    private readonly _vel6 = [0, 0, 0, 0, 0, 0];
+    /** Per part: until when (reaction clock) its self-collision stays off after it stood (see _upload). */
+    private _selfOffUntil: number[] = [];
+    private readonly _nerves = new Nerves();
+
+    /**
+     * How tense the body is now (Nerves.tone): the set's Tense, by the worst recent hit, from TONE_DELAY on, easing off
+     * over Tense for.
+     */
+    private _toneNow(): number {
+        const H = this.set.behaviours.hitReact.params;
+        if (!(H.tone > 0) || !this._wounds.length) return 0;
+        let t = 0;
+        for (const w of this._wounds) t = Math.max(t, Math.min(1, w.severity * 2) * reflexEnvelope(this._time - w.at - TONE_DELAY, 0.03, 0.15, Math.max(0.05, H.toneTime)));
+        return H.tone * t;
+    }
+    /** Per part: how loose a hit has left it (0 none, up to 2), easing off (see hitReact). */
+    private _loose = new Float64Array(0);
     /** Each part's collision mask as the ragdoll made it (what passThrough turns self-collision off from). */
     private _ownMask: number[] = [];
 
@@ -1618,6 +1687,7 @@ export class ReactionController implements AnimatorReactionLink {
             balancer: this._stepping ? this._balancer : null,
             standing: this._standingState(), knock: this._knockV,
             handFree: side => this._handFree(side),
+            loose: this._loose,
             outCold: this._limp || this._time < this._unconsciousUntil,
             rolling: this._rolling, rollSign: this._rollSign,
         };
@@ -1689,6 +1759,14 @@ export class ReactionController implements AnimatorReactionLink {
         const zone = this._zoneOf(part, dir);
         const severity = Math.min(1, impulse / Math.max(1, this.set.thresholds.fallImpulse) * 2);
         this._wounds.push({ part, local, normal, impulse: [dir[0] * impulse, dir[1] * impulse, dir[2] * impulse], at: this._time, hand, zone, severity, clock: this._physics.simulatedTime });
+        // The struck part goes loose by how bad the hit was, ON TOP of what looseness it still has (Euphoria's
+        // looseness per bullet): a second round on a weak arm keeps it weak, it does not start its ramp over. Off its
+        // feet its neighbours give a little too.
+        const L = this._loose;
+        if (L.length > part) {
+            L[part] = Math.min(2, L[part] + Math.max(0.25, severity));
+            if (!this._standingState()) for (const j of [p.parent, ...p.children]) if (j >= 0 && j < L.length) L[j] = Math.min(2, L[j] + 0.5 * severity);
+        }
         // Four at most: the slightest goes first (the oldest of equals), not merely the oldest.
         if (this._wounds.length > 4) {
             let worst = 0;

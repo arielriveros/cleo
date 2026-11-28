@@ -3,7 +3,7 @@ import type { Skin } from '../../animation/animatedModel';
 import type { AnimationPose } from '../../animation/animationPose';
 import { solveTwoBone } from '../../animation/ik';
 import { normalizeBoneName } from '../../animation/boneNames';
-import { quatFromToTuple, quatMultiplyTuple, quatConjugateTuple, quatRotateTuple, quatSlerpTuple, quatToRotationVector, rotationVectorToQuat } from '../../core/math';
+import { quatFromToTuple, quatMultiplyTuple, quatConjugateTuple, quatRotateTuple, quatSlerpTuple, quatSwingTwistTuple, quatToRotationVector, rotationVectorToQuat } from '../../core/math';
 import type { Ragdoll, RagdollPartInfo } from '../ragdoll';
 import { rigidRotation } from '../ragdollProfile';
 
@@ -31,9 +31,14 @@ export class ReactionBody {
     /**
      * The target's own spin, per part, in its parent's frame: the animation's, measured between this frame's pose and
      * the last (begin), so a muscle follows a swinging arm rather than trailing it; less as a behaviour blends the
-     * target away from the animation.
+     * target away from the animation. Smoothed (SPIN_TAU) and scaled by `followSpin` (Euphoria's angVelScale): a
+     * frame difference of a pose with a fast layer in it is mostly that layer's jerk, and a muscle fed it as a velocity
+     * passes it on as a wobble.
      */
     public readonly spin: number[][] = [];
+    /** How much of the animation's smoothed spin the muscles are fed (0..1; the set's Follow spin). */
+    public followSpin = 1;
+    private readonly _spinF: number[][] = [];
     /** Per part, the animation's world velocity [vx vy vz wx wy wz] (what a kinematic part is moved by). */
     public readonly animVel: number[][] = [];
     /** Per part: 1 while it is kinematic on the animation (the legs of a character on its feet). */
@@ -44,6 +49,11 @@ export class ReactionBody {
     public readonly torque: Float64Array;
     public readonly holdUp: Float64Array;
     public readonly friction: Float64Array;
+    /**
+     * Per part: the inertia its muscle's spring is sized for (kg·m², JointDrive.inertia), 0 for the joint's own: a
+     * planted leg's on the weight it carries. Zeroed each frame (begin).
+     */
+    public readonly inertia: Float64Array;
     /** Per part: how firmly its strings hold it to the animation (0..1), and how much of it is drawn simulated. */
     public readonly pin: Float64Array;
     public readonly mapping: Float64Array;
@@ -53,6 +63,13 @@ export class ReactionBody {
      */
     public readonly goal: number[][] = [];
     public readonly goalWeight: Float64Array;
+    /** Per part: how fast its string's point moves (world m/s): a hand held on a wound rides the wound. */
+    public readonly goalVel: number[][] = [];
+    /**
+     * Per part: a torque its joint adds on top of its muscle's spring (world N·m, on the part; its opposite on the
+     * parent): what a balance controller asks of a joint. Zeroed each frame (begin).
+     */
+    public readonly jointTorque: number[][] = [];
     /**
      * Per part, this frame: 1 to pass through the rest of the body (no self-collision), as an arm reaching across
      * the chest for a wound must: the chest's contacts would hold it off what it reaches for.
@@ -73,6 +90,11 @@ export class ReactionBody {
      */
     private readonly _bindRel: number[][] = [];
     private readonly _twist: number[] = [];
+    /**
+     * Per part: where its joint's twist is zero, its rotation in its parent's frame as the body was made (the
+     * physics' joint frames are measured from the pose they were made in, not the bind pose).
+     */
+    private readonly _twistZero: number[][] = [];
 
     constructor(public readonly ragdoll: Ragdoll) {
         const parts = this.parts = ragdoll.parts;
@@ -81,12 +103,13 @@ export class ReactionBody {
             this.sim.push([0, 0, 0, 0, 0, 0, 1]); this.anim.push([0, 0, 0, 0, 0, 0, 1]);
             this.target.push([0, 0, 0, 1]); this.ref.push([0, 0, 0, 1]); this.spin.push([0, 0, 0]); this.goal.push([0, 0, 0]);
             this.animVel.push([0, 0, 0, 0, 0, 0]); this._prevAnim.push([0, 0, 0, 0, 0, 0, 1]); this._prevRel.push([0, 0, 0, 1]);
+            this._spinF.push([0, 0, 0]); this.goalVel.push([0, 0, 0]); this.jointTorque.push([0, 0, 0]);
         }
         this.kinematic = new Uint8Array(n);
         this.goalWeight = new Float64Array(n);
         this.passThrough = new Uint8Array(n);
         this.frequency = new Float64Array(n); this.damping = new Float64Array(n); this.torque = new Float64Array(n);
-        this.holdUp = new Float64Array(n); this.friction = new Float64Array(n);
+        this.holdUp = new Float64Array(n); this.friction = new Float64Array(n); this.inertia = new Float64Array(n);
         this.pin = new Float64Array(n); this.mapping = new Float64Array(n).fill(1);
         const role = (r: string) => parts.findIndex(p => p.role === r);
         for (const s of ['L', 'R'] as const) {
@@ -104,6 +127,11 @@ export class ReactionBody {
             this._bindRel.push(quatMultiplyTuple([-lp[0], -lp[1], -lp[2], lp[3]], [lc[0], lc[1], lc[2], lc[3]]));
             const hinge = p.layout.part.joint?.type === 'hinge' || !!p.layout.hingeAxis;
             this._twist.push(p.parent >= 0 && !hinge && p.layout.twistAngle > 0 && p.layout.twistAngle < Math.PI - 1e-3 ? p.layout.twistAngle : 0);
+            if (p.parent >= 0) {
+                const qa = p.body.quaternion, qb = parts[p.parent].body.quaternion;
+                const z = quatMultiplyTuple([-qb.x, -qb.y, -qb.z, qb.w], [qa.x, qa.y, qa.z, qa.w]);
+                this._twistZero.push(Number.isFinite(z[0] + z[1] + z[2] + z[3]) ? z : this._bindRel[this._bindRel.length - 1]);
+            } else this._twistZero.push([0, 0, 0, 1]);
         }
         this.pelvis = Math.max(0, parts.findIndex(p => p.parent < 0));
         this.chest = [role('chest'), role('spine'), this.pelvis].find(i => i >= 0)!;
@@ -129,17 +157,22 @@ export class ReactionBody {
         r.animatedPartPoses(this.anim);
         const pa = this.anim[this.pelvis], pp = this._prevAnim[this.pelvis];
         const moving = dt > 1e-4 && this._begun && Math.hypot(pa[0] - pp[0], pa[1] - pp[1], pa[2] - pp[2]) < 0.5;
+        const smooth = moving ? 1 - Math.exp(-dt / SPIN_TAU) : 0;
         for (const p of this.parts) {
-            const i = p.index, t = this.target[i], s = this.spin[i], v = this.animVel[i];
+            const i = p.index, t = this.target[i], s = this.spin[i], v = this.animVel[i], f = this._spinF[i];
             r.relativeRotation(this.anim, i, t);
             s[0] = s[1] = s[2] = 0;
             for (let k = 0; k < 6; k++) v[k] = 0;
             const prevRel = this._prevRel[i], prev = this._prevAnim[i], a = this.anim[i];
+            if (!moving) f[0] = f[1] = f[2] = 0;
             if (moving) {
-                // ω in the parent's frame: rel_now = exp(ω·dt)·rel_prev, so ω = log(rel_now·inv(rel_prev)) / dt.
+                // ω in the parent's frame: rel_now = exp(ω·dt)·rel_prev, so ω = log(rel_now·inv(rel_prev)) / dt;
+                // smoothed, scaled and capped for the muscles (see `spin`).
                 if (p.parent >= 0) {
                     const w = quatToRotationVector(quatMultiplyTuple(t, quatConjugateTuple(prevRel)));
                     clampInto(s, w[0] / dt, w[1] / dt, w[2] / dt, MAX_SPIN);
+                    for (let k = 0; k < 3; k++) f[k] += (s[k] - f[k]) * smooth;
+                    clampInto(s, f[0] * this.followSpin, f[1] * this.followSpin, f[2] * this.followSpin, MAX_TARGET_SPIN);
                 }
                 v[0] = (a[0] - prev[0]) / dt; v[1] = (a[1] - prev[1]) / dt; v[2] = (a[2] - prev[2]) / dt;
                 const ww = quatToRotationVector(quatMultiplyTuple([a[3], a[4], a[5], a[6]], quatConjugateTuple([prev[3], prev[4], prev[5], prev[6]])));
@@ -153,17 +186,34 @@ export class ReactionBody {
         this._begun = true;
         this.goalWeight.fill(0);
         this.passThrough.fill(0);
+        for (const q of this.jointTorque) q[0] = q[1] = q[2] = 0;
+        this.inertia.fill(0);
     }
     private readonly _prevAnim: number[][] = [];
     private readonly _prevRel: number[][] = [];
     private _begun = false;
 
     /** A string from part `i`'s centre to a world point, `w` (0..1) of the set's strings; its rotation left free. */
-    public pull(i: number, point: ArrayLike<number>, w: number): void {
+    public pull(i: number, point: ArrayLike<number>, w: number, velocity?: ArrayLike<number> | null): void {
         if (!(w > 0) || i < 0) return;
-        const g = this.goal[i];
+        const g = this.goal[i], v = this.goalVel[i];
         g[0] = point[0]; g[1] = point[1]; g[2] = point[2];
+        v[0] = velocity?.[0] ?? 0; v[1] = velocity?.[1] ?? 0; v[2] = velocity?.[2] ?? 0;
         this.goalWeight[i] = Math.max(this.goalWeight[i], Math.min(1, w));
+    }
+
+    /** Add a torque to part `i`'s joint (world N·m on the part, its opposite on its parent): see `jointTorque`. */
+    public addJointTorque(i: number, x: number, y: number, z: number): void {
+        const q = this.jointTorque[i];
+        if (!q || !Number.isFinite(x + y + z)) return;
+        q[0] += x; q[1] += y; q[2] += z;
+    }
+
+    /** How fast a point of part `i` moves (world): its body's velocity there, v + ω × r. */
+    public pointVelocity(i: number, point: ArrayLike<number>): [number, number, number] {
+        const b = this.parts[i].body, v = b.velocity, w = b.angularVelocity, s = this.sim[i];
+        const rx = point[0] - s[0], ry = point[1] - s[1], rz = point[2] - s[2];
+        return [v.x + w.y * rz - w.z * ry, v.y + w.z * rx - w.x * rz, v.z + w.x * ry - w.y * rx];
     }
 
     // ---- poses ----
@@ -216,9 +266,10 @@ export class ReactionBody {
     }
 
     /** Muscle settings of part `i` moved toward these by `w`. */
-    public tune(i: number, w: number, s: { frequency?: number; damping?: number; torque?: number; holdUp?: number; friction?: number }): void {
+    public tune(i: number, w: number, s: { frequency?: number; damping?: number; torque?: number; holdUp?: number; friction?: number; inertia?: number }): void {
         if (!(w > 0) || i < 0) return;
         const k = Math.min(1, w);
+        if (s.inertia !== undefined) this.inertia[i] = w >= 0.5 ? s.inertia : this.inertia[i];
         if (s.frequency !== undefined) this.frequency[i] += (s.frequency - this.frequency[i]) * k;
         if (s.damping !== undefined) this.damping[i] += (s.damping - this.damping[i]) * k;
         if (s.torque !== undefined) this.torque[i] += (s.torque - this.torque[i]) * k;
@@ -360,13 +411,15 @@ export class ReactionBody {
     public clampTarget(i: number): void {
         const p = this.parts[i], cone = this._cone[i];
         if (!p || p.parent < 0 || !cone) return;
+        if (p.hingeJoint) { this._projectHinge(i); return; }
         this._clampTwist(i);
         if (!(cone.angle > 0) || cone.angle >= Math.PI - 1e-3) return;
         const t = this.target[i];
         const axis = quatRotateTuple(t, cone.child), ref = cone.parent;
         const cos = Math.max(-1, Math.min(1, axis[0] * ref[0] + axis[1] * ref[1] + axis[2] * ref[2]));
         const swing = Math.acos(cos);
-        const limit = cone.angle * 0.97;
+        // Inside the cone by a margin: a muscle aimed at its very edge presses the joint into its stop and shudders.
+        const limit = Math.max(0, cone.angle - Math.max(HINGE_MARGIN, cone.angle * 0.05));
         if (swing <= limit) return;
         // Turn the child's axis back onto the cone's edge, the short way, about the axis square to both.
         const turnAxis = [axis[1] * ref[2] - axis[2] * ref[1], axis[2] * ref[0] - axis[0] * ref[2], axis[0] * ref[1] - axis[1] * ref[0]];
@@ -385,8 +438,9 @@ export class ReactionBody {
     private _clampTwist(i: number): void {
         const limit = this._twist[i];
         if (!(limit > 0)) return;
-        const t = this.target[i], bind = this._bindRel[i], axis = this._cone[i].child;
-        // The target from the bind pose, in the part's own frame, split into twist about its axis and the rest.
+        const t = this.target[i], bind = this._twistZero[i] ?? this._bindRel[i], axis = this._cone[i].child;
+        // The target from where the joint's twist is zero, in the part's own frame, split into twist about its axis
+        // and the rest.
         const d = quatMultiplyTuple(quatConjugateTuple(bind), t);
         const along = d[0] * axis[0] + d[1] * axis[1] + d[2] * axis[2];
         let tw = [axis[0] * along, axis[1] * along, axis[2] * along, d[3]];
@@ -404,6 +458,26 @@ export class ReactionBody {
         t[0] = clamped[0]; t[1] = clamped[1]; t[2] = clamped[2]; t[3] = clamped[3];
     }
 
+    /**
+     * A knee's or an elbow's target turned about its hinge alone: what is left of it is a bend, inside the bend's range
+     * by a margin. Off-hinge content (a forearm's roll in the animation, a reach's solve) would otherwise sit on the
+     * joint's cone of a couple of degrees, a motor pressing into its stop: a shudder at the elbow.
+     */
+    private _projectHinge(i: number): void {
+        const h = this.parts[i].hingeJoint!, t = this.target[i];
+        const e = quatMultiplyTuple(quatConjugateTuple(h.rest), t);
+        const { angle } = quatSwingTwistTuple(e, h.axis);
+        if (!Number.isFinite(angle)) return;
+        const lo = Math.min(h.lo, h.hi) + HINGE_MARGIN, hi = Math.max(h.lo, h.hi) - HINGE_MARGIN;
+        const a = hi > lo ? Math.max(lo, Math.min(hi, angle)) : 0.5 * (h.lo + h.hi);
+        const s = Math.sin(a / 2);
+        const q = quatMultiplyTuple(h.rest, [h.axis[0] * s, h.axis[1] * s, h.axis[2] * s, Math.cos(a / 2)]);
+        t[0] = q[0]; t[1] = q[1]; t[2] = q[2]; t[3] = q[3];
+        // Its spin about the hinge alone too (the motor leads the target along it).
+        const w = this.spin[i], ax = quatRotateTuple(q, h.axis), d = w[0] * ax[0] + w[1] * ax[1] + w[2] * ax[2];
+        w[0] = ax[0] * d; w[1] = ax[1] * d; w[2] = ax[2] * d;
+    }
+
     /** Take a pose's part rotations (posePartTargets) for the parts in `mask`, by `w`. */
     public pose(rel: readonly (number[] | null)[], mask: Iterable<number>, w: number): void {
         for (const i of mask) { const q = rel[i]; if (q) this.blend(i, q, w); }
@@ -417,6 +491,11 @@ export class ReactionBody {
 
 /** The fastest an animation's part is taken to turn (rad/s): past it, a measurement across a cut, not a motion. */
 const MAX_SPIN = 20;
+/** The fastest spin a muscle's target is given to follow (rad/s), and how it is smoothed (s). */
+const MAX_TARGET_SPIN = 8;
+/** How far inside a joint's limit a muscle's target is kept (rad). */
+const HINGE_MARGIN = 3 * Math.PI / 180;
+const SPIN_TAU = 0.06;
 
 function clampInto(out: number[], x: number, y: number, z: number, max: number): void {
     const n = Math.hypot(x, y, z);
