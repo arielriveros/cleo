@@ -75,9 +75,10 @@ and of PuppetMaster, on Jolt's ragdoll tools:
   does, that the muscles take back.
 - **The upper body is drawn against the hips.** The simulated chest, arms and head are placed on the hips as the
   animation has them that frame, so the waist never tears however the physics lags the skin.
-- **A stagger is a shove on the capsule** (`CharacterNode.knockback`): a velocity added to the character's walk
-  that fades by half every **Shove lasts**; its locomotion goes on steering under it and its legs animate the
-  steps. The upper body leans after it. Tipped past **Falls past** for **For**, it falls.
+- **A stagger steps on legs of its own.** For a [stagger](#stagger) the legs and hips become the physics' and
+  take short quick steps to keep the body up; the capsule follows the body (`CharacterNode.followBody`) instead of
+  walking, and its walk still turns and aims it. Caught, the character is put where the body stands and the legs
+  go back to the animation.
 - **Hits add up.** A burst counts its last second's hits together: enough of them stagger it like one hard hit,
   more knock it down.
 - **A hand on a weapon stays there.** Only a free hand reaches for a wound. A hand is busy while the animator's
@@ -243,21 +244,41 @@ A wounded arm is not used to reach: the other hand goes to it, across the body i
 
 ### Stagger
 
-Knocked back but on its feet: the character is shoved, its capsule carrying it and its legs walking it out on
-their animation, its upper body swaying after the hit and leaning back the way it is shoved. It keeps its
-control throughout. Turning it off makes every hit that would stagger a flinch.
+Knocked back but on its feet: it steps to stay up, as Euphoria's balancer does. Its legs are the physics' for
+the stagger (on their muscles, not the animation's), and it takes short, quick steps: each one aimed where the
+body will be **Looks ahead** from now, beside the planted foot (never across it), no longer than **Step length**,
+a foot lifting **Step height** and landing in **Step time**. Its legs tire with each step after the second, and a
+hand keeps the trunk upright and the hips from sinking (**Help**, weakening as they tire). Caught (over its feet,
+slow, for **Recovered after**), it is back on its animation where it stands. It gives up and falls after
+**Steps** steps that have not caught it, leaning past **Falls past** for **For**, sinking to half its height, or
+with its capture point far beyond its feet. It keeps its control throughout: its capsule follows the body, and
+its walk still turns and aims it. Turning the behaviour off makes every hit that would stagger a flinch.
 
 | Setting | What it does |
 |---|---|
-| **Shove lasts** | How long the shove takes to fade by half, in seconds: longer carries it farther. |
+| **Shove lasts** | How long the upper body's lean after the shove takes to fade by half, in seconds. |
 | **Lean** | How far the upper body leans back the way it is shoved, in radians. |
-| **Falls past** | How far, in radians, the chest may be tipped from where the animation has it (against the hips) before the character falls. |
-| **For** | How long it must be tipped that far to fall. |
-| **Recovered after** | How long after the shove has faded it is back on its animation. |
+| **Looks ahead** | How far ahead of the body each step is aimed, in seconds: more makes fewer, longer steps. |
+| **Step time** | How long a foot takes from lifting to landing, in seconds. |
+| **Step height** | How high a foot lifts on the way, in metres. |
+| **Step length** | The longest step it takes from the planted foot, in metres. |
+| **Feet apart** | The least it steps out to its own side of the planted foot, in metres: it never crosses its feet. |
+| **Widest step** | The most it steps out to the side, in metres. |
+| **Steps** | How many steps it takes before it gives up and falls, if they have not caught it. |
+| **Tires to** | The strength its legs keep with each step after the second (0.7: 70% of the step before). |
+| **Help** | A hand keeping the trunk upright and the hips from sinking while it steps (0: its legs alone). |
+| **Falls above** | A shove faster than this (m/s) knocks it straight down: no step could catch it. |
+| **Falls past** | How far, in radians, the trunk may lean from upright before it falls. |
+| **For** | How long it must lean that far to fall. |
+| **Recovered after** | How long it must stand over its feet, slow, before it is back on its animation. |
 
-How fast a stagger shoves it is the thresholds' **Stumble speed**, more for a harder hit (up to two and a half
-times). The bench's **Balance** overlay draws the body's centre of mass and its **capture point** (where a body
-must put its foot to stop: its centre of mass plus its velocity times √(height ÷ g)).
+How fast a stagger shoves the body is the thresholds' **Stumble speed**, more for a harder hit (up to two and a
+half times), most of the walk it was taking braced against; the shove goes to the trunk and the arms, half of it
+to the thighs and none to the shins and feet, so the legs are left behind and must step. A shove softer than a
+stagger is a flinch: it never slides the character along the ground. The bench's **Balance** overlay draws the
+body's centre of mass and its **capture point** (where a body must put its foot to stop: its centre of mass plus
+its velocity times √(height ÷ g)). Scripts read the steps on `reactions.balance` (`steps`, `stepLengths`,
+`swinging`, `gaveUp`), and `reactions.knockCount` counts every stagger and every fall from its feet.
 
 ### Catch the fall
 

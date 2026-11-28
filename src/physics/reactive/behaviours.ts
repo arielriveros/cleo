@@ -3,6 +3,7 @@ import type { Skin } from '../../animation/animatedModel';
 import type { BodySensors } from './bodySensors';
 import { posePartTargets, type Limb, type ReactionBody } from './reactionBody';
 import type { BehaviourConfig, BehaviourId, ReactionSet } from './reactionSet';
+import type { Balancer } from './balancer';
 
 // The reflexes a reaction is made of (Euphoria's behaviours): each owns some of the body for a while and tells
 // its muscles where to go and how hard — through the ReactionBody's targets, IK and tuning, by a weight the
@@ -49,6 +50,10 @@ export interface ReactionContext {
     spin(i: number, x: number, y: number, z: number): void;
     /** Turn part `i` by an angular impulse (N·m·s, world): a turn sized to more than the part (the whole body rolled). */
     angularImpulse(i: number, x: number, y: number, z: number): void;
+    /** Push part `i` at its centre by an impulse (N·s, world). */
+    impulse(i: number, x: number, y: number, z: number): void;
+    /** The steps it is taking to stay on its feet (a stagger), or null. */
+    balancer: Balancer | null;
     /**
      * On its feet with its control (hitReact, stagger, a recovery from them): the legs are the animation's, the upper
      * body follows it on firm muscles, and a reaction is a sway on top of what the animation does.
@@ -197,15 +202,16 @@ const hitReact: ReactionBehaviour = {
 };
 
 /**
- * Knocked back on its feet (a stagger): the character's capsule carries the shove (CharacterNode.knockback) and its
- * legs walk it out on their animation; the upper body, on its muscles, sways after the hit and leans back the way it
- * is shoved, by as much of the lean as the shove is of a stumble.
+ * Knocked back on its feet (a stagger): it steps to stay up (balancer.ts: short quick steps on legs of its own, aimed a
+ * moment ahead, tiring, a helping hand on the trunk); the upper body, on its muscles, sways after the hit and leans
+ * back the way it is shoved, by as much of the lean as the shove is of a stumble.
  */
 const stepBalance: ReactionBehaviour = {
     id: 'stepBalance', states: ['stagger'], fade: 0.08,
     wants: () => true,
     update(ctx, c, w) {
         const P = c.params, body = ctx.body, k = ctx.knock;
+        ctx.balancer?.update(ctx, P, w);
         const flat = Math.hypot(k[0], k[2]);
         if (!(flat > 0.05) || !(P.leanInto > 0)) return;
         // About the axis square to the shove and up: the top of the trunk goes the shove's way.

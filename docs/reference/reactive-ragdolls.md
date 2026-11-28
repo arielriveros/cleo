@@ -10,8 +10,10 @@ On its feet a reaction is physical animation (Unreal's Physical Animation compon
 the legs and hips kinematic on the animation (`Ragdoll.setKinematic`, moved by velocity each step to the
 animation's pose a frame on), the upper body dynamic on firm muscles whose targets carry the animation's spin
 (`ReactionBody.spin`, measured between frames; Jolt's motors in position-and-velocity mode), drawn against the
-hips as animated that frame (`PhysicsMappingSource.anchorPart`), a stagger a fading shove on the capsule
-(`CharacterNode.knockback`). The character keeps its control (`ReactionController.hasControl`).
+hips as animated that frame (`PhysicsMappingSource.anchorPart`). A stagger steps on dynamic legs
+(`physics/reactive/balancer.ts`: capture-point steps aimed 0.2 s ahead, at most 0.40 m, tiring ×0.7 a step after the
+second, a StayUpright-style push on the trunk), the capsule following the body (`CharacterNode.followBody`). The
+character keeps its control (`ReactionController.hasControl`).
 
 ## Background
 

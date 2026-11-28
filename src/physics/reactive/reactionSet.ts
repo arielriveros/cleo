@@ -159,13 +159,23 @@ export const BEHAVIOUR_SPECS: readonly BehaviourSpec[] = [
         clips: [],
     },
     {
-        id: 'stepBalance', label: 'Stagger', doc: 'Knocked back but on its feet: the character is shoved, its legs walking it out on their animation, the upper body swaying after the hit, and it keeps its control. Tipped too far over, it falls.',
+        id: 'stepBalance', label: 'Stagger', doc: 'Knocked back but on its feet: it steps to stay up, short quick steps aimed a moment ahead on legs of its own (the physics\', not the animation\'s), tiring step by step, the upper body swaying after the hit. It keeps its control; past what its steps can catch, it falls.',
         params: [
-            p('knockTime', 'Shove lasts', 0.35, 0.05, 2, 0.01, 's', 'How long the shove takes to fade by half: longer carries it farther.'),
+            p('knockTime', 'Shove lasts', 0.35, 0.05, 2, 0.01, 's', 'How long the upper body\'s lean after the shove takes to fade by half.'),
             p('leanInto', 'Lean', 0.15, 0, 1, 0.01, 'rad', 'How far the upper body leans back the way it is shoved.'),
-            p('giveUpTilt', 'Falls past', 0.6, 0.1, 1.5, 0.01, 'rad', 'How far the chest may be tipped from where the animation has it before the character falls.'),
-            p('giveUpTime', 'For', 0.15, 0, 1, 0.01, 's', 'How long it must be tipped that far to fall.'),
-            p('recoverTime', 'Recovered after', 0.4, 0, 3, 0.05, 's', 'How long after the shove has faded it is back on its animation.'),
+            p('prediction', 'Looks ahead', 0.2, 0, 1, 0.01, 's', 'How far ahead of the body each step is aimed: more makes fewer, longer steps.'),
+            p('stepTime', 'Step time', 0.25, 0.1, 1, 0.01, 's', 'How long a foot takes from lifting to landing.'),
+            p('stepHeight', 'Step height', 0.1, 0, 0.4, 0.01, 'm', 'How high a foot lifts on the way.'),
+            p('stepLength', 'Step length', 0.4, 0.1, 1.2, 0.01, 'm', 'The longest step it takes from the planted foot.'),
+            p('widthMin', 'Feet apart', 0.12, 0, 0.5, 0.01, 'm', 'The least it steps out to its own side of the planted foot: it never crosses its feet.'),
+            p('widthMax', 'Widest step', 0.4, 0.1, 1, 0.01, 'm', 'The most it steps out to the side.'),
+            p('maxSteps', 'Steps', 4, 1, 12, 1, undefined, 'How many steps it takes before it gives up and falls, if they have not caught it.'),
+            p('tire', 'Tires to', 0.7, 0.1, 1, 0.01, undefined, 'The strength its legs keep with each step after the second.'),
+            p('assist', 'Help', 1, 0, 2, 0.05, undefined, 'A hand keeping the trunk upright and the hips from sinking while it steps (0: its legs alone).'),
+            p('maxShove', 'Falls above', 3, 0.5, 10, 0.1, 'm/s', 'A shove faster than this knocks it straight down: no step could catch it.'),
+            p('giveUpTilt', 'Falls past', 0.6, 0.1, 1.5, 0.01, 'rad', 'How far the trunk may lean from upright before it falls.'),
+            p('giveUpTime', 'For', 0.15, 0, 1, 0.01, 's', 'How long it must lean that far to fall.'),
+            p('recoverTime', 'Recovered after', 0.4, 0, 3, 0.05, 's', 'How long it must stand over its feet, slow, before it is back on its animation.'),
         ],
         poses: [], clips: [],
     },
@@ -333,6 +343,7 @@ export const REACTION_PRESETS: { name: string; doc: string; make(): ReactionSet 
             s.thresholds.staggerImpulse = 100; s.thresholds.fallImpulse = 260;
             s.thresholds.stumbleImpulse = 45; s.thresholds.stumbleSpeed = 0.6;
             s.behaviours.stepBalance.params.giveUpTilt = 0.8; s.behaviours.stepBalance.params.knockTime = 0.25;
+            s.behaviours.stepBalance.params.maxSteps = 6; s.behaviours.stepBalance.params.tire = 0.85;
             s.behaviours.hitReact.params.weakness = 0.75;
         }),
     },
@@ -341,6 +352,7 @@ export const REACTION_PRESETS: { name: string; doc: string; make(): ReactionSet 
             s.strength = 0.6;
             s.thresholds.staggerImpulse = 30; s.thresholds.fallImpulse = 70; s.thresholds.stumbleImpulse = 12;
             s.behaviours.stepBalance.params.giveUpTilt = 0.4;
+            s.behaviours.stepBalance.params.maxSteps = 2; s.behaviours.stepBalance.params.tire = 0.5;
             s.behaviours.hitReact.params.trackStiffness = 4;
             s.behaviours.writhe.params.duration = 10;
             s.behaviours.getUp.params.delay = 3;
@@ -352,6 +364,8 @@ export const REACTION_PRESETS: { name: string; doc: string; make(): ReactionSet 
             for (const r of MUSCLE_REGIONS) { s.muscles[r].frequency *= 0.6; s.muscles[r].damping = 0.6; }
             s.thresholds.staggerImpulse = 20; s.thresholds.stumbleImpulse = 15;
             s.behaviours.stepBalance.params.knockTime = 0.6; s.behaviours.stepBalance.params.leanInto = 0.3;
+            s.behaviours.stepBalance.params.stepTime = 0.35; s.behaviours.stepBalance.params.stepLength = 0.5;
+            s.behaviours.stepBalance.params.assist = 0.7;
             s.behaviours.hitReact.params.trackStiffness = 3;
             s.behaviours.catchFall.params.predictionTime = 0.2;
             s.behaviours.getUp.params.delay = 2.5;

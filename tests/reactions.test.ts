@@ -171,23 +171,52 @@ describe.each(BACKENDS)('reactions on %s', backend => {
         expect(finite(s.r)).toBe(true);
     });
 
-    it('shoved, is carried back on its feet, farther the harder, keeping its control, and knocked down past the fall threshold', () => {
-        const pushes = [40, 80, 200].map(J => {
+    it('shoved, steps to stay up: short quick steps, more the harder, keeping its control; flinches below a stagger and falls past the fall threshold', () => {
+        const pushes = [40, 80, 120, 200].map(J => {
             const s = setup();
-            let fell = false, control = true;
-            run(s, 240, f => {
+            let fell = false, control = true, staggered = false, steps = 0;
+            const lengths: number[] = [];
+            run(s, 300, f => {
                 if (f === 5) s.r.push([0, 0, -J / 70]);
                 if (s.r.state === 'falling') fell = true;
+                if (s.r.state === 'stagger') staggered = true;
                 if (f > 5 && !fell && !s.r.hasControl) control = false;
+                const b = s.r.balance;
+                if (b) {
+                    steps = Math.max(steps, b.steps);
+                    for (const l of b.stepLengths.slice(lengths.length)) lengths.push(l);
+                }
             });
-            return { J, fell, control, moved: -s.node.worldPosition[2] };
+            const longest = Math.max(0, ...lengths);
+            return { J, fell, control, staggered, steps, longest, moved: -s.node.worldPosition[2], state: s.r.state };
         });
-        expect(pushes[0].fell).toBe(false);
+        // A shove softer than a stagger is a flinch: no steps, and it does not slide along the ground.
+        expect(pushes[0]).toMatchObject({ staggered: false, fell: false, steps: 0 });
+        expect(Math.abs(pushes[0].moved)).toBeLessThan(0.05);
+        // Staggered, it steps, its steps no longer than a stumbling step, and stays up with its control.
+        for (const p of [pushes[1], pushes[2]]) {
+            expect(p.staggered, `${p.J}`).toBe(true);
+            expect(p.steps, `${p.J}`).toBeGreaterThan(0);
+            expect(p.longest, `${p.J}`).toBeLessThan(0.45);
+            expect(p.control, `${p.J}`).toBe(true);
+        }
         expect(pushes[1].fell).toBe(false);
-        expect(pushes[0].control && pushes[1].control).toBe(true);
-        expect(pushes[0].moved).toBeGreaterThan(0.1);
-        expect(pushes[1].moved).toBeGreaterThan(pushes[0].moved);
-        expect(pushes[2].fell).toBe(true);
+        expect(pushes[1].moved).toBeGreaterThan(0.05);
+        expect(pushes[2].steps + (pushes[2].fell ? 9 : 0)).toBeGreaterThanOrEqual(pushes[1].steps);
+        expect(pushes[3].fell).toBe(true);
+    });
+
+    it('gives up and falls when its steps cannot catch it: one step allowed, shoved hard', () => {
+        const s = setup();
+        s.r.set.behaviours.stepBalance.params.maxSteps = 1;
+        let gaveUp: string | null = null, fell = false;
+        run(s, 240, f => {
+            if (f === 5) s.r.push([0, 0, -1.9]);
+            gaveUp = s.r.balance?.gaveUp ?? gaveUp;
+            if (s.r.state === 'falling') fell = true;
+        });
+        expect(fell).toBe(true);
+        expect(gaveUp).not.toBeNull();
     });
 
     it('bails from a vehicle at 10 m/s: tumbles, comes to rest, gets up', () => {
@@ -722,17 +751,25 @@ describe('physical animation on its feet (jolt)', () => {
         expect(Math.max(...errors) * 180 / Math.PI).toBeLessThan(20);
     });
 
-    it('a stumble shoves it back on its feet: carried, keeping its control, then back on its animation', () => {
+    it('a stumble rocks it back on its feet: it steps, its legs the physics\' for it, keeping its control, then back on its animation', () => {
         const s = person();
         const states = new Set<string>();
+        let dynamicLegs = false, steps = 0;
         for (let f = 0; f < 300; f++) {
             if (f === 5) s.r.hit({ part: 'Chest', direction: [0, 0, -1], impulse: 40 });
             step(s);
             states.add(s.r.state);
+            const b = s.r.body;
+            if (b && s.r.state === 'stagger') {
+                dynamicLegs ||= !b.kinematic[b.legs.L!.end] && !(s.r.ragdoll!.parts[b.legs.L!.end].body as any).isKinematic;
+                steps = Math.max(steps, s.r.balance?.steps ?? 0);
+            }
         }
         expect(states.has('stagger')).toBe(true);
         expect(states.has('falling')).toBe(false);
-        expect(-s.node.worldPosition[2]).toBeGreaterThan(0.15);
+        expect(dynamicLegs).toBe(true);
+        expect(steps).toBeGreaterThan(0);
+        expect(-s.node.worldPosition[2]).toBeGreaterThan(0.05);
         expect(s.r.state).toBe('animated');
     });
 
@@ -813,9 +850,9 @@ describe('physical animation on its feet (jolt)', () => {
         expect(lowest).toBeLessThan(0.4);
     });
 
-    it('keeps its kinematic legs out of ground rays (a foot IK ray finds the floor, not its shin), and lets its feet go shoved', () => {
+    it('keeps its kinematic legs out of ground rays (a foot IK ray finds the floor, not its shin), and lets its feet go stepping', () => {
         const s = person();
-        s.r.hit({ part: 'Chest', direction: [0, 0, -1], impulse: 40 });
+        s.r.hit({ part: 'Chest', direction: [0, 0, -1], impulse: 12 });
         for (let f = 0; f < 4; f++) step(s);
         const b = s.r.body!;
         expect(s.r.standing).toBe(true);
@@ -828,7 +865,9 @@ describe('physical animation on its feet (jolt)', () => {
             // Any other ray still strikes the limb (a bullet).
             expect(s.physics.raycast([at.x, at.y + 0.6, at.z] as any, [at.x, -1, at.z] as any)?.body).not.toBeUndefined();
         }
-        // Shoved (a stagger): no foot locking while the capsule slides under the feet.
+        // Staggered: the legs are the body's, stepping, and the animation's feet are not locked under them.
+        s.r.hit({ part: 'Chest', direction: [0, 0, -1], impulse: 40 });
+        for (let f = 0; f < 4; f++) step(s);
         expect(s.r.state).toBe('stagger');
         expect(s.node.animator!.footLockSuppressed).toBe(true);
     });

@@ -288,6 +288,34 @@ export class CharacterNode extends Node {
     /** The shove it is walking out of now (world m/s): see {@link knockback}. */
     public get knockbackVelocity(): readonly number[] { return this._knock; }
 
+    /**
+     * Follow its body: the capsule moves after `target` (world x, z) over `tau` seconds instead of walking, whatever
+     * its move asks; its facing, its aim and everything else go on. Its reactions ask this while it steps to keep its
+     * balance (the body has its legs then). Null walks again.
+     */
+    public followBody(target: ArrayLike<number> | null, tau = 0.12): void {
+        if (!target) { this._bodyFollowAt = null; return; }
+        this._bodyFollowAt = [target[0], target[1]];
+        this._bodyFollowTau = Math.max(0.02, tau);
+    }
+
+    /** Following its body (see {@link followBody}). */
+    public get followingBody(): boolean { return this._bodyFollowAt !== null; }
+
+    private _bodyFollowAt: [number, number] | null = null;
+    private _bodyFollowTau = 0.12;
+
+    /** The flat velocity that takes the capsule after the body it follows, or null when it walks. */
+    private _bodyFollowVelocity(): [number, number] | null {
+        const f = this._bodyFollowAt;
+        if (!f) return null;
+        const p = this.worldPosition, k = 1 / this._bodyFollowTau;
+        let vx = (f[0] - p[0]) * k, vz = (f[1] - p[2]) * k;
+        const n = Math.hypot(vx, vz), most = 6;
+        if (n > most) { vx *= most / n; vz *= most / n; }
+        return [vx, vz];
+    }
+
     private _stepLocomotion(delta: number): void {
         this._stepKnock(delta);
         this._stepLocomotionInner(delta);
@@ -324,6 +352,9 @@ export class CharacterNode extends Node {
             this._locomotion = createLocomotionState();
         }
         if (!this._driven && !this.driveWhenUnpossessed) {
+            // Following its body (its reactions stepping), not walking: after the body.
+            const follow = this._bodyFollowVelocity();
+            if (follow) { const v = this.velocity; this.velocity = [follow[0], v[1], follow[1]] as [number, number, number]; return; }
             // Not walking: the shove alone moves it, by how much it changed since last frame.
             const k = this._knock, a = this._knockApplied;
             if (k[0] !== a[0] || k[2] !== a[2]) {
@@ -372,6 +403,10 @@ export class CharacterNode extends Node {
         this.velocity = (k[0] !== 0 || k[2] !== 0
             ? [out.velocity[0] + k[0], out.velocity[1], out.velocity[2] + k[2]]
             : out.velocity) as [number, number, number];
+        // Following its body (its reactions stepping to keep its balance): the walk turned it and aimed it, the body
+        // moves it.
+        const follow = this._bodyFollowVelocity();
+        if (follow) this.velocity = [follow[0], this.velocity[1], follow[1]] as [number, number, number];
         // On walkable ground, held there over the next step: never in the air, and not as it takes off (the jump
         // lockout), when gravity must have it all.
         if (this.slopeLimit > 0 && this.isGrounded && !out.jumped && out.next.jumpLockout <= 0)
