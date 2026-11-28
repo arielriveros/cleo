@@ -1,5 +1,6 @@
 import { useAiEditor } from './AiEditorContext'
 import BehaviorEditor from '../nodeInspector/propertyEditors/BehaviorEditor'
+import { Button, SectionTitle, TextInput, Toggle, hintClass } from '@cleo/app-kit/ui'
 import GoalsEditor from '../nodeInspector/propertyEditors/GoalsEditor'
 import FuzzyEditor from '../nodeInspector/propertyEditors/FuzzyEditor'
 
@@ -20,6 +21,31 @@ import FuzzyEditor from '../nodeInspector/propertyEditors/FuzzyEditor'
  * fuzzy model's variables are not on the canvas at all, and a panel that went blank until you clicked a
  * node would hide them.
  */
+/** The layer shown: its name, whether it runs, and a way to delete it. Nothing on the top level. */
+function LayerRows() {
+  const { asset, layer, renameLayer, removeLayer, setLayerEnabled, target } = useAiEditor()
+  if (!asset || asset.kind === 'goals' || !layer) return null
+  const data = asset.machine.layers?.find(l => l.name === layer)
+  if (!data || !target) return null
+  return (
+    <div className='mb-2'>
+      <SectionTitle title={`Layer — ${layer}`} className='mt-2 mb-1' />
+      <div className='flex items-center gap-1'>
+        <TextInput className='flex-1 min-w-0' value={layer} title='Layer name (a Layer time or Layer state source names it)'
+          onChange={v => renameLayer(layer, v)} />
+        <span title='Off: the layer is kept but does not run'>
+          <Toggle label='runs' checked={data.enabled !== false} onChange={on => setLayerEnabled(layer, on)} />
+        </span>
+        <Button variant='remove' size='sm' title='Delete this layer and its states' onClick={() => removeLayer(layer)}>✕</Button>
+      </div>
+      <p className={hintClass}>
+        Runs beside the top level over the same parameters, from its own entry state: its states never steer, they set
+        outputs (a field of the pawn while the state is held). Where two layers set one field, the lower one in the list wins.
+      </p>
+    </div>
+  )
+}
+
 export default function AiBrainInspector() {
   const { asset, target, view, commit } = useAiEditor()
 
@@ -33,7 +59,7 @@ export default function AiBrainInspector() {
         ? <FuzzyEditor node={target} onChange={commit} />
         : asset.kind === 'goals'
           ? <GoalsEditor node={target} onChange={commit} />
-          : <BehaviorEditor node={target} onChange={commit} />}
+          : <><LayerRows /><BehaviorEditor node={target} onChange={commit} /></>}
     </div>
   )
 }

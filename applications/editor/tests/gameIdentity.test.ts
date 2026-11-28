@@ -92,8 +92,8 @@ describe('the game in game.bin', () => {
     const manifest = unpackGameBin(packGameBin(data(game)).buffer).manifest;
     expect(manifest.game).toEqual(game);
     expect(manifest.contract).toBe(PLAYER_CONTRACT);
-    // 55 is the animator's reaction states (Ragdoll, Get Up, reaction effects); the game's identity bumped nothing.
-    expect(PLAYER_CONTRACT).toBe(55);
+    // 56 is the AI brains' layers and outputs and the reactions' stepping, rolling and zones; the game's identity bumped nothing.
+    expect(PLAYER_CONTRACT).toBe(56);
   });
 
   it('is absent from a pack built without it (Play in window), and changes the content hash', () => {

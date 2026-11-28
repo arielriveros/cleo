@@ -19,12 +19,13 @@ import type {
     FlockNeighbour, ProbeHit, SteeringState, SteeringTuning,
 } from "../../control/steering";
 import {
-    AI_GOALS, BEHAVIOR_SENSES, createBehaviorRuntime, isDefaultBehaviorMachine, parseBehaviorMachine,
+    AI_GOALS, BEHAVIOR_SENSES, behaviorLayerState, createBehaviorRuntime, isDefaultBehaviorMachine, parseBehaviorMachine,
     stepBehavior,
 } from "../../control/behavior";
 import type {
-    AiGoal, BehaviorMachine, BehaviorParameterSource, BehaviorRuntime, BehaviorState,
+    AiGoal, BehaviorMachine, BehaviorParameterSource, BehaviorRuntime, BehaviorState, BehaviorStep, StrafeSide,
 } from "../../control/behavior";
+import { REACTION_VALUES } from "../../../animation/reactionLink";
 import {
     advancePath, clearNavPath, createNavPath, createRepathState, followPath, hasPath, insetCorners,
     markRepathed, remainingDistance, repathPolicy, setNavPath, shouldRepath,
@@ -352,8 +353,9 @@ export class ControllerNode extends Node {
     private readonly _candidates: PerceptionCandidate[] = [];
     private readonly _rayHit: vec3 = vec3.create();
     private readonly _eye: vec3 = vec3.create();
-    /** Ids offered to perception this frame, so a hit ON a candidate is not read as a wall. */
+    /** Ids offered to perception this frame, so a hit ON a candidate is not read as a wall; and their nodes. */
     private readonly _candidateIds = new Set<string>();
+    private readonly _candidateNodes = new Map<string, Node>();
     /** Built lazily from `fuzzy`, and rebuilt when the authored model is replaced. */
     private _fuzzyBrain: FuzzyBrain | null = null;
     private _fuzzySource: FuzzyModel | null = null;
@@ -372,7 +374,7 @@ export class ControllerNode extends Node {
     private readonly _alignment: vec3 = vec3.create();
     private readonly _cohesion: vec3 = vec3.create();
     /** Bound once: a fresh closure per frame per agent is the kind of garbage that shows up in a HUD. */
-    private readonly _lineOfSight: LineOfSightTest = (from, to, hit) => this._testLineOfSight(from, to, hit);
+    private readonly _lineOfSight: LineOfSightTest = (from, to, hit, candidate) => this._testLineOfSight(from, to, hit, candidate);
     private readonly _desired: vec3 = vec3.create();
     /** The 2D candidates' positions, reused per frame (the middle of each body's box). */
     private readonly _candidatePositions: vec3[] = [];
@@ -740,6 +742,7 @@ export class ControllerNode extends Node {
         // set an agent cares about and a bounded one — as opposed to "every node", which is neither.
         this._candidates.length = 0;
         this._candidateIds.clear();
+        this._candidateNodes.clear();
         const characters = this._scene?.characters;
         const filter = this.perceptionFilter;
         if (characters) {
@@ -749,6 +752,7 @@ export class ControllerNode extends Node {
                 if (filter && !filter(character)) continue;
                 this._candidates.push({ id: character.id, position: character.worldPosition });
                 this._candidateIds.add(character.id);
+                this._candidateNodes.set(character.id, character);
             }
         }
 
@@ -852,7 +856,7 @@ export class ControllerNode extends Node {
      * broadphase and already knows which bodies are solid. The pawn's own body is ignored, or an agent
      * finds itself blocking its own view.
      */
-    private _testLineOfSight(from: vec3, to: vec3, hit: vec3): boolean {
+    private _testLineOfSight(from: vec3, to: vec3, hit: vec3, candidate?: string | null): boolean {
         const physics = this._scene?.physics;
         if (!physics) return false;
         const pawn = this._possessed;
@@ -864,6 +868,9 @@ export class ControllerNode extends Node {
             const hitNode = result.node;
             if (hitNode && (this._candidateIds.has(hitNode.id)
                 || (hitNode.nodeType === 'collider' && hitNode.children.some(c => this._candidateIds.has(c.id))))) return false;
+            // Nor is what the candidate sits in (the car it drives): seen through its windows, it is seen.
+            const seated = candidate ? this._candidateNodes.get(candidate) : undefined;
+            if (hitNode && seated && this._carrierOf(seated) && isAncestorOf(hitNode, seated)) return false;
             vec3.set(hit, result.point[0], result.point[1], result.point[2]);
             return true;
         } catch {
@@ -909,6 +916,11 @@ export class ControllerNode extends Node {
     /** Which behaviour state the machine is holding, or ''. For the editor's readout and for onThink. */
     public get behaviorState(): string { return this._behaviorRuntime.current; }
 
+    /** Which state a layer of the machine holds ('' the top level), or ''. For the editor's readout and onThink. */
+    public behaviorLayerState(layer: string): string {
+        return behaviorLayerState(this.behavior, this._behaviorRuntime, layer)?.name ?? '';
+    }
+
     /**
      * Turn the goal into an intent.
      *
@@ -930,6 +942,7 @@ export class ControllerNode extends Node {
         let goal: AiGoal = this.goal;
         let targetKey = this.targetKey;
         let stateScale = 1;
+        let strafeSide: StrafeSide = 'auto', strafeKeep = 0;
 
         if (this.brain === 'goal') {
             const drive = this._stepGoals(pawn, delta);
@@ -944,6 +957,8 @@ export class ControllerNode extends Node {
                 goal = state.goal;
                 targetKey = state.targetKey || this.targetKey;
                 stateScale = state.speedScale ?? 1;
+                strafeSide = state.strafeSide ?? 'auto';
+                strafeKeep = state.strafeDistance ?? 0;
             }
         }
 
@@ -984,8 +999,9 @@ export class ControllerNode extends Node {
                 if (flier) this._targetPos[1] += target.size[1] * 0.5;
                 vec3.set(this._targetVel, target.velocity2D[0], target.velocity2D[1], 0);
             } else {
-                const v = (target as CharacterNode).velocity;
-                vec3.set(this._targetVel, v?.[0] ?? 0, v?.[1] ?? 0, v?.[2] ?? 0);
+                // Seated in a vehicle its own body is out of the world: the vehicle's velocity is its.
+                const v = this._targetVelocity(target);
+                vec3.set(this._targetVel, v[0], v[1], v[2]);
             }
         } else {
             vec3.set(this._targetPos, this.goalPoint[0], this.goalPoint[1], this.goalPoint[2]);
@@ -995,7 +1011,7 @@ export class ControllerNode extends Node {
 
         // A goal that names a thing and has none holds still rather than walking to the world origin,
         // which is what falling back to an unset `goalPoint` would otherwise do.
-        const needsTarget = goal === 'seek' || goal === 'flee' || goal === 'follow' || goal === 'path';
+        const needsTarget = goal === 'seek' || goal === 'flee' || goal === 'follow' || goal === 'path' || goal === 'strafe';
         if (needsTarget && !target && targetKey !== 'point') {
             vec3.set(this._desired, 0, 0, 0);
         } else {
@@ -1007,6 +1023,7 @@ export class ControllerNode extends Node {
                 case 'patrol': this._steerPatrol(pawn, tuning, up); break;
                 case 'flee': flee(this._desired, this._selfPos, this._targetPos, tuning.maxSpeed, up); break;
                 case 'arrive': arrive(this._desired, this._selfPos, this._targetPos, tuning, up); break;
+                case 'strafe': this._steerStrafe(tuning, delta, strafeSide, strafeKeep); break;
                 case 'follow':
                     followTarget(this._desired, this._selfPos, this._targetPos, this._targetVel, tuning, up);
                     break;
@@ -1048,9 +1065,73 @@ export class ControllerNode extends Node {
         }
 
         intentFromDesired(this._intent, this._desired, tuning.maxSpeed, up);
+        // A strafe faces the target, whichever way it steps.
+        if (goal === 'strafe' && target) {
+            const dx = this._targetPos[0] - this._selfPos[0], dz = this._targetPos[2] - this._selfPos[2];
+            if (Math.hypot(dx, dz) > 1e-6) this._intent.aimYaw = Math.atan2(dx, dz) * 180 / Math.PI;
+        }
         // The state's own throttle multiplies whatever the steer asked for — a patrol at 0.4 and a chase
         // at 1 with nothing else different between them.
         this._intent.speedScale *= stateScale;
+    }
+
+    /**
+     * Sidestep round the target: square to the line to it, plus a pull toward `keep` metres from it (0: none). On
+     * `auto` it steps off the target's path, away from the way the target is crossing the line to it (more than
+     * 0.5 m/s, for 0.3 s, and no sooner than a second after its last change of side).
+     */
+    private _steerStrafe(tuning: SteeringTuning, delta: number, side: StrafeSide, keep: number): void {
+        this._strafeClock += delta;
+        const dx = this._targetPos[0] - this._selfPos[0], dz = this._targetPos[2] - this._selfPos[2];
+        const d = Math.hypot(dx, dz);
+        if (!(d > 1e-6)) { vec3.set(this._desired, 0, 0, 0); return; }
+        const fx = dx / d, fz = dz / d;
+        // The pawn's left as it faces the target (up × forward, Y up).
+        const lx = fz, lz = -fx;
+        if (side === 'auto') {
+            const lateral = this._targetVel[0] * lx + this._targetVel[2] * lz;
+            const want = lateral > 0.5 ? -1 : lateral < -0.5 ? 1 : 0;
+            if (want !== 0 && want !== this._strafeSide) {
+                this._strafeHold += delta;
+                if (this._strafeHold > 0.3 && this._strafeClock - this._strafeFlipAt > 1) {
+                    this._strafeSide = want;
+                    this._strafeFlipAt = this._strafeClock;
+                    this._strafeHold = 0;
+                }
+            } else this._strafeHold = 0;
+        }
+        const s = side === 'left' ? 1 : side === 'right' ? -1 : this._strafeSide;
+        const radial = keep > 0 ? Math.max(-1, Math.min(1, (d - keep) / 2)) * 0.7 : 0;
+        vec3.set(this._desired, lx * s + fx * radial, 0, lz * s + fz * radial);
+        const n = vec3.length(this._desired);
+        if (n > 1e-6) vec3.scale(this._desired, this._desired, tuning.maxSpeed / n);
+    }
+
+    /** Which way a strafe on `auto` steps (+1 the pawn's left as it faces the target), and its clock. */
+    private _strafeSide = 1;
+    private _strafeHold = 0;
+    private _strafeFlipAt = -Infinity;
+    private _strafeClock = 0;
+
+    /**
+     * What `target` sits in, when it sits in something that moves (its Collider out of the world and carried by an
+     * ancestor with a body of its own: a car's seat), or null.
+     */
+    private _carrierOf(target: Node): Node | null {
+        const collider = (target as { collider?: Node | null }).collider ?? null;
+        if (!collider || !collider._bodySuspended) return null;
+        for (let n: Node | null = collider.parent, depth = 0; n && depth < 16; n = n.parent, depth++) {
+            if (n.nodeType === 'character') continue;
+            if ((n as { body?: unknown }).body) return n;
+        }
+        return null;
+    }
+
+    /** The target's velocity, world: its own, or what it sits in when it sits in something. */
+    private _targetVelocity(target: Node): [number, number, number] {
+        const carrier = this._carrierOf(target);
+        const v = ((carrier ?? target) as { velocity?: ArrayLike<number> }).velocity;
+        return [v?.[0] ?? 0, v?.[1] ?? 0, v?.[2] ?? 0];
     }
 
     /**
@@ -1472,11 +1553,68 @@ export class ControllerNode extends Node {
      * stale value would transition on last frame's world.
      */
     private _stepBehavior(pawn: Pawn, delta: number): BehaviorState | null {
-        if (this.behavior.states.length === 0) return null;
+        if (this.behavior.states.length === 0 && !this.behavior.layers?.length) return null;
         this._refreshBehaviorParams(pawn);
         const stepped = stepBehavior(this.behavior, this._behaviorRuntime, delta);
         this._behaviorRuntime = stepped.next;
+        this._applyOutputs(pawn, stepped);
         return stepped.state;
+    }
+
+    /**
+     * The held states' outputs, onto the pawn: every field a held state outputs written (the topmost layer's when
+     * two do), a field no state outputs any more put back as it was before the first did; a not-held output once,
+     * as its state is entered.
+     */
+    private _applyOutputs(pawn: Pawn, step: BehaviorStep): void {
+        const held = [{ state: step.state, entered: step.entered }, ...(step.layers ?? [])];
+        const want = new Map<string, number | boolean>();
+        for (const h of held) for (const o of h.state?.outputs ?? []) {
+            if (o.hold === false) { if (h.entered) this._writeField(pawn, o.field, o.value); continue; }
+            want.set(o.field, o.value);
+        }
+        for (const [field, value] of want) {
+            if (!this._outputBaseline.has(field)) this._outputBaseline.set(field, this._readField(pawn, field));
+            this._writeField(pawn, field, value);
+        }
+        for (const [field, was] of this._outputBaseline) {
+            if (want.has(field)) continue;
+            if (was !== undefined) this._writeField(pawn, field, was);
+            this._outputBaseline.delete(field);
+        }
+    }
+    /** What each output field held before a state first set it. */
+    private readonly _outputBaseline = new Map<string, number | boolean | undefined>();
+    private readonly _warnedOutputs = new Set<string>();
+
+    private _readField(pawn: Pawn, field: string): number | boolean | undefined {
+        const v = field in pawn ? (pawn as unknown as Record<string, unknown>)[field] : pawn.getVariable(field);
+        return typeof v === 'number' || typeof v === 'boolean' ? v : undefined;
+    }
+
+    /** A field of the pawn set: its property (a script's field, a setter), else its custom variable; to its type. */
+    private _writeField(pawn: Pawn, field: string, value: number | boolean): void {
+        const was = this._readField(pawn, field);
+        const v = typeof was === 'number' && typeof value === 'boolean' ? (value ? 1 : 0)
+            : typeof was === 'boolean' && typeof value === 'number' ? value !== 0 : value;
+        if (field in pawn) {
+            // A read-only property (a getter alone) cannot be set: said once, and skipped.
+            for (let o: object | null = pawn; o; o = Object.getPrototypeOf(o)) {
+                const d = Object.getOwnPropertyDescriptor(o, field);
+                if (!d) continue;
+                if (d.get && !d.set) {
+                    if (!this._warnedOutputs.has(field)) {
+                        this._warnedOutputs.add(field);
+                        Logger.warn(`Controller '${this._name}': its brain outputs '${field}', which '${pawn.name}' only reads (it has no setter).`, 'Scene');
+                    }
+                    return;
+                }
+                break;
+            }
+            (pawn as unknown as Record<string, unknown>)[field] = v;
+            return;
+        }
+        pawn.setVariable(field, v);
     }
 
     /**
@@ -1564,6 +1702,19 @@ export class ControllerNode extends Node {
                 return this._sense(source.name, pawn);
             case 'fuzzy':
                 return this.fuzzyValue(source.name);
+            case 'reaction': {
+                // The pawn's reactions (its body), by the animator's reaction parameters' names.
+                const value = REACTION_VALUES[source.name];
+                if (!value) return undefined;
+                const reactions = (pawn as { reactions?: Parameters<typeof value.read>[0] | null }).reactions;
+                return reactions ? value.read(reactions) : value.none;
+            }
+            case 'layerTime': {
+                const rt = this._behaviorRuntime;
+                return source.layer ? rt.layers?.[source.layer]?.stateTime ?? 0 : rt.stateTime;
+            }
+            case 'layerState':
+                return behaviorLayerState(this.behavior, this._behaviorRuntime, source.layer)?.name === source.state;
             default:
                 return undefined;
         }
@@ -1581,12 +1732,26 @@ export class ControllerNode extends Node {
             const read = this._readSourceOrUndefined(p.source, pawn);
             const value: number | boolean = read ?? p.default;
             const source = p.source;
+            // A trigger on a count (a reaction's knockCount, hitCount): raised once each time the count rises, the
+            // first read only learning it, and lowered at the next read if nothing took it.
+            if (p.type === 'trigger' && source.kind === 'reaction' && REACTION_VALUES[source.name]?.counter) {
+                const n = Number(value), seen = this._counterSeen.get(p.name);
+                this._counterSeen.set(p.name, n);
+                if (seen !== undefined && n > seen) { values.set(p.name, true); this._counterPulse.add(p.name); }
+                else if (this._counterPulse.delete(p.name)) values.set(p.name, false);
+                else if (!values.has(p.name)) values.set(p.name, false);
+                continue;
+            }
             // A trigger a script raised this frame stays raised until a transition consumes it; anything
             // else is overwritten from its source.
             if (p.type === 'trigger' && values.get(p.name) === true && source.kind !== 'blackboard') continue;
             values.set(p.name, p.type === 'number' ? Number(value) : Boolean(value));
         }
     }
+
+    /** The counts a counter trigger last read, and the ones it raised that nothing has taken yet. */
+    private readonly _counterSeen = new Map<string, number>();
+    private readonly _counterPulse = new Set<string>();
 
     /** The handful of things only the controller knows, because they are about the GOAL not the pawn. */
     private _sense(name: string, pawn: Pawn): number | boolean {
@@ -1624,6 +1789,16 @@ export class ControllerNode extends Node {
             const forward = pawn.worldForward;
             return (to[0] - from[0]) * forward[0] + (to[2] - from[2]) * forward[2] > 0;
         }
+        if (name === 'targetInVehicle') return this._carrierOf(target) !== null;
+        if (name === 'targetSpeed' || name === 'targetApproachSpeed' || name === 'targetLateralSpeed') {
+            const v = this._targetVelocity(target);
+            if (name === 'targetSpeed') return Math.hypot(v[0], v[2]);
+            const dx = to[0] - from[0], dz = to[2] - from[2], d = Math.hypot(dx, dz);
+            if (!(d > 1e-6)) return 0;
+            const fx = dx / d, fz = dz / d;
+            // Coming at the pawn: against the line from it to the target. Across: toward the pawn's left.
+            return name === 'targetApproachSpeed' ? -(v[0] * fx + v[2] * fz) : v[0] * fz - v[2] * fx;
+        }
         if (name === 'distanceToTarget') return Math.hypot(to[0] - from[0], to[1] - from[1], to[2] - from[2]);
         if (name === 'planarDistanceToTarget') return Math.hypot(to[0] - from[0], to[2] - from[2]);
         // Positive when the target is above. World Y, which is the navigable up (`isNavigableUp`).
@@ -1645,8 +1820,10 @@ export class ControllerNode extends Node {
                 const hit = physics.raycast(
                     [from[0], from[1], from[2]], [to[0], to[1], to[2]],
                     { ignore: pawn.body ? [pawn.body] : undefined });
-                // A body's node is its Collider: the target counts when the hit is the collider it stands in.
-                return !hit || hit.node === target || (!!hit.node && hit.node === target.collider);
+                // A body's node is its Collider: the target counts when the hit is the collider it stands in, or
+                // what it sits in (a car it drives).
+                return !hit || hit.node === target || (!!hit.node && hit.node === target.collider)
+                    || (!!hit.node && this._carrierOf(target) !== null && isAncestorOf(hit.node, target));
             } catch { return true; }
         }
         return 0;
@@ -1991,4 +2168,10 @@ export class ControllerNode extends Node {
         // _commonParse adds the node to its parent — do not addChild again.
         Node.finishParse(node, parent, json);
     }
+}
+
+/** Whether `a` is `b` or holds it (a few levels up at most). */
+function isAncestorOf(a: Node, b: Node): boolean {
+    for (let n: Node | null = b, depth = 0; n && depth < 24; n = n.parent, depth++) if (n === a) return true;
+    return false;
 }

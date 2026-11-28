@@ -17,7 +17,15 @@
  * caller — `ControllerNode` reads them off the possessed pawn's measured motion, the blackboard and its
  * own senses — so everything here is a pure function of the table and the values.
  *
- * ## The one ordering rule
+ * ## Layers and outputs
+
+A machine may have LAYERS beside its own states: each a machine of its own over the same parameters, running at
+the same time (a Health layer going Fine → Hurt, a Weapon layer picking the gun), as an animator's layers do. Only
+the top level steers. Any state, on any layer, may name OUTPUTS: fields of the pawn it sets while it is held (a
+weapon to carry, a hurt flag for the animator), the topmost layer winning a field two states set. The caller
+writes them (`ControllerNode`); here they are data.
+
+## The one ordering rule
  *
  * Latches for EVERY condition in the machine advance once per frame, before any transition is
  * considered — not just the ones leaving the current state. A `>`/`<` hysteresis pair almost always sits
@@ -51,6 +59,9 @@ export const AI_GOALS = [
     // Group movement. Separation, alignment and cohesion over the other agents nearby -- the three
     // urges that turn a crowd into a shoal.
     'flock',
+    // Sidestep round the target, square to the line to it and facing it, at a kept distance: a gunfight's
+    // strafe. Which side is the state's (`strafeSide`); on `auto` it steps off the target's path.
+    'strafe',
     'script',
 ] as const;
 export type AiGoal = typeof AI_GOALS[number];
@@ -62,11 +73,44 @@ export interface BehaviorState {
     targetKey?: string;
     /** Throttle for this state, 0..1. A patrol at 0.4 and a chase at 1 with no other difference. */
     speedScale?: number;
+    /** Fields of the pawn this state sets while it is held (see {@link BehaviorOutput}). */
+    outputs?: BehaviorOutput[];
+    /**
+     * A strafe's side: `auto` (the default) steps off the target's path, away from the way it is moving across
+     * the line to it; `left` or `right` as the pawn faces the target.
+     */
+    strafeSide?: StrafeSide;
+    /** A strafe's distance kept from the target (m): it closes in or backs off toward it as it steps. 0: any. */
+    strafeDistance?: number;
     /** The state the machine starts in. Exactly one state should be the entry; the first wins otherwise. */
     isEntry?: boolean;
     /** Graph-editor layout coordinates. Authoring only — ignored at runtime, like AnimationState's. */
     x?: number;
     y?: number;
+}
+
+/** Which way a strafe steps. */
+export const STRAFE_SIDES = ['auto', 'left', 'right'] as const;
+export type StrafeSide = typeof STRAFE_SIDES[number];
+
+/**
+ * A field of the pawn a state sets: a script's field (`preferredWeapon`, `hurt`) or a node property, to `value`.
+ * Held (the default), it is written every frame the state is held, and the field goes back to what it was once no
+ * state outputs it any more; not held, it is written once as the state is entered and left as it is.
+ */
+export interface BehaviorOutput {
+    field: string;
+    value: number | boolean;
+    hold?: boolean;
+}
+
+/** A machine running beside the top-level one over the same parameters: it never steers, only outputs. */
+export interface BehaviorLayer {
+    name: string;
+    states: BehaviorState[];
+    transitions: BehaviorTransition[];
+    /** False: the layer is skipped (kept, not run). */
+    enabled?: boolean;
 }
 
 export interface BehaviorTransition {
@@ -80,6 +124,11 @@ export interface BehaviorTransition {
      * not consumed by a transition that cannot fire yet.
      */
     minDwell?: number;
+    /**
+     * May enter the state it leaves (from `*`, the state held): it starts over, its time back to 0. Another knock
+     * while hurt starts the hurt over.
+     */
+    restart?: boolean;
 }
 
 /**
@@ -102,7 +151,17 @@ export type BehaviorParameterSource =
      * The escape hatch from thresholds: "am I winning" is a blend of health, distance and how many
      * friends are left, and every way of writing that as `>` comparisons is a cliff somewhere.
      */
-    | { kind: 'fuzzy'; name: string };
+    | { kind: 'fuzzy'; name: string }
+    /**
+     * A value of the pawn's reactions (its body: knocked down, staggering, the last hit, how many knocks): the
+     * animator's reaction parameters, by the same names (`REACTION_VALUES`). A counter (`knockCount`,
+     * `hitCount`) read by a trigger raises it once each time it rises.
+     */
+    | { kind: 'reaction'; name: string }
+    /** Seconds a layer has held its current state ('' or the layer's name; '' is the top level). */
+    | { kind: 'layerTime'; layer: string }
+    /** Whether a layer holds a state now. */
+    | { kind: 'layerState'; layer: string; state: string };
 
 export const BEHAVIOR_SENSES = [
     'distanceToTarget', 'angleToTarget', 'hasTarget', 'targetVisible', 'stateTime',
@@ -124,6 +183,10 @@ export const BEHAVIOR_SENSES = [
     // off, and whether the target is in front of it at all. A platformer guard turns at both; a 3D one
     // asks them too. Probed on read.
     'wallAhead', 'ledgeAhead', 'targetInFront',
+    // How the target moves: its speed, how fast it is coming at the pawn (negative going away), how fast across
+    // the line to it (positive to the pawn's left as it faces the target), and whether it sits in a vehicle
+    // (its velocity then the vehicle's).
+    'targetSpeed', 'targetApproachSpeed', 'targetLateralSpeed', 'targetInVehicle',
 ] as const;
 export type BehaviorSense = typeof BEHAVIOR_SENSES[number];
 
@@ -133,6 +196,7 @@ export const BEHAVIOR_SENSE_TYPES: Readonly<Record<BehaviorSense, 'number' | 'bo
     stateTime: 'number', planarDistanceToTarget: 'number', heightToTarget: 'number', hasPath: 'boolean',
     pathRemaining: 'number', targetInSight: 'boolean', timeSinceSeen: 'number', lastKnownDistance: 'number',
     neighborCount: 'number', wallAhead: 'boolean', ledgeAhead: 'boolean', targetInFront: 'boolean',
+    targetSpeed: 'number', targetApproachSpeed: 'number', targetLateralSpeed: 'number', targetInVehicle: 'boolean',
 };
 
 export const BEHAVIOR_PARAM_TYPES = ['number', 'boolean', 'trigger'] as const;
@@ -149,6 +213,8 @@ export interface BehaviorMachine {
     parameters: BehaviorParameter[];
     states: BehaviorState[];
     transitions: BehaviorTransition[];
+    /** Machines running beside this one over its parameters (see the module header). */
+    layers?: BehaviorLayer[];
 }
 
 /** An empty machine. A controller with one falls back to its own `goal` field. */
@@ -161,10 +227,12 @@ export interface BehaviorRuntime {
     stateTime: number;
     /** Parameter values and hysteresis latches. The caller fills `values` each frame. */
     ctx: ConditionContext;
+    /** Each layer's held state and its time in it, by layer name. */
+    layers?: Record<string, { current: string; stateTime: number }>;
 }
 
 export function createBehaviorRuntime(): BehaviorRuntime {
-    return { current: '', stateTime: 0, ctx: createConditionContext() };
+    return { current: '', stateTime: 0, ctx: createConditionContext(), layers: {} };
 }
 
 /** The state a machine starts in: the one flagged, else the first. */
@@ -182,6 +250,38 @@ export interface BehaviorStep {
     /** True on exactly the frame the machine entered this state. */
     entered: boolean;
     next: BehaviorRuntime;
+    /** Each enabled layer's state now, and whether it was entered this frame, in the machine's order. */
+    layers?: { name: string; state: BehaviorState | null; entered: boolean }[];
+}
+
+/** One machine's states and transitions: the top level's, or a layer's. */
+interface StateTable { states: BehaviorState[]; transitions: BehaviorTransition[] }
+
+/**
+ * One table's step from `current` (held `stateTime`): the state it holds after, whether it entered it, and the
+ * transition that fired (its triggers are the caller's to consume).
+ */
+function stepTable(table: StateTable, current: string, stateTime: number, ctx: ConditionContext): {
+    state: BehaviorState | null; entered: boolean; current: string; stateTime: number; fired: BehaviorTransition | null;
+} {
+    if (table.states.length === 0) return { state: null, entered: false, current, stateTime, fired: null };
+    const held = table.states.find(s => s.name === current) ?? null;
+    if (!held) {
+        const entry = table.states.find(s => s.isEntry) ?? table.states[0];
+        return { state: entry, entered: true, current: entry.name, stateTime: 0, fired: null };
+    }
+    for (const t of table.transitions) {
+        if (t.from !== '*' && t.from !== current) continue;
+        if (t.to === current && !t.restart) continue;
+        // Before the conditions, so a trigger is not consumed by a transition that cannot fire yet.
+        if (t.minDwell && stateTime < t.minDwell) continue;
+        // An absent condition is no constraint at all, matching an empty group.
+        if (t.condition && !conditionNodeMet(ctx, t.condition)) continue;
+        const target = table.states.find(s => s.name === t.to);
+        if (!target) continue;
+        return { state: target, entered: true, current: target.name, stateTime: 0, fired: t };
+    }
+    return { state: held, entered: false, current, stateTime, fired: null };
 }
 
 /**
@@ -195,48 +295,51 @@ export function stepBehavior(
     machine: BehaviorMachine, runtime: BehaviorRuntime, dt: number,
 ): BehaviorStep {
     const delta = Number.isFinite(dt) && dt > 0 ? dt : 0;
+    const layers = (machine.layers ?? []).filter(l => l.enabled !== false);
     const next: BehaviorRuntime = {
         current: runtime.current,
         stateTime: runtime.stateTime + delta,
         ctx: runtime.ctx,
+        layers: {},
     };
+    const ran: { name: string; state: BehaviorState | null; entered: boolean }[] = [];
 
-    if (machine.states.length === 0) return { state: null, entered: false, next };
+    if (machine.states.length === 0 && layers.length === 0) return { state: null, entered: false, next, layers: ran };
 
-    // Enter, if the machine has not started or is holding a state that no longer exists (an author
-    // deleted it while playing). Falling back to the entry beats holding a name nothing answers to.
-    let current = stateNamed(machine, next.current);
-    if (!current) {
-        current = entryState(machine);
-        next.current = current?.name ?? '';
-        next.stateTime = 0;
-        return { state: current, entered: true, next };
+    // EVERY latch in the machine, every layer's too, before any transition is considered — see the module header.
+    // Not on the frame the top level starts: nothing has been held yet to leave.
+    const starting = !machine.states.some(s => s.name === next.current);
+    if (!starting || layers.length > 0) {
+        for (const t of machine.transitions) forEachCondition(t.condition, undefined, c => updateLatch(next.ctx, c));
+        for (const l of layers) for (const t of l.transitions) forEachCondition(t.condition, undefined, c => updateLatch(next.ctx, c));
     }
 
-    // EVERY latch in the machine, before any transition is considered — see the module header.
-    for (const t of machine.transitions)
-        forEachCondition(t.condition, undefined, c => updateLatch(next.ctx, c));
-
-    for (const t of machine.transitions) {
-        if (t.from !== '*' && t.from !== next.current) continue;
-        if (t.to === next.current) continue;
-        // Before the conditions, so a trigger is not consumed by a transition that cannot fire yet.
-        if (t.minDwell && next.stateTime < t.minDwell) continue;
-        // An absent condition is no constraint at all, matching an empty group.
-        if (t.condition && !conditionNodeMet(next.ctx, t.condition)) continue;
-
-        const target = stateNamed(machine, t.to);
-        if (!target) continue;
-
-        // EVERY trigger in the tree, including under an OR branch that did not contribute: one left
-        // raised would fire some unrelated transition on the next frame.
-        consumeTriggers(next.ctx, t.condition, undefined);
-        next.current = target.name;
-        next.stateTime = 0;
-        return { state: target, entered: true, next };
+    // The top level, then each layer, every one seeing the same triggers: a trigger is consumed once all have
+    // looked, so a layer and the top level can both answer one.
+    const fired: BehaviorTransition[] = [];
+    const top = stepTable(machine, next.current, next.stateTime, next.ctx);
+    next.current = top.current;
+    next.stateTime = top.stateTime;
+    if (top.fired) fired.push(top.fired);
+    for (const l of layers) {
+        const was = runtime.layers?.[l.name];
+        const r = stepTable(l, was?.current ?? '', (was?.stateTime ?? 0) + (was ? delta : 0), next.ctx);
+        next.layers![l.name] = { current: r.current, stateTime: r.stateTime };
+        if (r.fired) fired.push(r.fired);
+        ran.push({ name: l.name, state: r.state, entered: r.entered });
     }
+    // EVERY trigger in each fired tree, including under an OR branch that did not contribute: one left raised
+    // would fire some unrelated transition on the next frame.
+    for (const t of fired) consumeTriggers(next.ctx, t.condition, undefined);
+    return { state: top.state, entered: top.entered, next, layers: ran };
+}
 
-    return { state: current, entered: false, next };
+/** The state a layer holds ('' the top level), or null. */
+export function behaviorLayerState(machine: BehaviorMachine, runtime: BehaviorRuntime, layer: string): BehaviorState | null {
+    if (!layer) return stateNamed(machine, runtime.current);
+    const l = machine.layers?.find(x => x.name === layer);
+    const held = runtime.layers?.[layer]?.current;
+    return l && held ? l.states.find(s => s.name === held) ?? null : null;
 }
 
 // ---------------------------------------------------------------------------------------------------
@@ -271,6 +374,16 @@ function parseSource(raw: unknown): BehaviorParameterSource {
         case 'fuzzy': {
             const name = str(s.name);
             return name ? { kind: 'fuzzy', name } : { kind: 'const', value: 0 };
+        }
+        case 'reaction': {
+            const name = str(s.name);
+            return name ? { kind: 'reaction', name } : { kind: 'const', value: 0 };
+        }
+        case 'layerTime':
+            return { kind: 'layerTime', layer: str(s.layer) };
+        case 'layerState': {
+            const state = str(s.state);
+            return state ? { kind: 'layerState', layer: str(s.layer), state } : { kind: 'const', value: false };
         }
         default:
             return { kind: 'const', value: typeof s.value === 'boolean' ? s.value : finiteOr(s.value, 0) };
@@ -309,6 +422,18 @@ export function parseBehaviorState(raw: unknown): BehaviorState | null {
     if (s.isEntry === true) out.isEntry = true;
     if (typeof s.x === 'number' && Number.isFinite(s.x)) out.x = s.x;
     if (typeof s.y === 'number' && Number.isFinite(s.y)) out.y = s.y;
+    const outputs: BehaviorOutput[] = [];
+    for (const raw of (Array.isArray(s.outputs) ? s.outputs : [])) {
+        const o = (raw && typeof raw === 'object' ? raw : {}) as Record<string, unknown>;
+        const field = str(o.field);
+        if (!field || outputs.some(x => x.field === field)) continue;
+        const value = typeof o.value === 'boolean' ? o.value : finiteOr(o.value, 0);
+        outputs.push(o.hold === false ? { field, value, hold: false } : { field, value });
+    }
+    if (outputs.length) out.outputs = outputs;
+    if (s.strafeSide === 'left' || s.strafeSide === 'right') out.strafeSide = s.strafeSide;
+    const keep = finiteOr(s.strafeDistance, 0);
+    if (keep > 0) out.strafeDistance = keep;
     return out;
 }
 
@@ -327,6 +452,7 @@ export function parseBehaviorTransition(raw: unknown): BehaviorTransition | null
         : { op: 'and', children: [condition as ConditionNode] };
     const minDwell = finiteOr(t.minDwell, 0);
     if (minDwell > 0) out.minDwell = minDwell;
+    if (t.restart === true) out.restart = true;
     return out;
 }
 
@@ -357,20 +483,45 @@ export function parseBehaviorMachine(raw: unknown): BehaviorMachine {
         states.push(state);
     }
 
+    const transitions = parseTransitions(m.transitions, stateNames);
+
+    const layers: BehaviorLayer[] = [];
+    for (const entry of (Array.isArray(m.layers) ? m.layers : [])) {
+        if (!entry || typeof entry !== 'object') continue;
+        const l = entry as Record<string, unknown>;
+        const name = str(l.name);
+        if (!name || layers.some(x => x.name === name)) continue;
+        const ls: BehaviorState[] = [];
+        const names = new Set<string>();
+        for (const raw of (Array.isArray(l.states) ? l.states : [])) {
+            const state = parseBehaviorState(raw);
+            if (!state || names.has(state.name)) continue;
+            names.add(state.name);
+            ls.push(state);
+        }
+        const layer: BehaviorLayer = { name, states: ls, transitions: parseTransitions(l.transitions, names) };
+        if (l.enabled === false) layer.enabled = false;
+        layers.push(layer);
+    }
+
+    return layers.length ? { parameters, states, transitions, layers } : { parameters, states, transitions };
+}
+
+/** Transitions read, those naming no state of their table dropped (they can never fire). */
+function parseTransitions(raw: unknown, stateNames: Set<string>): BehaviorTransition[] {
     const transitions: BehaviorTransition[] = [];
-    for (const entry of (Array.isArray(m.transitions) ? m.transitions : [])) {
+    for (const entry of (Array.isArray(raw) ? raw : [])) {
         const transition = parseBehaviorTransition(entry);
         if (!transition) continue;
         if (transition.from !== '*' && !stateNames.has(transition.from)) continue;
         if (!stateNames.has(transition.to)) continue;
         transitions.push(transition);
     }
-
-    return { parameters, states, transitions };
+    return transitions;
 }
 
 /** Whether a machine is empty, so a controller that never authored one serializes nothing. */
 export function isDefaultBehaviorMachine(machine: unknown): boolean {
     const parsed = parseBehaviorMachine(machine);
-    return parsed.parameters.length === 0 && parsed.states.length === 0 && parsed.transitions.length === 0;
+    return parsed.parameters.length === 0 && parsed.states.length === 0 && parsed.transitions.length === 0 && !parsed.layers?.length;
 }

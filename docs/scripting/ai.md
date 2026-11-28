@@ -88,6 +88,10 @@ interface Sighting {
 }
 ```
 
+A character sitting in a vehicle (its Collider out of the world, carried by the vehicle) is seen through it: a
+sight line that strikes what it sits in counts as seeing it, and the senses read its motion as the vehicle's
+(`targetSpeed`, `targetLateralSpeed`, `targetInVehicle`).
+
 Defaults: `fieldOfView: 120` (the **full** cone, in degrees; 360 is omniscient within range),
 `range: 20`, `memorySpan: 5`, `reactionTime: 0.25`.
 
@@ -283,16 +287,28 @@ what stops a wide agent clipping a wall it technically has a path through.
 ## Behaviour machines from script
 
 ```ts
-get behaviorState: string       // '' when there is none
+get behaviorState: string              // '' when there is none
+behaviorLayerState(layer: string)      // a layer's state ('' the top level), '' when none
 ```
 
 The data model is plain and serializable:
 
 ```ts
-interface BehaviorState { name; goal: AiGoal; targetKey?; speedScale?; isEntry?; x?; y? }
-interface BehaviorTransition { from; to; condition?: ConditionGroup; minDwell? }
-interface BehaviorMachine { parameters; states; transitions }
+interface BehaviorState {
+    name; goal: AiGoal; targetKey?; speedScale?; isEntry?; x?; y?
+    outputs?: { field: string; value: number | boolean; hold?: boolean }[]   // fields of the pawn it sets
+    strafeSide?: 'auto' | 'left' | 'right'; strafeDistance?                  // a strafe's side, the distance kept
+}
+interface BehaviorTransition { from; to; condition?: ConditionGroup; minDwell?; restart? }   // restart: may re-enter its state
+interface BehaviorLayer { name; states; transitions; enabled? }
+interface BehaviorMachine { parameters; states; transitions; layers? }
 ```
+
+A layer runs beside the top level over the same parameters and never steers: its states set outputs. Outputs
+are written by the controller each frame its state is held (the last layer's where two set a field), and the field
+goes back to what it was once nothing sets it. Sources beyond the senses: `{ kind: 'reaction', name }` (the pawn's
+reactions: `knockCount`, `staggering`, `pain`...), `{ kind: 'layerTime', layer }`, `{ kind: 'layerState', layer,
+state }`.
 
 A machine only evaluates transitions leaving the state it is currently in, which is what keeps
 layered machines predictable.
@@ -359,6 +375,7 @@ Defuzzification is `'maxav'` (average of set peaks weighted by firing strength â
 
 ```ts
 get behaviorState / goalState / goalPlan / neighborCount / pathRemaining / sightings
+behaviorLayerState(layer)
 ```
 
 All safe to read from a HUD script. `pathRemaining` and `neighborCount` compute on read, so read

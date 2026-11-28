@@ -60,6 +60,8 @@ names. With no reactions they read their default (`hasControl`: true).
 | `lying` | number | ✔ | Off its feet, how it lies: `1` on its back, `−1` on its front, `0` on its side (`0` on its feet). |
 | `pain` | number | | How much it hurts now, `0`–`1`: each wound's, by how bad, rising over 0.2 s and easing off over seconds. |
 
+The same values are an AI brain's **Reaction** source (`{ kind: 'reaction', name }`), by these names.
+
 > **Only the signed ones can go below zero.** A state's Speed parameter clamps at 0, so a blend-space
 > sample authored at a negative coordinate on an unsigned axis is simply unreachable — the probe can
 > never get there. This is the usual cause of "one of my clips never plays".
@@ -97,6 +99,10 @@ Selected with `{ kind: 'sense' }`.
 | `wallAhead` | A wall just ahead, the way the pawn faces (not a slope it could walk up). |
 | `ledgeAhead` | The ground ends just ahead: a drop the pawn would walk off. One-way platforms count as ground. |
 | `targetInFront` | The target is in front of the pawn rather than behind it. |
+| `targetSpeed` | How fast the target moves along the ground, m/s (a vehicle's speed when it sits in one). |
+| `targetApproachSpeed` | How fast the target comes at the pawn, m/s; negative going away. |
+| `targetLateralSpeed` | How fast the target crosses the line to it, m/s; positive to the pawn's left as it faces the target. |
+| `targetInVehicle` | The target sits in a vehicle (its Collider out of the world, carried by something with a body): it is read by the vehicle's motion, and seen through it. |
 
 In a **2D** scene (a controller driving a Character Body 2D) the same senses are measured side-on, in the
 picture plane: `distanceToTarget` is the XY distance, `planarDistanceToTarget` is the horizontal |dx|,
@@ -148,6 +154,7 @@ The steering verbs. A behaviour state or a goal-graph leaf names one.
 | `patrol` | Walk a route authored on the navmesh. |
 | `investigate` | Walk to where the target was **last seen**. |
 | `flock` | Separation, alignment and cohesion over nearby agents. |
+| `strafe` | Sidestep round the target, square to the line to it and facing it, closing in or backing off toward the state's kept distance. On **Auto** it steps off the target's path: away from the way the target crosses the line to it (a car coming past). |
 | `script` | Write no intent at all — leave the frame to `onThink`. |
 
 > `path` and `patrol` **fall back to their straight-line equivalents** when the scene has no baked

@@ -1,6 +1,28 @@
 import { useState } from 'react'
 import { useAiEditor } from './AiEditorContext'
-import { Button, cn, controlClass } from '@cleo/app-kit/ui'
+import { Button, Select, cn, controlClass } from '@cleo/app-kit/ui'
+
+/**
+ * Which of a behaviour brain's layers the canvas shows (the top level, or a layer: a machine of its own over the
+ * same parameters, running beside it and setting outputs, never steering), and the button that adds one.
+ */
+export function BrainLayerPicker() {
+  const { asset, layer, setLayer, layers, addLayer } = useAiEditor()
+  if (!asset || asset.kind === 'goals') return null
+  return (
+    <div className='flex items-center gap-1 shrink-0'>
+      <Select className='w-[136px] truncate' value={layer} onChange={e => setLayer(e.target.value)}
+        title={layer
+          ? `The canvas shows and edits the “${layer}” layer: it runs beside the top level over the same parameters, sets its states’ outputs, and never steers. Pick another, or Base`
+          : 'The canvas shows and edits the top level: the states that steer. Pick a layer to edit its states'}>
+        <option value=''>Base</option>
+        {layers.map(l => <option key={l.name} value={l.name}>{l.name}</option>)}
+      </Select>
+      <Button size='sm' variant='subtle' className='shrink-0 whitespace-nowrap' onClick={addLayer}
+        title='Add a layer: its own states over the same parameters, running beside the top level (a Health layer, a Weapon layer), setting outputs'>+ Layer</Button>
+    </div>
+  )
+}
 
 /**
  * The toolbar head every AI canvas shares: the brain's name, editable in place.

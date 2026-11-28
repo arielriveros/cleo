@@ -174,11 +174,12 @@ export type {
 export {
     AI_GOALS, BEHAVIOR_SENSES, BEHAVIOR_SENSE_TYPES, BEHAVIOR_PARAM_TYPES, EMPTY_BEHAVIOR, createBehaviorRuntime, entryState,
     stateNamed, stepBehavior, parseBehaviorMachine, parseBehaviorState, parseBehaviorTransition,
-    parseBehaviorParameter, isDefaultBehaviorMachine,
+    parseBehaviorParameter, isDefaultBehaviorMachine, behaviorLayerState, STRAFE_SIDES,
 } from "./core/control/behavior";
 export type {
     AiGoal, BehaviorMachine, BehaviorState, BehaviorTransition, BehaviorParameter,
     BehaviorParameterSource, BehaviorParameterType, BehaviorRuntime, BehaviorSense, BehaviorStep,
+    BehaviorLayer, BehaviorOutput, StrafeSide,
 } from "./core/control/behavior";
 export { AISystem } from "./ai/aiSystem";
 export type { AISceneLike, NavMeshSource } from "./ai/aiSystem";

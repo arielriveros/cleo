@@ -46,6 +46,20 @@ export type AiBrainView = 'graph' | 'fuzzy'
 interface AiEditorSession {
   /** The asset being edited, or null when the active tab is not an AI brain. */
   asset: AiBrainAsset | null
+  /**
+   * The behaviour machine layer the canvas and the inspector show ('' the top level). A layer is shown through a
+   * working node of its own whose machine is the layer's states and transitions over the brain's parameters, so
+   * every editor edits it unchanged; `commit` writes it back into the layer.
+   */
+  layer: string
+  setLayer: (layer: string) => void
+  /** The brain's layers' names and states, and the top level's states (for Layer time and Layer state sources). */
+  layers: { name: string; states: string[] }[]
+  baseStates: string[]
+  addLayer: () => void
+  removeLayer: (name: string) => void
+  renameLayer: (from: string, to: string) => void
+  setLayerEnabled: (name: string, on: boolean) => void
   /** The working copy every editor and canvas reads. Null when there is no brain tab open. */
   target: ControllerNode | null
   view: AiBrainView
@@ -62,6 +76,7 @@ interface AiEditorSession {
 const EMPTY: AiEditorSession = {
   asset: null, target: null, view: 'graph', setView: () => {},
   selection: null, setSelection: () => {}, version: 0, commit: () => {}, rename: () => {},
+  layer: '', setLayer: () => {}, layers: [], baseStates: [], addLayer: () => {}, removeLayer: () => {}, renameLayer: () => {}, setLayerEnabled: () => {},
 }
 
 const AiEditorContext = createContext<AiEditorSession>(EMPTY)
@@ -75,6 +90,9 @@ export function AiEditorProvider({ children }: { children: React.ReactNode }) {
   const [view, setView] = useState<AiBrainView>('graph')
   const [selection, setSelection] = useState<AiSelection>(null)
   const [version, setVersion] = useState(0)
+  const [layer, setLayerState] = useState('')
+  // The layer's working node, rebuilt when the layer shown changes (or the brain does).
+  const layerRef = useRef<{ key: string; node: ControllerNode } | null>(null)
 
   // The working copy, keyed by the asset it was seeded from. A ref rather than state: the editors
   // mutate the node in place and announce it through `commit`, exactly as they do for a scene node.
@@ -98,12 +116,23 @@ export function AiEditorProvider({ children }: { children: React.ReactNode }) {
     node.brainId = asset.id
 
     targetRef.current = { id: asset.id, node }
+    layerRef.current = null
+    setLayerState('')
     setSelection(null)
     setView('graph')
     forceSeed(n => n + 1)
   }, [asset])
 
-  const target = asset && targetRef.current?.id === asset.id ? targetRef.current.node : null
+  const base = asset && targetRef.current?.id === asset.id ? targetRef.current.node : null
+  const layerData = base && layer ? base.behavior.layers?.find(l => l.name === layer) ?? null : null
+  if (base && layerData && layerRef.current?.key !== `${base.id}|${layer}`) {
+    const node = new ControllerNode(`${base.name} ▸ ${layer}`)
+    node.behavior = { parameters: base.behavior.parameters, states: layerData.states, transitions: layerData.transitions }
+    node.fuzzy = base.fuzzy
+    node.brain = base.brain
+    layerRef.current = { key: `${base.id}|${layer}`, node }
+  }
+  const target = base && layerData && layerRef.current ? layerRef.current.node : base
 
   /**
    * Write the working node back into the asset.
@@ -115,12 +144,66 @@ export function AiEditorProvider({ children }: { children: React.ReactNode }) {
   const commit = useCallback(() => {
     const node = targetRef.current?.node
     if (!asset || !node) return
+    // A layer shown: its node's states and transitions back into the layer, its parameters (the brain's) back too.
+    const view = layerRef.current
+    if (layer && view && view.key === `${node.id}|${layer}`) {
+      const v = view.node.behavior
+      node.behavior = {
+        ...node.behavior,
+        parameters: v.parameters,
+        layers: (node.behavior.layers ?? []).map(l => l.name === layer ? { ...l, states: v.states, transitions: v.transitions } : l),
+      }
+    }
     if (asset.kind === 'goals') asset.graph = node.goals
     else asset.machine = node.behavior
     asset.fuzzy = node.fuzzy
     setVersion(v => v + 1)
     markTabDirty(activeTab.id)
+  }, [asset, activeTab.id, markTabDirty, layer])
+
+  /** The brain's layers changed (added, removed, renamed): into the asset, and the layer view rebuilt. */
+  const editLayers = useCallback((change: (layers: NonNullable<ControllerNode['behavior']['layers']>) => NonNullable<ControllerNode['behavior']['layers']>, show?: string) => {
+    const node = targetRef.current?.node
+    if (!asset || !node || asset.kind === 'goals') return
+    node.behavior = { ...node.behavior, layers: change(node.behavior.layers ?? []) }
+    if (!node.behavior.layers?.length) delete node.behavior.layers
+    asset.machine = node.behavior
+    layerRef.current = null
+    if (show !== undefined) setLayerState(show)
+    setSelection(null)
+    setVersion(v => v + 1)
+    markTabDirty(activeTab.id)
   }, [asset, activeTab.id, markTabDirty])
+
+  const setLayer = useCallback((name: string) => { layerRef.current = null; setSelection(null); setLayerState(name) }, [])
+  const addLayer = useCallback(() => {
+    const taken = new Set((targetRef.current?.node.behavior.layers ?? []).map(l => l.name))
+    let name = 'Layer'
+    for (let i = 2; taken.has(name); i++) name = `Layer ${i}`
+    editLayers(ls => [...ls, { name, states: [{ name: 'State', goal: 'idle', isEntry: true }], transitions: [] }], name)
+  }, [editLayers])
+  const removeLayer = useCallback((name: string) => editLayers(ls => ls.filter(l => l.name !== name), ''), [editLayers])
+  const renameLayer = useCallback((from: string, to: string) => {
+    const next = to.trim()
+    const taken = new Set((targetRef.current?.node.behavior.layers ?? []).map(l => l.name))
+    if (!next || next === from || taken.has(next)) return
+    // A source reading the layer (Layer time, Layer state) follows it to its new name.
+    const node = targetRef.current?.node
+    if (node) node.behavior = {
+      ...node.behavior,
+      parameters: node.behavior.parameters.map(p => (p.source.kind === 'layerTime' || p.source.kind === 'layerState') && p.source.layer === from
+        ? { ...p, source: { ...p.source, layer: next } } : p),
+    }
+    editLayers(ls => ls.map(l => l.name === from ? { ...l, name: next } : l), next)
+  }, [editLayers])
+  const setLayerEnabled = useCallback((name: string, on: boolean) =>
+    editLayers(ls => ls.map(l => l.name === name ? (on ? (({ enabled: _drop, ...rest }) => rest)(l) : { ...l, enabled: false }) : l)), [editLayers])
+  const layers = useMemo(() => (base?.behavior.layers ?? []).map(l => ({ name: l.name, states: l.states.map(s => s.name) })),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [base, version])
+  const baseStates = useMemo(() => (base?.behavior.states ?? []).map(s => s.name),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [base, version])
 
   const rename = useCallback((name: string) => {
     if (!asset) return
@@ -145,7 +228,8 @@ export function AiEditorProvider({ children }: { children: React.ReactNode }) {
 
   const value = useMemo<AiEditorSession>(() => ({
     asset, target, view, setView, selection, setSelection, version, commit, rename,
-  }), [asset, target, view, selection, version, commit, rename])
+    layer, setLayer, layers, baseStates, addLayer, removeLayer, renameLayer, setLayerEnabled,
+  }), [asset, target, view, selection, version, commit, rename, layer, setLayer, layers, baseStates, addLayer, removeLayer, renameLayer, setLayerEnabled])
 
   return <AiEditorContext.Provider value={value}>{children}</AiEditorContext.Provider>
 }

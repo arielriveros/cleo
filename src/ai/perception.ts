@@ -63,7 +63,8 @@ export interface PerceptionCandidate {
  * Writes the blocking point into `hit` and returns true when the view is blocked. Zero-allocation by
  * contract, because it runs once per candidate that survives the range and cone tests.
  */
-export type LineOfSightTest = (from: vec3, to: vec3, hit: vec3) => boolean;
+/** Whether something blocks the ray `from` → `to` (the hit into `hit`); `candidate`: whose sighting it is for. */
+export type LineOfSightTest = (from: vec3, to: vec3, hit: vec3, candidate?: string | null) => boolean;
 
 /**
  * The plane an agent looks across. `xz` is the 3D ground plane. `xy` is a 2D scene's picture plane: its
@@ -99,6 +100,8 @@ export interface Sighting {
  */
 class CallbackObstacle extends GameEntity {
     public test: LineOfSightTest | null = null;
+    /** The candidate the next tests are for. */
+    public candidate: string | null = null;
     /** The plane the observer looks across: in `xy` the test is handed, and answers in, picture-plane XY. */
     public plane: PerceptionPlane = 'xz';
 
@@ -120,7 +123,7 @@ class CallbackObstacle extends GameEntity {
             vec3.set(this._from, this._from[0], this._from[2], 0);
             vec3.set(this._to, this._to[0], this._to[2], 0);
         }
-        if (!this.test(this._from, this._to, this._hit)) return null;
+        if (!this.test(this._from, this._to, this._hit, this.candidate)) return null;
         intersectionPoint.x = this._hit[0];
         intersectionPoint.y = this.plane === 'xy' ? 0 : this._hit[1];
         intersectionPoint.z = this.plane === 'xy' ? this._hit[1] : this._hit[2];
@@ -216,6 +219,7 @@ export class Perception {
             // distance to itself. Into scratch, not a fresh array -- this runs per candidate per frame.
             vec3.set(this._to, this._point.x, this._point.y, this._point.z);
             this._obstacle.reach = vec3.distance(this._from, this._to);
+            this._obstacle.candidate = candidate.id;
 
             const visible = this._vision.visible(this._point);
 

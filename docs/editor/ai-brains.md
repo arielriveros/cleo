@@ -92,7 +92,15 @@ transition.
 handle to handle to make a transition; duplicates are refused. Right-click a state for **Set as
 entry** or **Delete**. Delete removes states and **both directions** of an edge.
 
-While the game is playing, the current state is highlighted live.
+While the game is playing, the current state is highlighted live (the shown layer's, on a layer).
+
+**Layers.** The picker beside **+ State** shows the top level (**Base**) or one of the brain's **layers**;
+**+ Layer** adds one. A layer is a machine of its own over the same parameters, running beside the top level
+from its own entry state, every frame: a **Health** layer going Fine → Hurt on a knock and back after a while,
+a **Weapon** layer picking the gun by distance. Only the top level steers (its states' goals move the pawn); a
+layer's states only set **outputs**. A trigger is taken once every layer and the top level have looked at it, so
+two can answer the same one. With a layer shown, the inspector has its name, **runs** (off keeps it without
+running it) and a delete button above the usual rows.
 
 > Wildcard transitions (`from: '*'`) are **not drawn** — there is no node to draw them from. The
 > hint line says how many were skipped, so they are not invisible, just not on the canvas.
@@ -106,13 +114,25 @@ The inspector holds the machine's detail:
   `boolean` or `trigger`) and a source: a **built-in** reading the pawn's measured motion
   (`planarSpeed`, `isGrounded`, `slopeAngle` …), a **sense** — one of the few things only the
   controller knows about its target — a blackboard entry, a variable on the pawn, a fuzzy output
-  (offered once the brain's fuzzy model writes one), or a constant.
+  (offered once the brain's fuzzy model writes one), a **Reaction** — what the pawn's body is doing
+  (knocked down, staggering, the last hit, `knockCount`, `pain`: the animator's
+  [reaction parameters](../reference/animation-builtins.md#node-built-ins--node_builtins), by the same names; a trigger on a
+  count such as `knockCount` fires once each time it rises) — **Layer time** (seconds a layer has held its
+  state) or **Layer state** (whether a layer holds a state), or a constant.
 - **States** — each state's name and goal, **Entry** (the state the machine starts in, and the one it
   falls back to if the held state is deleted), a target key (empty uses the controller's own) and a
-  **Speed** throttle. Renaming a state carries its transitions along.
+  **Speed** throttle. Renaming a state carries its transitions along. A **strafe** state also has its **Side**
+  (**Auto** steps off the target's path; **Left**, **Right**) and the distance it **Keep**s.
+- **Outputs** — on any state, of any layer: fields of the pawn it sets while it is held (**+ Output**: the
+  field, a number or `true`/`false`, and **held**). A script's field is set as its script reads it
+  (`preferredWeapon`, `hurt`), a property through its setter, anything else as a custom variable. Held, it
+  is written every frame and goes back to what it was once no held state sets it; not held, it is written once
+  as the state is entered. Where two layers set the same field the one lower in the layer list wins, and a layer
+  over the top level.
 - **Transitions** — from a state (or *any state*) to another, a **Min dwell** — seconds the machine
   must have spent in the source state before the transition may fire, the guard against a pair that
-  flips every frame — and the condition tree that opens it.
+  flips every frame — and the condition tree that opens it. One from *any state* has **restarts**: on, it may
+  enter the state already held, starting it over (another knock while hurt starts the hurt over).
 
 ## The Goals canvas
 

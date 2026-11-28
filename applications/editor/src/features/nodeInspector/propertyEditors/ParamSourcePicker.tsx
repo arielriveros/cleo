@@ -1,4 +1,4 @@
-import { BEHAVIOR_SENSES } from 'cleo'
+import { BEHAVIOR_SENSES, REACTION_VALUES } from 'cleo'
 import type { BehaviorParameterSource } from 'cleo'
 import { Select, TextInput } from '@cleo/app-kit/ui'
 
@@ -25,9 +25,16 @@ interface Props {
    * than offering a source that can only ever read 0.
    */
   fuzzyOutputs?: string[]
+  /** The brain's layers and their states, and the top level's: offered as Layer time and Layer state. */
+  layers?: { name: string; states: string[] }[]
+  baseStates?: string[]
 }
 
-export default function ParamSourcePicker({ source, onChange, fuzzyOutputs = [] }: Props) {
+/** The reaction values a brain can read: the animator's reaction parameters, by the same names. */
+const REACTIONS = Object.keys(REACTION_VALUES)
+
+export default function ParamSourcePicker({ source, onChange, fuzzyOutputs = [], layers = [], baseStates = [] }: Props) {
+  const layerStates = (name: string) => name ? layers.find(l => l.name === name)?.states ?? [] : baseStates
   return (
     <div className='flex items-center gap-1'>
       <Select className='w-[104px]' value={source.kind}
@@ -39,6 +46,9 @@ export default function ParamSourcePicker({ source, onChange, fuzzyOutputs = [] 
               : kind === 'blackboard' ? { kind, key: 'target' }
               : kind === 'variable' ? { kind, varName: '' }
               : kind === 'fuzzy' ? { kind, name: fuzzyOutputs[0] ?? '' }
+              : kind === 'reaction' ? { kind, name: 'knockCount' }
+              : kind === 'layerTime' ? { kind, layer: layers[0]?.name ?? '' }
+              : kind === 'layerState' ? { kind, layer: layers[0]?.name ?? '', state: (layers[0]?.states ?? baseStates)[0] ?? '' }
               : { kind: 'const', value: 0 })
         }}>
         <option value='builtin'>Built-in</option>
@@ -47,6 +57,9 @@ export default function ParamSourcePicker({ source, onChange, fuzzyOutputs = [] 
         <option value='variable'>Variable</option>
         {/* Offered only when a model writes something: a fuzzy source with no outputs reads 0 forever. */}
         {(fuzzyOutputs.length > 0 || source.kind === 'fuzzy') && <option value='fuzzy'>Fuzzy</option>}
+        <option value='reaction' title='What the pawn’s body is doing: knocked down, staggering, the last hit, how many knocks (a count raises a trigger each time it rises)'>Reaction</option>
+        {(layers.length > 0 || source.kind === 'layerTime') && <option value='layerTime' title='Seconds a layer has held its state'>Layer time</option>}
+        {(layers.length > 0 || source.kind === 'layerState') && <option value='layerState' title='Whether a layer holds a state now'>Layer state</option>}
         <option value='const'>Constant</option>
       </Select>
 
@@ -78,6 +91,30 @@ export default function ParamSourcePicker({ source, onChange, fuzzyOutputs = [] 
               not silently repoint an authored source at a different output. */}
           {!fuzzyOutputs.includes(source.name) && <option value={source.name}>{source.name || '(none)'}</option>}
           {fuzzyOutputs.map(o => <option key={o} value={o}>{o}</option>)}
+        </Select>
+      )}
+      {source.kind === 'reaction' && (
+        <Select className='flex-1 min-w-0' value={source.name}
+          onChange={(e) => onChange({ kind: 'reaction', name: e.target.value })}>
+          {!REACTIONS.includes(source.name) && <option value={source.name}>{source.name}</option>}
+          {REACTIONS.map(r => <option key={r} value={r}>{r}</option>)}
+        </Select>
+      )}
+      {(source.kind === 'layerTime' || source.kind === 'layerState') && (
+        <Select className='flex-1 min-w-0' value={source.layer}
+          title='The layer it reads (Base: the top level)'
+          onChange={(e) => onChange(source.kind === 'layerTime'
+            ? { kind: 'layerTime', layer: e.target.value }
+            : { kind: 'layerState', layer: e.target.value, state: layerStates(e.target.value)[0] ?? source.state })}>
+          <option value=''>Base</option>
+          {layers.map(l => <option key={l.name} value={l.name}>{l.name}</option>)}
+        </Select>
+      )}
+      {source.kind === 'layerState' && (
+        <Select className='w-[92px]' value={source.state}
+          onChange={(e) => onChange({ kind: 'layerState', layer: source.layer, state: e.target.value })}>
+          {!layerStates(source.layer).includes(source.state) && <option value={source.state}>{source.state || '(none)'}</option>}
+          {layerStates(source.layer).map(s => <option key={s} value={s}>{s}</option>)}
         </Select>
       )}
       {source.kind === 'const' && (

@@ -6,7 +6,7 @@ import MachineGraph from '../../components/MachineGraph'
 import type { GraphLinkModel, GraphNodeModel } from '../../components/MachineGraph'
 import { behaviorLinkKey, behaviorLinks, hasWildcardTransitions } from '../../utils/aiGraphEdits'
 import { useAiEditor } from './AiEditorContext'
-import AiGraphToolbar, { AiEmptyState } from './AiGraphToolbar'
+import AiGraphToolbar, { AiEmptyState, BrainLayerPicker } from './AiGraphToolbar'
 import { Button } from '@cleo/app-kit/ui'
 
 /**
@@ -58,7 +58,7 @@ function transitionLabel(t: BehaviorTransition): string {
 
 export default function BehaviorGraph() {
   const { isPlayMode, instance } = useCleoEngine()
-  const { target: controller, selection, setSelection, version, commit } = useAiEditor()
+  const { target: controller, selection, setSelection, version, commit, layer } = useAiEditor()
   const [activeState, setActiveState] = useState<string | null>(null)
 
   // The canvas selection IS the session selection, so the inspector on the right rail details whatever
@@ -74,13 +74,13 @@ export default function BehaviorGraph() {
     const tick = () => {
       // The PLAY scene has its own copy of the node; the authoring one never advances.
       const live = instance?.scene?.getNodeById(controller.id)
-      const name = live instanceof ControllerNode ? live.behaviorState : ''
+      const name = live instanceof ControllerNode ? (layer ? live.behaviorLayerState(layer) : live.behaviorState) : ''
       setActiveState(prev => (prev === (name || null) ? prev : (name || null)))
       raf = requestAnimationFrame(tick)
     }
     raf = requestAnimationFrame(tick)
     return () => cancelAnimationFrame(raf)
-  }, [controller, isPlayMode, instance])
+  }, [controller, isPlayMode, instance, layer])
 
   const machine = controller?.behavior
   void version
@@ -208,6 +208,7 @@ export default function BehaviorGraph() {
       toolbar={
         <>
           <AiGraphToolbar />
+          <BrainLayerPicker />
           <Button variant='primary' className='px-2'
             onClick={() => {
               const n = machine.states.length

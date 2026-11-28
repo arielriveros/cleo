@@ -1,9 +1,10 @@
 import { useMemo, useState } from 'react'
 import { AI_GOALS, ControllerNode, parseBehaviorMachine } from 'cleo'
 import type {
-  AiGoal, BehaviorMachine, BehaviorParameter, BehaviorParameterSource, BehaviorParameterType,
-  BehaviorState, BehaviorTransition,
+  AiGoal, BehaviorMachine, BehaviorOutput, BehaviorParameter, BehaviorParameterSource, BehaviorParameterType,
+  BehaviorState, BehaviorTransition, StrafeSide,
 } from 'cleo'
+import { useAiEditor } from '../../ai/AiEditorContext'
 import ConditionTreeView, { emptyConditionGroup } from '../../../components/ConditionTreeView'
 import ParamSourcePicker from './ParamSourcePicker'
 import type { ConditionParam } from '../../../components/ConditionTreeView'
@@ -38,6 +39,10 @@ export default function BehaviorEditor({ node, onChange }: Props) {
   // — so there is nothing to gain from a finer-grained store, and one path means one place to be wrong.
   const [version, setVersion] = useState(0)
   const machine = node.behavior
+  // A brain's layers, for the source picker's Layer time and Layer state (the AI Brain tab's; none elsewhere).
+  const { layers: brainLayers, baseStates: brainBase, asset: brainAsset } = useAiEditor()
+  const layers = brainAsset ? brainLayers : (machine.layers ?? []).map(l => ({ name: l.name, states: l.states.map(s => s.name) }))
+  const baseStates = brainAsset ? brainBase : machine.states.map(s => s.name)
 
   const apply = (next: BehaviorMachine) => {
     node.behavior = parseBehaviorMachine(next)
@@ -104,7 +109,7 @@ export default function BehaviorEditor({ node, onChange }: Props) {
               <ButtonWithConfirm variant='remove'
                 onClick={() => apply({ ...machine, parameters: machine.parameters.filter((_, x) => x !== i) })}>✕</ButtonWithConfirm>
             </div>
-            <ParamSourcePicker source={p.source} fuzzyOutputs={fuzzyOutputs}
+            <ParamSourcePicker source={p.source} fuzzyOutputs={fuzzyOutputs} layers={layers} baseStates={baseStates}
               onChange={(source) => patchParam(i, { source })} />
           </div>
         ))}
@@ -167,6 +172,8 @@ export default function BehaviorEditor({ node, onChange }: Props) {
             <Slider label='Speed' min={0} max={1} step={0.05} value={s.speedScale ?? 1}
               labelClassName='w-[52px]'
               onChange={(v) => patchState(s.name, { speedScale: v })} />
+            {s.goal === 'strafe' && <StrafeRows state={s} onChange={patch => patchState(s.name, patch)} />}
+            <OutputRows outputs={s.outputs ?? []} onChange={outputs => patchState(s.name, { outputs: outputs.length ? outputs : undefined })} />
           </div>
         ))}
         <Button size='sm' variant='ghost'
@@ -201,6 +208,11 @@ export default function BehaviorEditor({ node, onChange }: Props) {
             <Slider label='Min dwell' min={0} max={5} step={0.05} value={t.minDwell ?? 0}
               labelClassName='w-[68px]' title={DWELL_HINT}
               onChange={(v) => patchTransition(i, { minDwell: v > 0 ? v : undefined })} />
+            {(t.from === '*' || t.from === t.to) && (
+              <span title='May enter the state it leaves: it starts over, its time back to 0 (another knock while hurt starts the hurt over)'>
+                <Toggle label='restarts' checked={!!t.restart} onChange={on => patchTransition(i, { restart: on || undefined })} />
+              </span>
+            )}
             <ConditionTreeView
               params={params}
               node={t.condition ?? emptyConditionGroup()}
@@ -227,6 +239,52 @@ export default function BehaviorEditor({ node, onChange }: Props) {
       </div>
     </div>
     </DocScope>
+  )
+}
+
+const STRAFE_HINT = 'Which way it steps round the target: Auto steps off the target’s path (away from the way it crosses the line to it); Left or Right as it faces the target.'
+const KEEP_HINT = 'The distance it keeps from the target while it steps, closing in or backing off toward it (0: any).'
+
+/** A strafe state's side and the distance it keeps. */
+function StrafeRows({ state, onChange }: { state: BehaviorState; onChange: (patch: Partial<BehaviorState>) => void }) {
+  return (
+    <div className='flex items-center gap-1'>
+      <span className={labelClass} title={STRAFE_HINT}>Side</span>
+      <Select className='w-[72px]' value={state.strafeSide ?? 'auto'} title={STRAFE_HINT}
+        onChange={e => onChange({ strafeSide: e.target.value === 'auto' ? undefined : e.target.value as StrafeSide })}>
+        <option value='auto'>Auto</option>
+        <option value='left'>Left</option>
+        <option value='right'>Right</option>
+      </Select>
+      <Slider className='flex-1 min-w-0' label='Keep' min={0} max={30} step={0.5} value={state.strafeDistance ?? 0}
+        labelClassName='w-[36px]' title={KEEP_HINT}
+        onChange={v => onChange({ strafeDistance: v > 0 ? v : undefined })} />
+    </div>
+  )
+}
+
+const OUTPUT_HINT = 'A field of the pawn this state sets while it is held: a script’s field (preferredWeapon, hurt) or a property. Held, it goes back to what it was once no state sets it; Once, it is set as the state is entered and left as it is.'
+
+/** A state's outputs: field, value, held or once. */
+function OutputRows({ outputs, onChange }: { outputs: BehaviorOutput[]; onChange: (outputs: BehaviorOutput[]) => void }) {
+  const patch = (i: number, p: Partial<BehaviorOutput>) => onChange(outputs.map((o, x) => x === i ? { ...o, ...p } : o))
+  return (
+    <div className='flex flex-col gap-1'>
+      {outputs.map((o, i) => (
+        <div key={i} className='flex items-center gap-1'>
+          <span className={labelClass} title={OUTPUT_HINT}>Sets</span>
+          <TextInput className='flex-1 min-w-0' value={o.field} title='The pawn’s field' onChange={field => patch(i, { field: field.trim() })} />
+          <TextInput className='w-[52px]' value={String(o.value)} title='The value: a number, or true / false'
+            onChange={v => patch(i, { value: v === 'true' ? true : v === 'false' ? false : (parseFloat(v) || 0) })} />
+          <span title='Held: set every frame the state is held. Once: set as it is entered'>
+            <Toggle label='held' checked={o.hold !== false} onChange={on => patch(i, { hold: on ? undefined : false })} />
+          </span>
+          <ButtonWithConfirm variant='remove' onClick={() => onChange(outputs.filter((_, x) => x !== i))}>✕</ButtonWithConfirm>
+        </div>
+      ))}
+      <Button size='sm' variant='ghost' title={OUTPUT_HINT}
+        onClick={() => onChange([...outputs, { field: 'field', value: 1 }])}>+ Output</Button>
+    </div>
   )
 }
 
