@@ -71,6 +71,112 @@ animation and dropped to a free ragdoll once the hips strayed too far.
   kept within bounds, fat shapes, the hand-off velocity taken from two animation frames, and depenetration at
   spawn.
 
+## What makes a reaction convincing
+
+What shipped games and the literature do about the things that most often make a reactive ragdoll look wrong, with
+the numbers they use. Euphoria's parameter names and defaults are the library defaults (the GTA V message set as its
+helpers document it); the shipped values are tuned per situation and not public. NaturalMotion's stiffness reads as
+an angular frequency in rad/s, critically damped at damping 1: Euphoria characters run soft but critically damped,
+about 1–2.5 Hz (stiffness 6–16 is f = k/2π, 0.95–2.5 Hz), where Jolt's motors take Hz and a damping ratio.
+
+### Limbs that wiggle
+
+- Euphoria puts the visible jerk of a hit in the **spine and neck, not the arms**: its shot snap acts on the spine
+  and neck only (SnapMag 0.4, UnSnapRatio 0.7, as torques), and a chest hit adds a short spine torque (ShockSpin
+  50–90, decaying ×4).
+- A bullet is **shaped**, not an instant point impulse (ConfigureBullets): spread over 0.1 s along the spine, a share
+  of it applied to the whole body as one rigid body (rbRatio 0.5), and a counter-push on the pelvis 33 ms later
+  (counterImpulseMag 0.5). Its "looseness fix" applies only the centre impulse and the spine's twist.
+- **Every arm has a job** after a hit: reach for the wound, brace, point the gun, fling. Arms left tracking a walk's
+  swing after a hit is what reads as wobble. Stiffness: body 11, arms 10, neck 14 (stiffer than the body); damping 1.
+- PuppetMaster's anti-wobble is world-space **pins** on top of the muscles (pinWeight 1, pinPow 4), hits lowering the
+  pins locally and the pins coming back at a set speed; internal collisions off while pinned.
+- Unreal: ramp a physical-animation profile's strength from 0 to 1 rather than editing it; don't apply local physical
+  animation to a body with no physical parent (the pelvis).
+
+### Balance steps
+
+- Euphoria's balancer aims each step at where the body will be a short time ahead (predictionTime 0.2 s; its
+  StaggerFall 0.1 s: "larger values give fewer, bigger steps"), steps 0.1 m high on legs of stiffness 12 (about
+  1.9 Hz), re-steps when the feet are too far apart (legsApartRestep 0.2) or together, weakens the legs step by step
+  (×0.7 per step after the second) and slumps after about four steps (NumStepsTillSlump 4), giving up below
+  giveUpHeight 0.5.
+- The capture point x + v·√(z/g) is about v·0.3 s for a 0.9 m pelvis: aiming short of it gives several short steps
+  instead of one long one (Pratt, Carff, Drakunov, Goswami 2006). SIMBICON aims the swing hip at d·0.5 + v·0.2 with
+  states of about 0.3 s.
+- People react in about 82 ms, shift weight by 130–138 ms and put the first foot down at 164–192 ms; a first step of
+  0.84–1.03 m only follows an extreme lean of 30°.
+- GTA V and RDR2 end a stagger they survived with a short recovery clip matched to the stance (narrow, wide, left,
+  centre, right).
+- A stagger that moves the character's capsule under its ordinary walk takes the walk's strides (0.8–1.5 m): that is
+  the "steps too far apart" look.
+
+### A body that looks dead
+
+- Euphoria never drops a living body's muscles to zero: catching a fall arms 15, torso 9, legs 6; a high fall, a
+  smart fall and a foetal curl 9–11; rolling down stairs 11, each with the head looking. A death relaxes the upper body
+  over 2 s and the legs over 0.4 s, so the legs buckle first. Its BodyRelax at 50 is only half relaxed.
+- PuppetMaster keeps 30% muscle strength when knocked out, and its fall behaviour blends a writhe clip and a
+  catch-fall clip by the pelvis's height and fall speed, so the body always follows a living pose.
+- CryEngine's "fall and play" keeps the ragdoll stiff: with few contacts it follows a falling animation, on the ground
+  the first frame of the stand-up clip that matches best; going limp is a separate call.
+- GTA V and RDR2 pose the hands during a ragdoll (fist, grab, flat on the floor, flailing).
+
+### Pain
+
+- Euphoria's "conscious pain": a lean of the spine up over 0.2 s, held, back over 1.5 s; the head looks at the wound
+  for 0.3–0.8 s; the hand reaches it after 0.2 s and holds it 2 s. A gut shot folds (spine bend 2, hips 1, for 2 s);
+  one from behind arches (spine 4, for 0.7 s, no step for 0.3 s).
+- GTA V and RDR2 add directional additive flinches, an injured stance, injured locomotion and get-ups, and writhing on
+  the ground.
+- People's startle response comes in 72–109 ms and their corrective response at about 300 ms.
+
+### A hit that depends on where it lands
+
+- An **arm**: the arm goes loose for a quarter second, the hips turn (hipYaw 0.8) and a step turns with it; the other
+  hand reaches for it.
+- A **leg**: the leg weakens (legInjury 0.3, for 0.4 s), the knee gives at 0.3 s, the character limps; a hard one
+  folds it to its knees after about 0.7 s of trying to stand, arms out.
+- The **chest**: a spin and the pain lean; the **gut**: a fold; the **back**: an arch; the **head**: the neck loose
+  (stiffness 14 ramping back over 0.4 s) and a snap.
+- The Last of Us Part II stuns on a leg hit and split the thigh into two capsules so knee hits count as leg hits;
+  RDR2 keeps injured-left-leg, injured-right-leg and injured-torso states, each with its own locomotion, aim,
+  flinches and recoveries; CryEngine picks a reaction from a table by body part, shot origin, movement and stance.
+
+### Getting up
+
+- GTA V and RDR2 classify the lying pose (front, back, either hip, arms down, left side, right side) and roll a body
+  lying on its side or front onto its back first, then rise in stages (to the knees or seated, then to the feet).
+- Unreal's ALS reads face up from the pelvis's roll and turns the target yaw by 180° when face up; a pose snapshot
+  blends into the get-up.
+- Start the get-up when the body has stopped rolling (Euphoria: roll speed under 0.2 for 0.5 s), not after a fixed
+  wait (PuppetMaster's default 5 s getUpDelay is a leftover of that).
+- Join the get-up clip at the frame that matches the lying pose (EA's patent US10388053 scores candidate start frames
+  against the ragdoll's pose), not at a first frame that may lie still for seconds.
+- A robust facing test: the belly normal averaged over pelvis and chest against up; above +0.35 face up, below −0.35
+  face down, between them on its side; with hysteresis.
+
+### Falling from a vehicle
+
+- GTA V plays a jump-out clip, then its falling behaviours: catch the fall 0.3 s before impact, curl into a foetal
+  shape when it cannot land upright (below uprightness 0.9), arms up to land, roll on landing, head kept off the
+  ground; a fall under 15 m/s counts as recoverable.
+- A parachute landing fall: feet and knees together, knees bent, chin tucked, elbows in, roll through five points of
+  contact. Jumping from a car: away from it at an angle, chin to chest, limbs in, land on a shoulder and roll.
+- In a real fall the arms go out by reflex; the wrists land about 38 ms before the pelvis.
+
+### What Cleo changes for it (2026-11-27)
+
+| The look | What it was | The change |
+|---|---|---|
+| Dead bodies | Off its feet every muscle aimed at where the body already was (`hold`), and a behaviour's offset on that ran away | Muscles follow a reference pose (the pose it fell in, a clip, a brace), firm with damping 1, never below 0.3 while alive; relax only once still |
+| Bail and falls | A brief stiff spine and a runaway arm | Tuck in flight, arms toward the ground 0.3 s before it, roll on landing, head protected |
+| Steps too far apart | A shove on the capsule under the walk's strides | A balancer: short steps (0.25 s, at most 0.40 m) aimed 0.2 s ahead, legs weakening per step, a fall after four |
+| One hit for all | A kick of at most 1.2 m/s anywhere; a leg's hit put on the chest | Shaped impulses and a reaction per zone: head, chest, gut, back, arm, leg |
+| No pain | A 0.25 s weakness; the wound forgotten after 2.3 s | A pain lean, the head looking at the wound, the hand holding it 2 s, wounds kept by severity, hurt values for the graphs |
+| Wrong get-up | The face-down slot held a clip that starts on its back; *Stand Up* lies 1.4 s before it rises | Lying classes, a roll onto the back, the clip joined where it starts to rise |
+| Wiggle | Feedback on a pose a worker step old, fast layers in the muscles' target, the animation's spin dropped | Latency-compensated reach, fast layers drawn but not followed, the spin kept |
+
 ## How Cleo maps them
 
 | Idea | In Cleo |
@@ -161,3 +267,27 @@ The golden physics traces are unchanged: a world with no drives steps exactly as
 - Coros, Beaudoin and van de Panne, [Generalized Biped Walking Control](https://www.cs.ubc.ca/~van/papers/2010-TOG-gbwc/paper.pdf), SIGGRAPH 2010.
 - Faloutsos, van de Panne and Terzopoulos, [Composable Controllers for Physics-Based Character Animation](https://www.cs.ubc.ca/~van/papers/2000-siggraph-interactive.pdf), SIGGRAPH 2001.
 - [Jolt Physics](https://github.com/jrouwe/JoltPhysics): [SwingTwistConstraint](https://jrouwe.github.io/JoltPhysics/class_swing_twist_constraint.html) and its ragdoll samples.
+- Shot, balance and fall behaviours with their defaults: [ShotHelper](https://docs.ragecoop.com/SHVDN/GTA.NaturalMotion.ShotHelper.html),
+  [ShotSnapHelper](https://docs.ragecoop.com/SHVDN/GTA.NaturalMotion.ShotSnapHelper.html),
+  [ShotShockSpinHelper](https://docs.ragecoop.com/SHVDN/GTA.NaturalMotion.ShotShockSpinHelper.html),
+  [ShotInGutsHelper](https://docs.ragecoop.com/SHVDN/GTA.NaturalMotion.ShotInGutsHelper.html),
+  [ShotFromBehindHelper](https://docs.ragecoop.com/SHVDN/GTA.NaturalMotion.ShotFromBehindHelper.html),
+  [ShotFallToKneesHelper](https://docs.ragecoop.com/SHVDN/GTA.NaturalMotion.ShotFallToKneesHelper.html),
+  [ShotHeadLookHelper](https://docs.ragecoop.com/SHVDN/GTA.NaturalMotion.ShotHeadLookHelper.html),
+  [StaggerFallHelper](https://docs.ragecoop.com/SHVDN/GTA.NaturalMotion.StaggerFallHelper.html),
+  [SmartFallHelper](https://docs.ragecoop.com/SHVDN/GTA.NaturalMotion.SmartFallHelper.html),
+  [HighFallHelper](https://docs.ragecoop.com/SHVDN/GTA.NaturalMotion.HighFallHelper.html),
+  [BodyFoetalHelper](https://docs.ragecoop.com/SHVDN/GTA.NaturalMotion.BodyFoetalHelper.html),
+  [BodyRollUpHelper](https://docs.ragecoop.com/SHVDN/GTA.NaturalMotion.BodyRollUpHelper.html).
+- PuppetMaster: [BehaviourPuppet](http://www.root-motion.com/puppetmasterdox/html/page10.html),
+  [BehaviourFall](http://www.root-motion.com/puppetmasterdox/html/page11.html),
+  [MuscleHit](http://www.root-motion.com/puppetmasterdox/html/struct_root_motion_1_1_dynamics_1_1_muscle_hit.html).
+- CryEngine: [Fall and Play](https://www.cryengine.com/docs/static/engines/cryengine-3/categories/1638401/pages/1048781),
+  [hit reactions](https://www.cryengine.com/docs/static/engines/cryengine-3/categories/1638401/pages/1933363).
+- Unreal: [ALS Community](https://github.com/dyanikoglu/ALS-Community) (its get-up and facing test),
+  [physics-driven animation](https://dev.epicgames.com/documentation/en-us/unreal-engine/physics-driven-animation-in-unreal-engine).
+- Derek Mattson, [A Second Shot](https://media.gdcvault.com/gdc2024/Slides/GDC+slide+presentations/Mattson_Derek_ASecondShot_Notes.pdf) (The Last of Us Part II's hit zones), GDC 2024.
+- Pratt, Carff, Drakunov and Goswami, [Capture Point](https://cs.utexas.edu/~shivaram/readings/b2hd-PrattCDG2006.html), 2006.
+- [Stepping responses after a lean-and-release](https://media.isbweb.org/images/conf/2005/abstracts/0401.pdf) (ISB 2005); [protective responses in falls](https://frontiersin.org/articles/10.3389/fneur.2018.00986/full).
+- EA, [US10388053B1](https://patents.google.com/patent/US10388053B1/en): choosing where a get-up joins a ragdoll's pose.
+- [Parachute landing fall](https://en.wikipedia.org/wiki/Parachute_landing_fall).
