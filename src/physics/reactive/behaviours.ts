@@ -47,6 +47,8 @@ export interface ReactionContext {
     playClip(clip: string | null, loop?: boolean): void;
     /** Give part `i` a spin (rad/s, world), as a hand from outside would (a tumble kept rolling). */
     spin(i: number, x: number, y: number, z: number): void;
+    /** Turn part `i` by an angular impulse (N·m·s, world): a turn sized to more than the part (the whole body rolled). */
+    angularImpulse(i: number, x: number, y: number, z: number): void;
     /**
      * On its feet with its control (hitReact, stagger, a recovery from them): the legs are the animation's, the upper
      * body follows it on firm muscles, and a reaction is a sway on top of what the animation does.
@@ -56,6 +58,11 @@ export interface ReactionContext {
     knock: readonly number[];
     /** Whether a hand may leave what it is doing to hold a wound (a hand on a weapon may not). */
     handFree(side: 'L' | 'R'): boolean;
+    /** Out cold (a knock-out, a limp Ragdoll state): its muscles keep a third of their strength until it lies still. */
+    outCold: boolean;
+    /** Rolling onto its back before it gets up (the Roll over behaviour), and which way: +1 its left side up. */
+    rolling: boolean;
+    rollSign: number;
 }
 
 export interface ReactionBehaviour {
@@ -223,11 +230,19 @@ const catchFall: ReactionBehaviour = {
     id: 'catchFall', states: ['falling'], fade: 0.12,
     wants(ctx, c) {
         const i = ctx.sensors.impact;
-        return !!i && i.time < c.params.predictionTime && !(i.headFirst && ctx.sensors.trunkSpin > ctx.set.thresholds.tumbleAngularSpeed)
-            && ctx.sensors.uprightness < (ctx.set.behaviours.landing.params.uprightness ?? 0.85);
+        // Thrown from a vehicle: only just before the ground, and not at all coming down too fast for hands to take it.
+        const bail = BAILS.has(ctx.body), B = ctx.set.behaviours.vehicleBail.params;
+        if (bail && fastBail(ctx)) return false;
+        const ahead = bail ? Math.min(c.params.predictionTime, B.catchTime) : c.params.predictionTime;
+        // Upright it lands on its feet instead, but not thrown from a vehicle: going that fast it does not.
+        return !!i && i.time < ahead && !(i.headFirst && ctx.sensors.trunkSpin > ctx.set.thresholds.tumbleAngularSpeed)
+            && (bail || ctx.sensors.uprightness < (ctx.set.behaviours.landing.params.uprightness ?? 0.85));
     },
     update(ctx, c, w) {
         const P = c.params, body = ctx.body, sense = ctx.sensors, impact = sense.impact;
+        // The way it falls: a body going over backward reaches back, one going sideways to that side.
+        const v = sense.velocity, flatV = Math.hypot(v[0], v[2]);
+        const way = flatV > 0.5 ? [v[0] / flatV, 0, v[2] / flatV] : sense.forward;
         const brace = slotPose(ctx, c, 'brace');
         if (brace) body.pose(brace, body.partsOf(['arms', 'hands', 'legs']), w * 0.7);
         const touched = MEMORY.get(body) ?? { at: -1, first: -1 };
@@ -244,8 +259,8 @@ const catchFall: ReactionBehaviour = {
                 const sideways = side === 'L' ? 1 : -1;
                 const at = add(add(impact.point, sense.left, 0.18 * sideways), [sense.velocity[0], 0, sense.velocity[2]], P.armForward * 0.25);
                 at[1] = Math.max(at[1], impact.point[1]) + body.parts[arm.end].radius * 2;
-                // Out in front of the shoulder, never behind it.
-                const reachFrom = add(shoulder, sense.forward, P.armForward);
+                // Ahead of the shoulder the way the body falls, never behind it.
+                const reachFrom = add(shoulder, way, P.armForward);
                 const target = add(at, [reachFrom[0] - at[0], 0, reachFrom[2] - at[2]], 0.35);
                 body.reach(arm, target, w * ramp, add(add(shoulder, sense.left, 0.3 * sideways), [0, 0.2, 0]));
             }
@@ -269,7 +284,8 @@ const protectHead: ReactionBehaviour = {
         const s = ctx.sensors, i = s.impact;
         return ctx.state === 'tumble' || s.terrain === 'stairs' && !s.grounded
             || (!!i && i.headFirst && i.time < 0.7) || s.trunkSpin > ctx.set.thresholds.tumbleAngularSpeed
-            || struckFor(ctx) < ctx.set.behaviours.struck.params.duration + 0.4;
+            || struckFor(ctx) < ctx.set.behaviours.struck.params.duration + 0.4
+            || (fastBail(ctx) && !!i && i.time < 0.7);
     },
     update(ctx, c, w) {
         const P = c.params, body = ctx.body;
@@ -288,8 +304,9 @@ const protectHead: ReactionBehaviour = {
             }
         }
         body.tuneAll(body.partsOf(['arms', 'hands']), w, { frequency: P.armStiffness, holdUp: 1 });
-        // Chin to chest: the head turned forward about its own left axis.
-        body.blendWorld(body.head, quatMultiplyTuple(axisAngle(left, P.chinTuck), headQ), w);
+        // Chin to chest: the head's target turned forward about its own left axis (an offset from the pose it holds,
+        // never a turn from where the head already is, which would never stop).
+        body.turnWorld(body.head, axisAngle(left, P.chinTuck), w);
         body.tune(body.head, w, { frequency: P.neckStiffness });
     },
 };
@@ -299,6 +316,8 @@ const landing: ReactionBehaviour = {
     id: 'landing', states: ['falling'], fade: 0.08,
     wants(ctx, c) {
         const s = ctx.sensors, i = s.impact;
+        // Thrown from a vehicle at speed, feet planted would catch and pitch it over: it rolls instead.
+        if (BAILS.has(ctx.body) && Math.hypot(s.velocity[0], s.velocity[2]) > 3) return false;
         return s.uprightness > c.params.uprightness && !!i && !i.headFirst && i.time < c.params.leadTime + 0.15;
     },
     update(ctx, c, w) {
@@ -425,18 +444,43 @@ const struck: ReactionBehaviour = {
 };
 export const STRUCK = new WeakMap<ReactionBody, number>();
 
-/** Thrown from a vehicle: the controller's bail() sets it moving; while airborne it braces. */
+/**
+ * Thrown from a vehicle (the controller's bail() sets it moving): in the air it tucks into a ball, as a stunt
+ * performer jumps from a car (knees and thighs folded up, the trunk curled, the chin in, the elbows in), and holds it
+ * to the ground. A moment before it gets there its hands go to meet it (Catch the fall), or round its head coming down
+ * too fast for hands (Protect the head); moving along the ground fast it rolls (the controller's tumble).
+ */
 const vehicleBail: ReactionBehaviour = {
     id: 'vehicleBail', states: ['falling'], fade: 0.1,
-    wants: (ctx, c) => ctx.time < c.params.clearTime + 0.5 && BAILS.has(ctx.body),
-    update(ctx, _c, w) {
-        // Arms tucked in, body tense, until the ground is near (catch the fall takes over).
-        const body = ctx.body;
-        body.tuneAll(body.partsOf(['spine', 'neck']), w, { frequency: 3 });
-        for (const side of ['L', 'R'] as const) { const arm = body.arms[side]; if (arm) flex(ctx, arm.root, 0.6, w * 0.5); }
+    wants: ctx => BAILS.has(ctx.body),
+    update(ctx, c, w) {
+        const P = c.params, body = ctx.body, sense = ctx.sensors;
+        for (const side of ['L', 'R'] as const) {
+            const leg = body.legs[side];
+            if (!leg) continue;
+            flex(ctx, leg.root, P.hipTuck, w);
+            body.bend(leg.mid, P.kneeTuck, w);
+        }
+        for (const i of body.partsOf(['spine'])) flex(ctx, i, -P.curl, w);
+        if (body.head >= 0) body.turnWorld(body.head, axisAngle(quatRotateTuple(body.simRotation(body.head), [1, 0, 0]), P.chinTuck), w);
+        // The elbows in until the ground is near; then the hands are catch the fall's or protect the head's.
+        const near = !!sense.impact && sense.impact.time < P.catchTime;
+        if (!near) for (const side of ['L', 'R'] as const) {
+            const arm = body.arms[side];
+            if (!arm) continue;
+            flex(ctx, arm.root, P.armsIn, w);
+            body.bend(arm.mid, 1.6, w);
+        }
+        body.tuneAll(body.parts.map(p => p.index), w, { frequency: P.stiffness, damping: 1, holdUp: 0.6 });
     },
 };
-export const BAILS = new WeakSet<ReactionBody>();
+/** Bodies thrown from a vehicle, and the reaction-clock second they were (ReactionController.bail). */
+export const BAILS = new WeakMap<ReactionBody, number>();
+
+/** Thrown from a vehicle and coming down too fast for hands to take the ground. */
+function fastBail(ctx: ReactionContext): boolean {
+    return BAILS.has(ctx.body) && ctx.sensors.speed > ctx.set.behaviours.vehicleBail.params.catchSpeed;
+}
 
 /** Lying hurt: slow movement, a hand on the wound, or a clip played softly. */
 const writhe: ReactionBehaviour = {
@@ -447,7 +491,7 @@ const writhe: ReactionBehaviour = {
     update(ctx, c, w) {
         const P = c.params, body = ctx.body, t = ctx.time;
         if (!c.clips?.writhe) {
-            for (const i of body.parts.map(p => p.index)) body.hold(i, w * 0.6);
+            // On the pose it lies in (the targets are the reference pose already).
             const phase = 2 * Math.PI * t / Math.max(0.1, P.period);
             const twist = quatRotateTuple(body.simRotation(body.pelvis), [0, 1, 0]);
             for (const i of body.partsOf(['spine'])) body.turnWorld(i, axisAngle(twist, P.amplitude * 0.4 * Math.sin(phase)), w);
@@ -464,16 +508,95 @@ const writhe: ReactionBehaviour = {
     },
 };
 
-/** Unconscious or dead: muscles let go. */
+/**
+ * Unconscious or dead, once it has come to rest: the muscles let go (dead, once it has been on the ground a moment;
+ * out cold, keeping a third of their strength until it lies still). Before then a body is not limp: it falls alive.
+ */
 const relax: ReactionBehaviour = {
     id: 'relax', states: ['down', 'dead'], fade: 0.4,
-    wants: (ctx) => ctx.state === 'dead' || ctx.stateTime > 0,
+    wants: (ctx) => ctx.state === 'dead' ? ctx.sensors.grounded && ctx.stateTime > 0.3 : !ctx.rolling && ctx.sensors.stillFor > ctx.set.thresholds.settleTime,
     update(ctx, c, w) {
         const P = c.params, body = ctx.body;
+        const keep = ctx.outCold && ctx.sensors.stillFor <= ctx.set.thresholds.settleTime ? Math.max(P.strength, 0.3) : P.strength;
         for (const p of body.parts) {
-            body.hold(p.index, w);
-            body.tune(p.index, w, { frequency: body.frequency[p.index] * P.strength, torque: body.torque[p.index] * Math.max(P.strength, 0.02), holdUp: 0, friction: P.friction * ctx.massScale });
+            body.tune(p.index, w, { frequency: body.frequency[p.index] * keep, torque: body.torque[p.index] * Math.max(keep, 0.02), holdUp: 0, friction: P.friction * ctx.massScale });
         }
+    },
+};
+
+/**
+ * The turn (radians) about the hips' long axis (hips to head) that puts part `i`'s front facing up: positive turns
+ * the body's left side up first.
+ */
+export function rollAngle(body: ReactionBody, i: number): number {
+    const a = quatRotateTuple(body.simRotation(body.pelvis), [0, 1, 0]);
+    const n = quatRotateTuple(body.simRotation(i), [0, 0, 1]);
+    const dn = n[0] * a[0] + n[1] * a[1] + n[2] * a[2], du = a[1];
+    const np = [n[0] - a[0] * dn, n[1] - a[1] * dn, n[2] - a[2] * dn], up = [-a[0] * du, 1 - a[1] * du, -a[2] * du];
+    const c = [np[1] * up[2] - np[2] * up[1], np[2] * up[0] - np[0] * up[2], np[0] * up[1] - np[1] * up[0]];
+    return Math.atan2(c[0] * a[0] + c[1] * a[1] + c[2] * a[2], np[0] * up[0] + np[1] * up[1] + np[2] * up[2]);
+}
+
+/**
+ * Rolling onto its back to get up (lying on its front or side): the leg on the side that goes up crosses over and the
+ * arm on that side reaches over the body, the arm underneath tucks in, the chest and the head lead the turn; a string
+ * on the hips and the chest turns the body about its length, a little ahead of where it is, until it faces up.
+ */
+const rollOver: ReactionBehaviour = {
+    id: 'rollOver', states: ['down'], fade: 0.25,
+    wants: ctx => ctx.rolling,
+    update(ctx, c, w) {
+        const P = c.params, body = ctx.body, sign = ctx.rollSign >= 0 ? 1 : -1;
+        const qp = body.simRotation(body.pelvis);
+        const along = quatRotateTuple(qp, [0, 1, 0]), left = quatRotateTuple(qp, [1, 0, 0]), front = quatRotateTuple(qp, [0, 0, 1]);
+        const top = sign > 0 ? 'L' : 'R', under = sign > 0 ? 'R' : 'L';
+        // The chest and the head turn first, the way it rolls.
+        if (body.chest >= 0 && body.chest !== body.pelvis) body.turnWorld(body.chest, axisAngle(along, sign * P.twist), w);
+        if (body.head >= 0) body.turnWorld(body.head, axisAngle(along, sign * P.twist), w);
+        // The top leg crosses over: the thigh across the body and forward, the knee bent.
+        const legTop = body.legs[top];
+        if (legTop) {
+            body.turnWorld(legTop.root, axisAngle(front, -sign * 0.5), w);
+            body.turnWorld(legTop.root, axisAngle(left, -0.7), w);
+            body.bend(legTop.mid, 1, w);
+        }
+        // The top arm out and over the body; the one underneath folded in out of the way.
+        const armTop = body.arms[top], armUnder = body.arms[under];
+        if (armTop) {
+            body.turnWorld(armTop.root, axisAngle(front, sign * 1.2), w);
+            body.turnWorld(armTop.root, axisAngle(along, sign * 0.8), w);
+            body.bend(armTop.mid, 0.3, w);
+        }
+        if (armUnder) {
+            body.turnWorld(armUnder.root, axisAngle(left, -0.5), w);
+            body.bend(armUnder.mid, 1.4, w);
+        }
+        body.tuneAll(body.parts.map(p => p.index), w, { frequency: 2.5, damping: 1, holdUp: 0.6 });
+        // The turn: the body's spin about its length driven toward its Roll speed, slowing to nothing as it gets onto
+        // its back, by angular impulses on the hips and the chest sized to the whole body (what has to turn).
+        let angle = rollAngle(body, body.pelvis);
+        if (angle * sign < -0.3) angle += 2 * Math.PI * sign;
+        const com = ctx.sensors.com;
+        let inertia = 0, mass = 0;
+        for (const p of body.parts) {
+            mass += p.mass;
+            const s = body.sim[p.index], d = [s[0] - com[0], s[1] - com[1], s[2] - com[2]];
+            const k = d[0] * along[0] + d[1] * along[1] + d[2] * along[2];
+            inertia += p.mass * (Math.max(0, d[0] * d[0] + d[1] * d[1] + d[2] * d[2] - k * k) + 0.5 * p.radius * p.radius);
+        }
+        const av = body.parts[body.pelvis].body.angularVelocity;
+        const spinNow = av.x * along[0] + av.y * along[1] + av.z * along[2];
+        const want = Math.sign(angle) * Math.min(P.speed, Math.abs(angle) * 3);
+        // Until it is over on its side its weight holds it where it lies (lifted over the edge of the shoulders and
+        // hips): that much more, in the way it rolls.
+        const lift = Math.abs(angle) > 1.2 ? mass * ctx.gravity * 0.2 * Math.sign(angle) : 0;
+        let dL = (inertia * (want - spinNow) / 0.08 + lift) * ctx.dt * w;
+        const most = mass * ctx.gravity * 0.3 * ctx.dt;
+        if (Math.abs(dL) > most) dL = Math.sign(dL) * most;
+        const chest = body.chest >= 0 && body.chest !== body.pelvis ? body.chest : -1;
+        const share = chest >= 0 ? 0.6 : 1;
+        ctx.angularImpulse(body.pelvis, along[0] * dL * share, along[1] * dL * share, along[2] * dL * share);
+        if (chest >= 0) ctx.angularImpulse(chest, along[0] * dL * 0.4, along[1] * dL * 0.4, along[2] * dL * 0.4);
     },
 };
 
@@ -488,4 +611,4 @@ const getUp: ReactionBehaviour = {
 };
 
 /** Every behaviour, in the order they compose (later ones win where they overlap). */
-export const BEHAVIOURS: readonly ReactionBehaviour[] = [relax, writhe, airborne, tumble, landing, vehicleBail, struck, catchFall, protectHead, stepBalance, getUp, hitReact];
+export const BEHAVIOURS: readonly ReactionBehaviour[] = [relax, writhe, airborne, tumble, landing, vehicleBail, struck, catchFall, protectHead, stepBalance, rollOver, getUp, hitReact];

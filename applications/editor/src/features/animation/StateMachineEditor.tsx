@@ -1279,9 +1279,16 @@ function GetUpRows({ state, clips, rigClips, onChange }: {
     <>
       {row('faceUp', 'On back', 'The clip it rises on lying on its back')}
       {row('faceDown', 'On front', 'The clip it rises on lying on its front')}
+      <span title={'Play the clip from its first frame. Off, it joins the clip where the body in it starts to rise: a '
+        + 'motion-capture get-up often lies still a second or more first, and the character would lie there as though '
+        + 'nothing were happening.'}>
+        <Toggle label='from first frame' checked={!!state.getUp?.fromFirstFrame} className='text-ui-xs'
+          onChange={c => onChange({ getUp: { ...state.getUp, fromFirstFrame: c || undefined } })} />
+      </span>
       <p className={hintClass}>
-        Picked as it is entered, from where the body lies, and lined up with it. Entered before the body lies still it
-        waits on its first frame. No root motion, no foot placement; the character is held until it leaves.
+        Picked as it is entered, from where the body lies, and lined up with it; joined where the body in it starts to
+        rise. Entered before the body lies still it waits on that frame. No root motion, no foot placement; the
+        character is held until it leaves.
       </p>
     </>
   )

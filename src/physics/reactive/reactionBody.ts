@@ -22,6 +22,13 @@ export class ReactionBody {
     /** The muscles' target per part: its rotation in its parent's frame. */
     public readonly target: number[][] = [];
     /**
+     * Off its feet, the pose the muscles follow, per part (its rotation in its parent's frame): the pose it fell in,
+     * eased toward a brace or a clip, relaxed once it lies still (ReactionController._evolveRef). Behaviours compose
+     * on it, so a bend or a flex is an offset from a pose that stays put, never a turn from wherever the limb already
+     * is, which would never end.
+     */
+    public readonly ref: number[][] = [];
+    /**
      * The target's own spin, per part, in its parent's frame: the animation's, measured between this frame's pose and
      * the last (begin), so a muscle follows a swinging arm rather than trailing it; less as a behaviour blends the
      * target away from the animation.
@@ -72,7 +79,7 @@ export class ReactionBody {
         const n = parts.length;
         for (let i = 0; i < n; i++) {
             this.sim.push([0, 0, 0, 0, 0, 0, 1]); this.anim.push([0, 0, 0, 0, 0, 0, 1]);
-            this.target.push([0, 0, 0, 1]); this.spin.push([0, 0, 0]); this.goal.push([0, 0, 0]);
+            this.target.push([0, 0, 0, 1]); this.ref.push([0, 0, 0, 1]); this.spin.push([0, 0, 0]); this.goal.push([0, 0, 0]);
             this.animVel.push([0, 0, 0, 0, 0, 0]); this._prevAnim.push([0, 0, 0, 0, 0, 0, 1]); this._prevRel.push([0, 0, 0, 1]);
         }
         this.kinematic = new Uint8Array(n);
@@ -210,6 +217,42 @@ export class ReactionBody {
     /** Every part in `parts` (indices) tuned the same way. */
     public tuneAll(parts: Iterable<number>, w: number, s: Parameters<ReactionBody['tune']>[2]): void {
         for (const i of parts) this.tune(i, w, s);
+    }
+
+    // ---- the reference pose (off its feet) ----
+
+    /** Part `i`'s rotation in its parent's frame as simulated now. */
+    public simRelative(i: number): number[] {
+        const p = this.parts[i];
+        if (!p || p.parent < 0) return [0, 0, 0, 1];
+        return quatMultiplyTuple(quatConjugateTuple(this.simRotation(p.parent)), this.simRotation(i));
+    }
+
+    /** The reference pose set to the body as simulated now. */
+    public captureRef(): void {
+        for (const p of this.parts) { const q = this.simRelative(p.index), r = this.ref[p.index]; r[0] = q[0]; r[1] = q[1]; r[2] = q[2]; r[3] = q[3]; }
+    }
+
+    /** Part `i`'s reference moved toward rotation `rel` (in its parent's frame) by `k` (0..1). */
+    public refToward(i: number, rel: ArrayLike<number>, k: number): void {
+        if (!(k > 0) || i < 0) return;
+        const r = this.ref[i], q = k >= 1 ? [rel[0], rel[1], rel[2], rel[3]] : quatSlerpTuple(r, [rel[0], rel[1], rel[2], rel[3]], k);
+        r[0] = q[0]; r[1] = q[1]; r[2] = q[2]; r[3] = q[3];
+    }
+
+    /** Part `i`'s reference let go toward the pose it holds now (a body lying still), by `k`. */
+    public relaxRef(i: number, k: number): void { this.refToward(i, this.simRelative(i), k); }
+
+    /** Every target from the reference pose, by `w` (1: the reference exactly, with no spin). */
+    public fromRef(w = 1): void {
+        for (const p of this.parts) if (p.parent >= 0) this.blend(p.index, this.ref[p.index], w);
+    }
+
+    /** How far part `i`'s target is from where it is (radians). */
+    public targetError(i: number): number {
+        const q = this.simRelative(i), t = this.target[i];
+        const d = Math.abs(q[0] * t[0] + q[1] * t[1] + q[2] * t[2] + q[3] * t[3]);
+        return 2 * Math.acos(Math.min(1, d));
     }
 
     /** Hold part `i` where it is now (its simulated rotation relative to its parent), by `w`. */

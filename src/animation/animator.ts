@@ -23,6 +23,7 @@ import { rootMotionNodeOf, rootParentRotation, rootParentScale } from './clipEdi
 import { humanoidSlotOf, normalizeBoneName } from './boneNames';
 import { socketModelMatrix } from './sockets';
 import { footLockAt, footLockKey } from './footLockWindows';
+import { clipRiseStart } from './clipRiseStart';
 import { FORK_DEPTH, forksFromAnywhere, isForkIn, pathsFrom, resolveIn, staticEnd, type MachinePath, type MachineView } from './machineForks';
 // The condition model and evaluator live in core/conditions.ts — they read a table of named values and
 // answer yes or no, which has nothing to do with animation, and the behavior state machine needs the
@@ -205,6 +206,12 @@ export interface AnimationGetUpState {
     /** The clip it plays lying on its back, and lying on its front. Either absent: the rig's reaction set's. */
     faceUp?: string;
     faceDown?: string;
+    /**
+     * Play the clip from its first frame. By default it joins the clip where the body in it starts to rise
+     * (clipRiseStart: a capture's get-up often lies still a second or more first), so the character gets up as soon
+     * as the body is handed to it.
+     */
+    fromFirstFrame?: boolean;
 }
 
 export interface AnimationState {
@@ -1373,12 +1380,23 @@ export class Animator {
             this._speed = state.speed ?? 1;
             this._applyStateSpeed(state);
         }
-        this._currentTime = 0;
-        this._prevEventTime = 0;
-        this._eventFromStart = true;
+        this._getUpStart = this._riseStartFor(state, clip);
+        this._currentTime = this._getUpStart;
+        this._prevEventTime = this._getUpStart;
+        this._eventFromStart = this._getUpStart <= 0;
         this._playing = true;
         this._reactionHold = false;
         return this._getUpClock();
+    }
+
+    /**
+     * The base layer is in a Ragdoll state playing a clip of its own: the body's muscles follow that clip (the
+     * reactions ease their reference pose to it) rather than the pose the body fell in.
+     */
+    public get reactionClipPlaying(): boolean {
+        if (this._isOverlay) return false;
+        const s = this._currentState;
+        return !!s?.ragdoll && !!s.clipName && this._currentAnimation?.name === s.clipName;
     }
 
     /** Out of any Ragdoll or Get Up state at once, back to the entry state (the reactions were reset: a respawn). */
@@ -1402,26 +1420,38 @@ export class Animator {
         return this._animatedModel?.animations.find(a => a.name === name) ?? null;
     }
 
-    /** The current Get Up state's clock, in real seconds; over once the state is left. */
+    /** Where a Get Up state joins its clip (seconds into it): where the body in it rises, unless it says from the start. */
+    private _riseStartFor(state: AnimationState, clip: Animation): number {
+        if (state.getUp?.fromFirstFrame) return 0;
+        const skin = this._animatedModel?.skin;
+        return skin ? clipRiseStart(clip, skin) : 0;
+    }
+    /** Seconds into the Get Up state's clip it joined it at. */
+    private _getUpStart = 0;
+
+    /**
+     * The current Get Up state's clock, in real seconds from where it joined its clip (its rise start); over once the
+     * state is left.
+     */
     private _getUpClock(): GetUpClock {
-        const self = this, token = this._stateToken;
+        const self = this, token = this._stateToken, start = this._getUpStart;
         const rate = () => Math.max(1e-3, self._speed);
         const live = () => self._stateToken === token;
         return {
-            get time() { return live() ? self._currentTime / rate() : 0; },
-            get duration() { return live() ? self._getAnimationDuration() / rate() : 0; },
+            get time() { return live() ? Math.max(0, self._currentTime - start) / rate() : 0; },
+            get duration() { return live() ? Math.max(0, self._getAnimationDuration() - start) / rate() : 0; },
             get done() { return !live() || (!self._playing && self._currentTime >= self._getAnimationDuration() - 1e-6); },
             seek(seconds: number) {
                 if (!live()) return;
-                self._currentTime = clamp(seconds * rate(), 0, self._getAnimationDuration());
+                self._currentTime = clamp(start + seconds * rate(), start, self._getAnimationDuration());
                 self._prevEventTime = self._currentTime;
             },
             stop() {
-                // Knocked down again: the state waits on its first frame for the body to come to rest once more.
+                // Knocked down again: the state waits on the frame it joined for the body to come to rest once more.
                 if (!live()) return;
                 self._reactionHold = true;
-                self._currentTime = 0;
-                self._prevEventTime = 0;
+                self._currentTime = start;
+                self._prevEventTime = start;
                 self._playing = true;
             },
         };
@@ -4705,6 +4735,12 @@ export class Animator {
         const fromBody = !!link?.ragdolled;
         this._noRootMotion = true;
         this._playClip(clip, false, !fromBody);
+        // Joined where the body in it rises: what it waits on while the body is not down yet, and plays on from.
+        this._getUpStart = this._riseStartFor(state, clip);
+        if (this._getUpStart > 0) {
+            this._currentTime = this._prevEventTime = this._getUpStart;
+            this._eventFromStart = false;
+        }
         if (!fromBody && blendOverride !== undefined) this._activeBlendTime = Math.max(0, blendOverride);
         this._loopLimit = 0;
         this._loopsPlayed = 0;

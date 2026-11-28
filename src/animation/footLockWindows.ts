@@ -151,7 +151,7 @@ export function detectFootLockWindows(clip: Animation, skin: Skin, options: Foot
     let duration = 0;
     for (const s of clip.samplers) duration = Math.max(duration, s.input[s.input.length - 1] ?? 0);
     const n = Math.max(2, Math.round(duration * fps));
-    const pose = poser(clip, skin);
+    const pose = clipPoser(clip, skin);
     const heights = feet.map(() => ({ heel: [] as number[], ball: [] as number[] }));
     const times: number[] = [];
     for (let k = 0; k <= n; k++) {
@@ -201,7 +201,7 @@ export function detectFootLockWindows(clip: Animation, skin: Skin, options: Foot
 }
 
 /** `(time) => (node) => model-space position`, the clip posed over the skin's rest. */
-function poser(clip: Animation, skin: Skin): (time: number) => (node: number) => vec3 {
+export function clipPoser(clip: Animation, skin: Skin): (time: number) => (node: number) => vec3 {
     const tracks = new Map<number, { t?: number; r?: number; s?: number }>();
     clip.channels.forEach((c) => {
         const e = tracks.get(c.targetNodeIndex) ?? {};

@@ -31,7 +31,7 @@ export interface MuscleSettings {
 /** What a behaviour can be: the reflexes a reaction is made of. */
 export type BehaviourId =
     | 'hitReact' | 'stepBalance' | 'catchFall' | 'protectHead' | 'landing' | 'airborne' | 'tumble' | 'vehicleBail'
-    | 'struck' | 'writhe' | 'relax' | 'getUp';
+    | 'struck' | 'writhe' | 'relax' | 'rollOver' | 'getUp';
 
 /** A pose a behaviour reaches for (a slot): a pose asset in the editor, its bones embedded for the game. */
 export interface ReactionPoseSlot {
@@ -234,12 +234,21 @@ export const BEHAVIOUR_SPECS: readonly BehaviourSpec[] = [
         clips: [],
     },
     {
-        id: 'vehicleBail', label: 'Bail out', doc: 'Thrown from a moving vehicle: it leaves with the vehicle\'s speed, clear of it for a moment, braces for the ground, then tumbles.',
+        id: 'vehicleBail', label: 'Bail out', doc: 'Thrown from a moving vehicle: it leaves with the vehicle\'s speed, clear of it for a moment, tucks into a ball in the air, puts its hands to the ground (or round its head, coming down fast) and rolls.',
         params: [
             p('inherit', 'Keeps speed', 1, 0, 1.5, 0.05, undefined, 'How much of the vehicle\'s velocity it leaves with.'),
             p('ejectSpeed', 'Thrown out', 2, 0, 15, 0.1, 'm/s', 'How fast it is thrown out through the door.'),
             p('ejectUp', 'Thrown up', 1, 0, 10, 0.1, 'm/s', 'How fast it is thrown upward.'),
             p('clearTime', 'Clear for', 0.35, 0, 3, 0.05, 's', 'How long it passes through the vehicle it left.'),
+            p('kneeTuck', 'Knee tuck', 1.25, 0, 2.4, 0.05, 'rad', 'How far the knees fold in the air.'),
+            p('hipTuck', 'Hip tuck', 1, 0, 2, 0.05, 'rad', 'How far the thighs come up toward the chest.'),
+            p('curl', 'Trunk curl', 0.25, 0, 1, 0.01, 'rad', 'How far each part of the spine curls forward.'),
+            p('chinTuck', 'Chin in', 0.5, 0, 1.2, 0.05, 'rad', 'How far the head bends to the chest.'),
+            p('armsIn', 'Arms in', 0.8, 0, 2, 0.05, 'rad', 'How far the upper arms come in front of the chest, the elbows folded.'),
+            p('stiffness', 'Tuck stiffness', 3, 0, 20, 0.05, 'Hz', 'How firmly it holds the tuck.'),
+            p('catchTime', 'Hands down', 0.3, 0, 1, 0.01, 's', 'How long before it reaches the ground the hands go to meet it.'),
+            p('catchSpeed', 'Too fast to catch', 7, 0, 30, 0.5, 'm/s', 'Coming down faster than this, the arms go round the head instead.'),
+            p('rollSpeed', 'Rolls above', 2.5, 0, 20, 0.1, 'm/s', 'Moving along the ground faster than this when it lands, it rolls (a tumble).'),
         ],
         poses: [], clips: [],
     },
@@ -273,6 +282,15 @@ export const BEHAVIOUR_SPECS: readonly BehaviourSpec[] = [
         params: [
             p('strength', 'Strength', 0.05, 0, 1, 0.01, undefined, 'Muscle strength kept.'),
             p('friction', 'Friction', 2, 0, 50, 0.5, 'N·m', 'Joint friction: how fast a limp limb stops swinging.'),
+        ],
+        poses: [], clips: [],
+    },
+    {
+        id: 'rollOver', label: 'Roll over', doc: 'Lying on its front or its side when it is time to get up: it rolls onto its back first, the top leg crossing over and the top arm reaching over, then gets up with the clip for its back.',
+        params: [
+            p('twist', 'Twist', 0.35, 0, 1.2, 0.01, 'rad', 'How far the chest and the head lead the roll.'),
+            p('speed', 'Roll speed', 2.5, 0, 10, 0.1, 'rad/s', 'How fast it turns over (slowing as it gets onto its back).'),
+            p('giveUp', 'Tries for', 4, 0.5, 15, 0.5, 's', 'How long it tries before it gets up as it lies.'),
         ],
         poses: [], clips: [],
     },

@@ -46,10 +46,18 @@ it, a powered ragdoll is made from the pose it holds, and the reaction moves thr
 | stagger | Knocked back on its feet: the character is shoved (its capsule carries it, its legs walking it out on their animation), the upper body leaning after the hit. It keeps its control; tipped too far, it falls. |
 | falling | Off its feet: it braces, covers its head, lands on bent knees or flails on a long drop. |
 | tumble | Rolling down stairs, a slope or away from a vehicle: curled up, head covered. |
-| down | Lying on the ground. It may writhe for a while if it was hurt. |
+| down | Lying on the ground. It may writhe for a while if it was hurt; about to get up off its front or side, it rolls onto its back. |
 | getUp | Getting up, face up or face down, on a get-up clip or pulled up by its strings. A hit or a shove knocks it back down. It has no control until the get-up is over (its clip and the blend after it). |
 | recover | Back on its feet: the skin blends from the body to the animation (on its feet, once the upper body follows the animation closely). |
-| dead | Killed: limp, and stays down. |
+| dead | Killed: limp once it is on the ground, and stays down. |
+
+Off its feet (falling, tumbling, lying, dead) the body is alive: its muscles follow a pose of their own, never
+merely holding wherever the limbs already are. Falling, that is the pose it fell in, easing toward a brace (knees,
+hips and elbows a little bent); a clip playing as the body's (a [Fall from height](#fall-from-height) or
+[Writhe](#writhe) clip, or a [Ragdoll state](animation.md#ragdoll-and-get-up-states)'s own) takes it over; lying,
+it is the pose it came to rest in, let go once it lies still. Every behaviour bends, tucks and reaches on top of
+that pose, and every muscle is at least critically damped, so a limb settles rather than rings. A part pressed into
+the ground far from its pose gives way to it.
 
 ### On its feet: physical animation
 
@@ -325,8 +333,12 @@ stop it once it has slowed.
 
 ### Bail out
 
-Thrown from a moving vehicle: it leaves with the vehicle's speed, passes clear of the vehicle for a moment,
-braces for the ground, then tumbles.
+Thrown from a moving vehicle: it leaves with the vehicle's speed and passes clear of the vehicle for a moment. In
+the air it tucks into a ball, as a stunt performer jumping from a car does: knees and thighs folded up, the trunk
+curled, the chin in, the elbows in. A moment before the ground its hands go to meet it ([Catch the fall](#catch-the-fall)),
+or, coming down too fast for hands, its arms go round its head ([Protect the head](#protect-the-head)); it never
+tries to land on its feet. Moving along the ground faster than **Rolls above** when it lands, it rolls on (a
+[tumble](#tumble)) rather than stopping dead.
 
 | Setting | What it does |
 |---|---|
@@ -334,6 +346,15 @@ braces for the ground, then tumbles.
 | **Thrown out** | How fast it is thrown out through the door, in m/s. |
 | **Thrown up** | How fast it is thrown upward, in m/s. |
 | **Clear for** | How long it passes through the vehicle it left. |
+| **Knee tuck** | How far the knees fold in the air, in radians. |
+| **Hip tuck** | How far the thighs come up toward the chest, in radians. |
+| **Trunk curl** | How far each part of the spine curls forward, in radians. |
+| **Chin in** | How far the head bends to the chest, in radians. |
+| **Arms in** | How far the upper arms come in front of the chest, the elbows folded, in radians. |
+| **Tuck stiffness** | How firmly it holds the tuck, in Hz. |
+| **Hands down** | How long before it reaches the ground the hands go to meet it, in seconds. |
+| **Too fast to catch** | Coming down faster than this (m/s), the arms go round the head instead. |
+| **Rolls above** | Moving along the ground faster than this (m/s) when it lands, it rolls. |
 
 ### Struck
 
@@ -369,12 +390,33 @@ It runs only for a character that was hurt (hit) before it went down.
 
 ### Relax
 
-Unconscious or dead: the muscles let go, with a little friction left in the joints.
+Unconscious or dead, once it has come to rest: the muscles let go, with a little friction left in the joints. Dead,
+they let go a moment after it reaches the ground; out cold, they keep at least a third of their strength until it
+lies still. Until then it falls like a body, not a sack.
 
 | Setting | What it does |
 |---|---|
 | **Strength** | Muscle strength kept, 0 to 1. |
 | **Friction** | Joint friction, in N·m: how fast a limp limb stops swinging. |
+
+### Roll over
+
+Lying on its front or its side when it is time to get up: it rolls onto its back first, then gets up with the clip
+for its back. The leg on the side that goes up crosses over and the arm on that side reaches over the body, the arm
+underneath folds in, and the chest and the head lead the turn; the turn itself is driven about the body's length at
+**Roll speed**, slowing to nothing as the body gets onto its back. Off, a body on its front gets up with the clip for
+its front (**From the front**).
+
+| Setting | What it does |
+|---|---|
+| **Twist** | How far the chest and the head lead the roll, in radians. |
+| **Roll speed** | How fast it turns over, in rad/s (slowing as it gets onto its back). |
+| **Tries for** | How long it tries, in seconds, before it gets up as it lies. |
+
+How it lies is read from the front of its hips and its chest together, against up: more than 0.35 of the way up
+is on its back, less than −0.35 on its front, between them on its side; once it is one it stays that until it is
+well into the next, so a body rocking on the line does not flicker. Scripts read it as `reactions.lying`, and the
+`Down`, `Settled` and `GettingUp` events carry it.
 
 ### Get up
 
@@ -390,10 +432,13 @@ body following the clip until it stands.
 | **From the back** | Clip: the clip to get up with lying face up. |
 | **From the front** | Clip: the clip to get up with lying face down. |
 
-Face up or face down is read from the hips and the chest together. The clip is lined up with the body, not
-the body with the clip: the character is turned about the vertical so the clip's hips lie the way the body's do,
-and placed where the body lies. The clip then waits on its first frame for **Blend** while the skin blends from
-the body onto it, and plays. Without clips the strings lift the body back onto the animation it was playing,
+Face up or face down is read from the hips and the chest together (and with [Roll over](#roll-over) on, a body on
+its front or side rolls onto its back first). The clip is lined up with the body, not the body with the clip: the
+character is turned about the vertical so the clip's hips lie the way the body's do (along the hips' length, where
+it lies flat), and placed where the body lies. The clip is joined where the body in it starts to rise: a
+motion-capture get-up often lies still a second or more first, and played from its first frame the character would
+lie there as though nothing were happening. It waits on that frame for **Blend** while the skin blends from the
+body onto it, and plays. Without clips the strings lift the body back onto the animation it was playing,
 which works but looks like a puppet; Mixamo's "Getting Up" (face down) and "Stand Up" (face up) imported onto the
 skeleton work well. A character whose **Gets up** is off, or that is dead or knocked out, stays down.
 

@@ -224,6 +224,63 @@ describe.each(BACKENDS)('reactions on %s', backend => {
         expect(sum / Math.max(1, n)).toBeLessThan(backend === 'rapier' ? 0.6 : 0.4);
     });
 
+    /** The angle (radians) between two parts as simulated: a knee's bend is its thigh's against its shin. */
+    const between = (r: ReactionController, a: number, b: number) => {
+        const qa = r.body!.simRotation(a), qb = r.body!.simRotation(b);
+        return 2 * Math.acos(Math.min(1, Math.abs(qa[0] * qb[0] + qa[1] * qb[1] + qa[2] * qb[2] + qa[3] * qb[3])));
+    };
+
+    it('falls alive: off its feet the muscles reach for a braced pose, knees and elbows giving, rather than holding wherever the body is', () => {
+        const s = setup();
+        let knee = 0, elbow = 0;
+        run(s, 90, f => {
+            if (f === 3) s.r.trip();
+            const b = s.r.body;
+            if (!b || s.r.state !== 'falling' || !b.legs.L || !b.arms.L) return;
+            knee = Math.max(knee, between(s.r, b.legs.L.root, b.legs.L.mid));
+            elbow = Math.max(elbow, between(s.r, b.arms.L.root, b.arms.L.mid));
+        });
+        // Standing straight-legged and straight-armed (the rig's Idle), it bends both as it goes.
+        expect(knee).toBeGreaterThan(0.2);
+        expect(elbow).toBeGreaterThan(0.2);
+    });
+
+    it('thrown from a vehicle fast: tucks in the air, the arms round the head, never lands on its feet, and rolls on', () => {
+        const s = setup([0, 0.4, 0]);
+        let knee = 0, protect = false, catchFall = false, landing = false, states = '', touched = false;
+        run(s, 300, f => {
+            if (f === 2) s.r.bail({ velocity: [0, 0, 10], exitDirection: [1, 0, 0] });
+            if (!states.endsWith(s.r.state)) states += `>${s.r.state}`;
+            const b = s.r.body, going = s.r.behaviours;
+            if (!b || !b.legs.L) return;
+            if (s.r.sensors.touching.size > 0) touched = true;
+            if (s.r.state === 'falling' && !touched) {
+                knee = Math.max(knee, between(s.r, b.legs.L.root, b.legs.L.mid));
+                protect ||= (going.get('protectHead') ?? 0) > 0;
+            }
+            catchFall ||= (going.get('catchFall') ?? 0) > 0;
+            landing ||= (going.get('landing') ?? 0) > 0;
+        });
+        expect(knee).toBeGreaterThan(0.8);
+        expect(protect).toBe(true);
+        // Too fast for hands to take the ground, and feet planted at 10 m/s would pitch it over.
+        expect(catchFall).toBe(false);
+        expect(landing).toBe(false);
+        expect(states).toMatch(/>falling>tumble/);
+    });
+
+    it('thrown from a vehicle slowly: its hands go to the ground just before it gets there', () => {
+        const s = setup([0, 0.4, 0]);
+        let reached: number | null = null;
+        run(s, 240, f => {
+            if (f === 2) s.r.bail({ velocity: [0, 0, 3], exitDirection: [1, 0, 0] });
+            const i = s.r.sensors.impact;
+            if (reached === null && s.r.state === 'falling' && (s.r.behaviours.get('catchFall') ?? 0) > 0) reached = i ? i.time : 0;
+        });
+        expect(reached).not.toBeNull();
+        expect(reached!).toBeLessThanOrEqual(0.3 + 1e-6);
+    });
+
     it('dies limp and never gets up', () => {
         const s = setup();
         const died: string[] = [];
@@ -232,6 +289,19 @@ describe.each(BACKENDS)('reactions on %s', backend => {
         expect(s.r.alive).toBe(false);
         expect(s.r.state).toBe('dead');
         expect(died.length).toBe(1);
+    });
+
+    it('dies falling, its muscles letting go only once it is on the ground', () => {
+        const s = setup();
+        let relaxedFalling = false, relaxedLying = false;
+        run(s, 300, f => {
+            if (f === 3) s.r.kill();
+            const w = s.r.behaviours.get('relax') ?? 0;
+            if (w > 0 && !s.r.sensors.grounded) relaxedFalling = true;
+            if (w > 0.5) relaxedLying = true;
+        });
+        expect(relaxedFalling).toBe(false);
+        expect(relaxedLying).toBe(true);
     });
 });
 
@@ -456,6 +526,37 @@ describe.each(BACKENDS)('reactions that look right on %s', backend => {
         }
         expect(states).toMatch(/>getUp/);
         expect(turned).toBeLessThan(20);
+    });
+
+    it('lying on its front, rolls onto its back the shorter way before it gets up, and rises on the clip for its back', () => {
+        const s = person(0);
+        const lying: number[] = [];
+        let rolled = -1, roll = 0;
+        let rose: { faceUp?: boolean; lying?: number } | null = null;
+        getChannel('reaction').on('GettingUp', (info: ReactionEventInfo) => { rose = { faceUp: info.faceUp, lying: info.lying }; });
+        for (let f = 0; f < 900 && !rose; f++) {
+            if (f === 3) s.r.trip();
+            step(s);
+            if (s.r.state === 'down' && lying[lying.length - 1] !== s.r.lying) lying.push(s.r.lying);
+            if (s.r.rollingOver) { roll++; if (rolled < 0) rolled = f; }
+        }
+        // Tripped, it came down on its front, rolled over, and got up off its back.
+        expect(lying[0]).toBe(-1);
+        expect(lying[lying.length - 1]).toBe(1);
+        expect(rolled).toBeGreaterThan(0);
+        expect(roll * H).toBeLessThan(2.5);
+        expect(rose).toEqual({ faceUp: true, lying: 1 });
+    });
+
+    it('with Roll over off, gets up off its front on the clip for it', () => {
+        const s = person(0);
+        (s.r.set.behaviours.rollOver as { enabled: boolean }).enabled = false;
+        let rolling = false;
+        let rose: { faceUp?: boolean } | null = null;
+        getChannel('reaction').on('GettingUp', (info: ReactionEventInfo) => { rose = { faceUp: info.faceUp }; });
+        for (let f = 0; f < 900 && !rose; f++) { if (f === 3) s.r.trip(); step(s); rolling ||= s.r.rollingOver; }
+        expect(rolling).toBe(false);
+        expect(rose).toEqual({ faceUp: false });
     });
 
     it('has no control until its get-up is over: through the clip and the blend back onto the animation', () => {
@@ -979,13 +1080,18 @@ describe('graph-driven reactions (jolt)', () => {
         expect(s.r.state).toBe('animated');
     });
 
-    it("a script's getUp() while the graph holds it asks the graph; reset() takes the graph back to its entry", () => {
+    it("a script's getUp() while the graph holds it asks the graph, once the body has rolled onto its back; reset() takes the graph back to its entry", () => {
         const s = person(graph({ rise: 'CanGetUp' }));
         // Knocked out for good: never ready on its own.
         for (let f = 0; f < 300; f++) { if (f === 3) { s.a.setTrigger('Trip'); } if (f === 4) s.r.knockOut(1e9); step(s); }
-        expect([s.r.state, s.a.currentStateName, s.r.canGetUp]).toEqual(['down', 'Ragdoll', false]);
+        expect([s.r.state, s.a.currentStateName, s.r.canGetUp, s.r.lying]).toEqual(['down', 'Ragdoll', false, -1]);
         s.r.getUp();
-        expect(s.r.canGetUp).toBe(true);
+        // On its front: it rolls over first, and the graph hears it may rise once it lies on its back.
+        expect([s.r.rollingOver, s.r.canGetUp]).toEqual([true, false]);
+        let ready = -1;
+        for (let f = 0; f < 300 && ready < 0; f++) { step(s); if (s.r.canGetUp || s.a.currentStateName === 'Get Up') ready = f; }
+        expect(ready).toBeGreaterThan(0);
+        expect(s.r.lying).toBe(1);
         for (let f = 0; f < 3; f++) step(s);
         expect(s.a.currentStateName).toBe('Get Up');
         s.r.reset();

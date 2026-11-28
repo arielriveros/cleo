@@ -141,6 +141,45 @@ describe('Ragdoll and Get Up states', () => {
         expect(clock.duration).toBe(0);
     });
 
+    it('joins its clip where the body in it starts to rise, unless it says from its first frame', () => {
+        // Lying still for a second, then up over the next.
+        const lieThenRise = (): Animation => {
+            const flat = quat.create(), up = quat.setAxisAngle(quat.create(), [1, 0, 0], -60 * Math.PI / 180);
+            return { name: 'Up Back', samplers: [{ input: [0, 1, 2], output: [...flat, ...flat, ...up], interpolation: 'LINEAR' }],
+                channels: [{ samplerIndex: 0, targetNodeIndex: boneIndex('Spine'), targetPath: 'rotation' }] };
+        };
+        for (const fromFirstFrame of [false, true]) {
+            const sm = machine();
+            sm.states.find(s => s.name === 'Get Up')!.getUp = { faceUp: 'Up Back', ...(fromFirstFrame ? { fromFirstFrame } : {}) };
+            const { node, a, link, frame } = setup(sm);
+            const anims = (node.model as any)._animations as Animation[];
+            anims[anims.findIndex(c => c.name === 'Up Back')] = lieThenRise();
+            a.setTrigger('Down');
+            frame();
+            link.set({ ragdolled: true, faceUp: true });
+            a.setTrigger('Up');
+            frame(10);
+            // Waiting for the body on the frame it joins.
+            const at = (a as any)._currentTime;
+            const clock = a.playGetUp(true, link.getUpClips)!;
+            if (fromFirstFrame) {
+                expect(at).toBe(0);
+                expect(clock.duration).toBeCloseTo(2, 3);
+            } else {
+                expect(at).toBeGreaterThan(0.9);
+                expect(at).toBeLessThan(1.05);
+                // Its clock counts from there: what is left of the clip.
+                expect(clock.time).toBe(0);
+                expect(clock.duration).toBeCloseTo(2 - at, 3);
+                frame(30);
+                expect(clock.time).toBeCloseTo(0.5, 2);
+                clock.stop();
+                frame(5);
+                expect((a as any)._currentTime).toBeCloseTo(at, 6);
+            }
+        }
+    });
+
     it("chooses its clip by the side the body lies on, else the rig's for that side", () => {
         const { a, link, frame } = setup(machine());
         a.setTrigger('Down');

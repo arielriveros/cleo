@@ -12,9 +12,10 @@ import { clamp, closestSegmentSegment, planarSignedAngle, quatConjugateTuple, qu
 import { cachedRagdollLayout, ragdollPartPoseInto, skinRagdollProfile, type RagdollLayout } from '../ragdollProfile';
 import { physicsStats } from '../physicsStats';
 import type { mat4 } from 'gl-matrix';
-import { BodySensors, type ContactList, type Raycaster, type SensorDetail } from './bodySensors';
+import { BodySensors, classifyLying, type ContactList, type Raycaster, type SensorDetail } from './bodySensors';
+import { clipRiseStart } from '../../animation/clipRiseStart';
 import { ReactionBody } from './reactionBody';
-import { BAILS, BEHAVIOURS, STRUCK, type ReactionBehaviour, type ReactionContext, type ReactionState, type ReactionWound } from './behaviours';
+import { BAILS, BEHAVIOURS, rollAngle, STRUCK, type ReactionBehaviour, type ReactionContext, type ReactionState, type ReactionWound } from './behaviours';
 import { NO_REACTION_EFFECTS, type AnimationRagdollStart, type AnimatorReactionLink, type GetUpClock, type ReactionEffectsNow } from '../../animation/reactionLink';
 import { pickReactionSet, parseReactionSets, type ReactionSet } from './reactionSet';
 
@@ -68,6 +69,8 @@ export interface ReactionEventInfo {
     fallHeight?: number;
     impactSpeed?: number;
     faceUp?: boolean;
+    /** How it lies (Down, Settled, GettingUp): 1 on its back, −1 on its front, 0 on its side. */
+    lying?: -1 | 0 | 1;
 }
 
 /** Per-model settings (ModelNode.ragdollConfig.reactions). */
@@ -116,8 +119,22 @@ function clampLength(v: number[], max: number): number[] {
 const MAX_KNOCK_SPEEDS = 2;
 /** A shove faster than this (m/s) lets the feet go (Animator.footLockSuppressed): they cannot stay planted. */
 const KNOCK_UNLOCKS_FEET = 0.15;
+/** A clip playing from `start` seconds in, as a get-up clock whose time and length count from there. */
+function clockFrom(action: GetUpClock, start: number): GetUpClock {
+    if (!(start > 0)) return action;
+    return {
+        get time() { return Math.max(0, action.time - start); },
+        get duration() { return Math.max(0, action.duration - start); },
+        get done() { return action.done; },
+        seek: (seconds: number) => action.seek(start + Math.max(0, seconds)),
+        stop: (blendOut?: number) => action.stop(blendOut),
+    };
+}
+
 /** A part of the body that is the animation's while the character stands (kinematic on it). */
 const LOWER = (region: string) => region === 'pelvis' || region === 'legs' || region === 'feet';
+/** The states whose muscles follow the reference pose (off its feet). */
+const OFF_FEET_REF = (s: ReactionState) => s === 'falling' || s === 'tumble' || s === 'down' || s === 'dead';
 /** What a body dropped out cold (a graph's limp Ragdoll state) does not do: no hand out, no head tucked, no reach. */
 const LIMP_OFF = new Set(['hitReact', 'catchFall', 'protectHead', 'landing', 'airborne', 'tumble', 'writhe']);
 const IDENTITY = new Float32Array([1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1]) as unknown as mat4;
@@ -148,6 +165,13 @@ export class ReactionController implements AnimatorReactionLink {
     private _riseAsked = false;
     /** Out cold (a graph's limp Ragdoll state): no protective behaviours, no firm start. */
     private _limp = false;
+    /** How it lies off its feet (classifyLying), null on them. */
+    private _lying: -1 | 0 | 1 | null = null;
+    /** Rolling onto its back before it gets up, which way (+1: its left side up), since when; rolled already. */
+    private _rolling = false;
+    private _rollSign = 1;
+    private _rollStart = 0;
+    private _rolled = false;
     /** The last hit, for the graph's hit parameters (AnimatorReactionLink). */
     private readonly _lastHit = { count: 0, angle: 0, height: 0.5, strength: 0 };
     /** Reaction-clock seconds the current reaction began at (it left plain animation). */
@@ -216,10 +240,17 @@ export class ReactionController implements AnimatorReactionLink {
     public get standing(): boolean { return this._standingState(); }
     /** Lying on its back: its hips and chest facing up together (the sensors' guess before there is a body). */
     public get faceUp(): boolean { return this._lyingFaceUp(); }
+    /**
+     * How it lies, off its feet: 1 on its back, −1 on its front, 0 on its side (the front of its hips and chest
+     * against up, with some give either way so it does not flicker: classifyLying). 0 on its feet.
+     */
+    public get lying(): -1 | 0 | 1 { return this._lying ?? 0; }
+    /** Rolling onto its back to get up (the set's Roll over). */
+    public get rollingOver(): boolean { return this._rolling; }
     /** Off its feet and the physics': falling, tumbling, lying, dead (not getting up). */
     public get ragdolled(): boolean { const s = this._state; return s === 'falling' || s === 'tumble' || s === 'down' || s === 'dead'; }
     /** Lying, alive and ready to rise, or asked to (getUp() while the graph holds it). */
-    public get canGetUp(): boolean { return this._state === 'down' && this._alive && (this._riseAsked || this._readyToRise()); }
+    public get canGetUp(): boolean { return this._mayRise() && (this._asked() || this._readyToRise()); }
     /** Shoved back on its feet, walking it out. */
     public get staggering(): boolean { return this._state === 'stagger'; }
     /** Hits taken so far (each a shot, a blow, a car's), whether the body reacted or not. */
@@ -576,7 +607,9 @@ export class ReactionController implements AnimatorReactionLink {
      */
     public getUp(): void {
         if (this._state !== 'down' || !this._alive) return;
-        if (this._graphKind() === 'ragdoll') { this._riseAsked = true; return; }
+        // Lying on its front with a roll to do first: asked, it rolls now, and rises once it has.
+        if (this._needsRoll() && !this._rolling) this._startRoll();
+        if (this._graphKind() === 'ragdoll' || this._rolling) { this._riseAsked = true; return; }
         this._go('getUp');
     }
 
@@ -602,7 +635,34 @@ export class ReactionController implements AnimatorReactionLink {
 
     /** The graph entered a Get Up state: lying and ready (or asked to), the body rises on it now; else when it is. */
     public graphGetUp(): void {
-        if (this._state === 'down' && this._alive && (this._riseAsked || this._readyToRise())) this._go('getUp');
+        if (this._mayRise() && (this._asked() || this._readyToRise())) this._go('getUp');
+    }
+
+    /** Asked to get up (getUp()), and done rolling onto its back first if it had to: that roll come to rest. */
+    private _asked(): boolean {
+        return this._riseAsked && (!this._rolled || this.sensors.stillFor > 0.2);
+    }
+
+    /** Down, alive, and not lying on its front with a roll to do first (or doing it). */
+    private _mayRise(): boolean {
+        return this._state === 'down' && this._alive && !this._rolling && !this._needsRoll();
+    }
+
+    /** Lying on its front or side with the set's Roll over on, not yet rolled. */
+    private _needsRoll(): boolean {
+        return !!this._body && this.set.behaviours.rollOver.enabled && !this._rolled && this._lying !== 1;
+    }
+
+    /** Roll onto its back: the shorter way round, held to the end (ctx.rollSign). Its bodies back in the world. */
+    private _startRoll(): void {
+        const body = this._body;
+        if (!body) return;
+        this._rolling = true;
+        this._rollStart = this._stateTime;
+        const angle = rollAngle(body, body.pelvis);
+        this._rollSign = angle >= 0 ? 1 : -1;
+        if (this.ragdoll?.frozen) this.ragdoll.unfreeze();
+        this.sensors.stillFor = 0;
     }
 
     /** The reaction state the animator's graph is in (Animator.reactionKind), read live. */
@@ -619,14 +679,17 @@ export class ReactionController implements AnimatorReactionLink {
     private _readyToRise(): boolean {
         const B = this.set.behaviours, T = this.set.thresholds;
         const writhing = B.writhe.enabled && this._wounds.length > 0 && this._stateTime < B.writhe.params.duration;
-        return B.getUp.enabled && this._alive && this._time >= this._unconsciousUntil && !writhing
-            && this.sensors.stillFor > T.settleTime + B.getUp.params.delay;
+        if (!(B.getUp.enabled && this._alive && this._time >= this._unconsciousUntil && !writhing) || this._rolling) return false;
+        // Rolled onto its back to get up: up as soon as the roll has come to rest.
+        if (this._rolled) return this.sensors.stillFor > 0.2;
+        return this.sensors.stillFor > T.settleTime + B.getUp.params.delay && !this._needsRoll();
     }
 
     /** Lying on its back: the hips and the chest facing up together (one alone cannot tell a body on its side). */
     private _lyingFaceUp(): boolean {
         const body = this._body;
         if (!body) return this.sensors.faceUp;
+        if (this._lying === 1 || this._lying === -1) return this._lying === 1;
         const fwdY = (i: number) => quatRotateTuple(body.simRotation(i), [0, 0, 1])[1];
         return fwdY(body.pelvis) + (body.chest >= 0 ? fwdY(body.chest) : 0) > 0;
     }
@@ -710,7 +773,7 @@ export class ReactionController implements AnimatorReactionLink {
             opts.velocity[0] * P.inherit + exit[0] * P.ejectSpeed, opts.velocity[1] * P.inherit + P.ejectUp, opts.velocity[2] * P.inherit + exit[2] * P.ejectSpeed,
         ];
         for (const p of r.parts) p.body.velocity.set(v[0], v[1], v[2]);
-        if (this._body) BAILS.add(this._body);
+        if (this._body) BAILS.set(this._body, this._time);
         const vb = opts.vehicle?.body as unknown as { collisionFilterMask: number } | null | undefined;
         if (vb && typeof vb.collisionFilterMask === 'number') {
             this._clearBody = vb;
@@ -748,12 +811,15 @@ export class ReactionController implements AnimatorReactionLink {
         if (this._state === 'getUp' && this._getUpAction && this._stateTime < this._getUpHold()) this._getUpAction.seek(0);
         body.begin(dt);
         if (this._split) this._driveKinematic(body, dt);
+        this._evolveRef(body, dt);
         this._base(body, dt);
         const ctx = this._context(dt);
         for (const b of BEHAVIOURS) {
             const w = this._running.get(b) ?? 0;
             if (w > 0) b.update(ctx, this.set.behaviours[b.id], w);
         }
+        // Off its feet every muscle is at least critically damped: a soft limb that rings reads as jelly.
+        if (OFF_FEET_REF(this._state)) for (const p of body.parts) if (body.damping[p.index] < 1) body.damping[p.index] = 1;
         this._upload(body, dt);
     }
 
@@ -809,6 +875,7 @@ export class ReactionController implements AnimatorReactionLink {
             d.under = airborne || st === 'hitReact' || st === 'stagger' || (++this._senseFrame & 3) === 0;
             this.sensors.update(r, dt, contacts, this.set.thresholds.settleSpeed, this._raycaster, d);
         } else this.sensors.stillFor += dt;
+        this._lying = this._offFeet() ? classifyLying(this.sensors.bellyUp, this._lying) : null;
         if (this._clearBody && this._time >= this._clearUntil) this._restoreClear();
         this._fadeKnock(dt);
         this._transitions(dt);
@@ -850,7 +917,9 @@ export class ReactionController implements AnimatorReactionLink {
                     this._emit('Landed', { fallHeight: s.fallHeight, impactSpeed: s.impactSpeed });
                 }
                 if (!s.grounded || t < 0.15) break;
-                const rolling = s.trunkSpin > T.tumbleAngularSpeed || ((s.terrain === 'stairs' || s.terrain === 'slope') && s.speed > B.tumble.params.slowDownSpeed);
+                // Thrown from a vehicle, it lands moving: it rolls on, rather than stopping dead where it came down.
+                const bailRoll = !!this._body && BAILS.has(this._body) && Math.hypot(s.velocity[0], s.velocity[2]) > B.vehicleBail.params.rollSpeed;
+                const rolling = bailRoll || s.trunkSpin > T.tumbleAngularSpeed || ((s.terrain === 'stairs' || s.terrain === 'slope') && s.speed > B.tumble.params.slowDownSpeed);
                 if (rolling && B.tumble.enabled) this._go('tumble');
                 else if (s.speed < T.downSpeed) this._go('down');
                 break;
@@ -860,20 +929,29 @@ export class ReactionController implements AnimatorReactionLink {
                 else if (t > 8) this._go('down');
                 break;
             case 'down': {
-                if (s.stillFor > T.settleTime && !this._settledSent) { this._settledSent = true; this._emit('Settled', { faceUp: s.faceUp }); }
+                if (s.stillFor > T.settleTime && !this._settledSent) { this._settledSent = true; this._emit('Settled', { faceUp: this._lyingFaceUp(), lying: this.lying }); }
                 if (!this._alive) { this._go('dead'); break; }
                 if (!s.grounded && s.speed > T.downSpeed * 3) { this._go('falling'); break; }
                 // The animator's graph decides while it is in a Ragdoll state (it never rises by itself) or a Get Up
                 // state (it rises once ready, the model's Gets up switch notwithstanding: that is for its own get-up).
                 const graph = this._graphKind();
-                if (graph === 'getUp' && (this._riseAsked || this._readyToRise())) { this._go('getUp'); break; }
-                const wantsUp = !graph && B.getUp.enabled && this.config.getUp !== false && this._time >= this._unconsciousUntil;
+                const conscious = this._time >= this._unconsciousUntil;
+                const wantsUp = !graph && B.getUp.enabled && this.config.getUp !== false && conscious;
                 const writhing = B.writhe.enabled && this._wounds.length > 0 && t < B.writhe.params.duration;
+                // Lying on its front or side, about to get up: it rolls onto its back first (Roll over), when it would
+                // have got up, or when asked to.
+                if (this._rolling) {
+                    if (this._lying === 1 || t - this._rollStart > B.rollOver.params.giveUp) { this._rolling = false; this._rolled = true; }
+                } else if (this._needsRoll() && this._alive && (this._riseAsked
+                    || (conscious && !writhing && B.getUp.enabled && (graph !== null || wantsUp) && s.stillFor > T.settleTime + B.getUp.params.delay))) {
+                    this._startRoll();
+                }
+                if (graph === 'getUp' && this._mayRise() && (this._asked() || this._readyToRise())) { this._go('getUp'); break; }
                 // Lying still with nothing left to do but wait: its bodies leave the world, the pose held where it lies,
                 // until it gets up or something moves it (a hit, a push: _ensure puts them back).
                 const r = this.ragdoll;
-                if (r && !r.frozen && this._settledSent && !writhing && this._alive) r.freeze();
-                if (wantsUp && !writhing && s.stillFor > T.settleTime + B.getUp.params.delay) this._go('getUp');
+                if (r && !r.frozen && this._settledSent && !writhing && this._alive && !this._rolling) r.freeze();
+                if (!graph && this._mayRise() && (this._asked() || (wantsUp && this._readyToRise()))) this._go('getUp');
                 break;
             }
             case 'getUp': {
@@ -990,6 +1068,8 @@ export class ReactionController implements AnimatorReactionLink {
         // Off the ground's rest: its bodies back in the world (they left it lying still).
         if (from === 'down' && next !== 'dead' && this.ragdoll?.frozen) this.ragdoll.unfreeze();
         if (from === 'down') this._riseAsked = false;
+        if (next === 'down' && from !== 'down') { this._rolling = false; this._rolled = false; }
+        if (from === 'down') this._rolling = false;
         // Up again: out cold no more.
         if (next === 'getUp' || next === 'recover' || next === 'animated' || next === 'hitReact' || next === 'stagger') this._limp = false;
         if (next !== 'animated' && from === 'animated') { this._reactionStart = this._time; this._emit('Started', { from }); }
@@ -1027,12 +1107,12 @@ export class ReactionController implements AnimatorReactionLink {
             case 'down':
                 this._suspend();
                 this._settledSent = false;
-                this._emit('Down', { from, faceUp: this.sensors.faceUp });
+                this._emit('Down', { from, faceUp: this._lyingFaceUp(), lying: this.lying });
                 break;
             case 'getUp':
                 this._suspend();
                 this._startGetUp();
-                this._emit('GettingUp', { from, faceUp: this.sensors.faceUp });
+                this._emit('GettingUp', { from, faceUp: this._lyingFaceUp(), lying: this.lying });
                 break;
             case 'recover':
                 // Up from the ground: the Collider back under the body, the animation there. On its feet it never left.
@@ -1102,6 +1182,74 @@ export class ReactionController implements AnimatorReactionLink {
         this._getUpAction = null;
     }
 
+    /**
+     * The pose the muscles follow off its feet (ReactionBody.ref), moved on every step:
+     * - falling: the pose it fell in, eased toward a brace (the animation's pose as it fell, knees, hips and elbows
+     *   a little bent);
+     * - a clip playing as the body's (the Reaction slot's, the graph's Ragdoll state's own) eased toward the clip:
+     *   what gets a fall or a writhe clip to the muscles;
+     * - lying: the pose it came to rest in, let go toward the pose it holds once it is still; a part pressed into
+     *   the ground far from its target always lets go a little, so no muscle shoves at the floor.
+     */
+    private _evolveRef(body: ReactionBody, dt: number): void {
+        const st = this._state;
+        if (!OFF_FEET_REF(st)) { this._refState = null; return; }
+        const entered = this._refState !== st;
+        const from = this._refState;
+        this._refState = st;
+        if (entered && (st === 'falling' || from === null || st === 'down' || st === 'dead')) {
+            body.captureRef();
+            if (st === 'falling') {
+                // The brace it eases into: the animation's pose as it fell (body.target holds it now), bent a little.
+                for (const p of body.parts) { const t = body.target[p.index], b = this._brace[p.index] ??= [0, 0, 0, 1]; b[0] = t[0]; b[1] = t[1]; b[2] = t[2]; b[3] = t[3]; }
+                this._braceBent(body);
+            }
+        }
+        const ease = (tau: number) => 1 - Math.exp(-Math.max(0, dt) / tau);
+        const animator = this.node.animator as { reactionClipPlaying?: boolean } | null | undefined;
+        const clipLed = !!this._clip || !!animator?.reactionClipPlaying;
+        if (clipLed) {
+            // The clip is the pose (body.target is the animation's at the start of the step).
+            const k = ease(0.25);
+            for (const p of body.parts) if (p.parent >= 0) body.refToward(p.index, body.target[p.index], k);
+        } else if (st === 'falling') {
+            const k = ease(0.4);
+            for (const p of body.parts) if (p.parent >= 0 && this._brace[p.index]) body.refToward(p.index, this._brace[p.index], k);
+        } else if ((st === 'down' || st === 'dead') && this.sensors.stillFor > this.set.thresholds.settleTime) {
+            const k = ease(0.6);
+            for (const p of body.parts) if (p.parent >= 0) body.relaxRef(p.index, k);
+        }
+        // A part on the ground well away from its target gives way to it.
+        const k = ease(0.3);
+        for (const i of this.sensors.touching) {
+            const p = body.parts[i];
+            if (!p || p.parent < 0) continue;
+            const r = body.ref[i], s = body.simRelative(i);
+            const err = 2 * Math.acos(Math.min(1, Math.abs(r[0] * s[0] + r[1] * s[1] + r[2] * s[2] + r[3] * s[3])));
+            if (err > 0.35) body.relaxRef(i, k);
+        }
+    }
+    private _refState: ReactionState | null = null;
+    private readonly _brace: number[][] = [];
+
+    /** The fall's brace bent a little: knees and elbows folded, hips forward, as a body does when it goes. */
+    private _braceBent(body: ReactionBody): void {
+        const bend = (i: number, angle: number) => {
+            const p = body.parts[i];
+            if (!p || p.parent < 0 || !p.layout.hingeAxis || !this._brace[i]) return;
+            const pr = body.parts[p.parent].layout.rotation, h = p.layout.hingeAxis;
+            const axis = quatRotateTuple([-pr[0], -pr[1], -pr[2], pr[3]], [h[0], h[1], h[2]]);
+            const s = Math.sin(angle / 2);
+            const q = quatMultiplyTuple([axis[0] * s, axis[1] * s, axis[2] * s, Math.cos(angle / 2)], this._brace[i]);
+            const b = this._brace[i]; b[0] = q[0]; b[1] = q[1]; b[2] = q[2]; b[3] = q[3];
+        };
+        for (const side of ['L', 'R'] as const) {
+            const leg = body.legs[side], arm = body.arms[side];
+            if (leg) bend(leg.mid, 0.35);
+            if (arm) bend(arm.mid, 0.5);
+        }
+    }
+
     /** The base every behaviour composes over: the set's muscles, this state's strings and drawing. */
     private _base(body: ReactionBody, dt: number): void {
         const set = this.set, state = this._state;
@@ -1139,7 +1287,9 @@ export class ReactionController implements AnimatorReactionLink {
             // Off its feet the muscles hold what the body does rather than pull it back to standing (the behaviours
             // brace, protect and land on top); on the ground (rolling, lying) they let it lie with its weight: they
             // hold up little, and tire.
-            if (state === 'falling' || state === 'tumble' || state === 'down' || state === 'dead') body.hold(i, 1);
+            // Off its feet the muscles follow the reference pose (the pose it fell in, a brace, a clip; _evolveRef):
+            // held where it is they only resisted, and the body looked dead.
+            if (state === 'falling' || state === 'tumble' || state === 'down' || state === 'dead') body.blend(i, body.ref[i], 1);
             if (state === 'tumble' || state === 'down') { body.holdUp[i] *= 0.3; body.torque[i] *= 0.6; }
             let pin = 0, map = 1;
             if (standing) {
@@ -1273,15 +1423,47 @@ export class ReactionController implements AnimatorReactionLink {
         return r.parts.reduce((s, p) => s + p.mass, 0) / REFERENCE_MASS || 1;
     }
 
+    /**
+     * Change part `i`'s spin by (x, y, z) rad/s as an angular impulse (a pair of opposite impulses about its centre):
+     * never a velocity written over the body's, which with the physics worker is a step or two old.
+     */
+    private _spin(i: number, x: number, y: number, z: number): void {
+        const p = this._body?.parts[i];
+        if (!p) return;
+        // The body's inertia about the axis, as a capsule's (about its long axis or across it, roughly).
+        const inertia = p.mass * (p.radius * p.radius * 0.4 + p.halfLength * p.halfLength / 3);
+        this._angularImpulse(i, x * inertia, y * inertia, z * inertia);
+    }
+
+    /** An angular impulse (N·m·s, world) on part `i`: a pair of opposite impulses about its centre. */
+    private _angularImpulse(i: number, x: number, y: number, z: number): void {
+        const p = this._body?.parts[i];
+        if (!p) return;
+        const L = Math.hypot(x, y, z);
+        if (!(L > 1e-9) || !Number.isFinite(L)) return;
+        const ax = [x / L, y / L, z / L];
+        // A unit vector square to the axis, and the couple's arm along it.
+        const u = Math.abs(ax[1]) < 0.9 ? [ax[2], 0, -ax[0]] : [0, -ax[2], ax[1]];
+        const un = Math.hypot(u[0], u[1], u[2]) || 1;
+        u[0] /= un; u[1] /= un; u[2] /= un;
+        const arm = 0.1, k = L / (2 * arm);
+        const j = [(ax[1] * u[2] - ax[2] * u[1]) * k, (ax[2] * u[0] - ax[0] * u[2]) * k, (ax[0] * u[1] - ax[1] * u[0]) * k];
+        p.body.applyImpulse(j, [u[0] * arm, u[1] * arm, u[2] * arm]);
+        p.body.applyImpulse([-j[0], -j[1], -j[2]], [-u[0] * arm, -u[1] * arm, -u[2] * arm]);
+    }
+
     private _context(dt: number): ReactionContext {
         return {
             body: this._body!, sensors: this.sensors, set: this.set, skin: this._skin!, state: this._state,
             stateTime: this._stateTime, time: this._time, dt, wounds: this._wounds, gravity: 9.81,
             massScale: this.ragdoll ? this._massScale(this.ragdoll) : 1,
             playClip: (clip, loop) => this._playClip(clip, loop),
-            spin: (i, x, y, z) => { const b = this._body?.parts[i]?.body; if (b) b.angularVelocity.vadd({ x, y, z }, b.angularVelocity); },
+            spin: (i, x, y, z) => this._spin(i, x, y, z),
+            angularImpulse: (i, x, y, z) => this._angularImpulse(i, x, y, z),
             standing: this._standingState(), knock: this._knockV,
             handFree: side => this._handFree(side),
+            outCold: this._limp || this._time < this._unconsciousUntil,
+            rolling: this._rolling, rollSign: this._rollSign,
         };
     }
 
@@ -1426,27 +1608,30 @@ export class ReactionController implements AnimatorReactionLink {
             const clip = faceUp ? clips.faceUp ?? clips.faceDown : clips.faceDown ?? clips.faceUp;
             if (clip && animator.playAction) {
                 this._clip = null;
-                // Present at once (a blend-in of 0): the pose measured next is the clip's first frame.
-                const action = animator.playAction(clip, { slot: REACTION_SLOT, blendIn: 0.0, blendOut: 0.2, ikWeight: 0 });
-                if (!action.done) this._getUpAction = action;
+                // Joined where the body in it starts to rise (a capture's get-up often lies still a second or more
+                // first), present at once (a blend-in of 0): the pose measured next is that frame.
+                const anim = (this.node.model as AnimatedModel | undefined)?.animations?.find(a => a.name === clip);
+                const start = anim && this._skin ? clipRiseStart(anim, this._skin) : 0;
+                const action = animator.playAction(clip, { slot: REACTION_SLOT, blendIn: 0.0, blendOut: 0.2, ikWeight: 0, startTime: start });
+                if (!action.done) this._getUpAction = clockFrom(action, start);
             }
         }
         // Where the clip (or the plain animation) puts the hips now, against where the body has them.
         animator.update(0);
         body.begin();
-        // The clip turned about the vertical to lie the way the body lies: its hips' long axis (hips to head) and
-        // their side axis, each weighted by how flat it lies, matched to the body's. The body does not turn.
+        // The clip turned about the vertical to lie the way the body lies: its hips' long axis (hips to head) matched
+        // to the body's where both lie flat enough to tell, else their side axis (a body sitting up). One axis, not a
+        // blend of both: where the two disagree (the clip on its back, the body on its side), a blend cancels out.
         const qs = body.simRotation(body.pelvis), qa = body.animRotation(body.pelvis);
-        let sx = 0, sz = 0;
+        let turn: number | null = null;
         for (const axis of [[0, 1, 0], [1, 0, 0]]) {
             const s = quatRotateTuple(qs, axis), a = quatRotateTuple(qa, axis);
-            const w = Math.hypot(s[0], s[2]) * Math.hypot(a[0], a[2]);
-            if (w < 1e-4) continue;
-            const d = Math.atan2(s[0], s[2]) - Math.atan2(a[0], a[2]);
-            sx += w * Math.sin(d); sz += w * Math.cos(d);
+            if (Math.hypot(s[0], s[2]) * Math.hypot(a[0], a[2]) < 0.25) continue;
+            turn = Math.atan2(s[0], s[2]) - Math.atan2(a[0], a[2]);
+            break;
         }
-        const yaw = sx !== 0 || sz !== 0
-            ? this._yawNow() + Math.atan2(sx, sz) * 180 / Math.PI
+        const yaw = turn !== null
+            ? this._yawNow() + turn * 180 / Math.PI
             : yawFromDirection(this.sensors.forward[0], this.sensors.forward[2]);
         const pelvisSim = body.simPosition(body.pelvis);
         const g = Number.isFinite(this.sensors.groundY) ? this.sensors.groundY : pelvisSim[1] - 0.2;

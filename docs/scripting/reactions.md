@@ -64,7 +64,7 @@ Its `hit.node` is `null`, like terrain's, so a test for terrain should check `!h
 | `bail({ velocity, exitDirection?, vehicle? })` | Thrown from a vehicle moving at `velocity`, out along `exitDirection`, passing clear of `vehicle` (anything with a `body`) for a moment. |
 | `knockOut(seconds = 4)` | Falls limp and lies there for `seconds` before it can get up. |
 | `kill()` | Falls limp and stays down. |
-| `getUp()` | Gets up now, if it is down and alive. While the animator's graph holds the body in a [Ragdoll state](../editor/animation.md#ragdoll-and-get-up-states) it asks the graph instead: `canGetUp` turns true, and the graph's way into its Get Up state rises. |
+| `getUp()` | Gets up now, if it is down and alive; lying on its front or side it rolls onto its back first (the set's [Roll over](../editor/reactions.md#roll-over)). While the animator's graph holds the body in a [Ragdoll state](../editor/animation.md#ragdoll-and-get-up-states) it asks the graph instead: `canGetUp` turns true, and the graph's way into its Get Up state rises. |
 | `reset()` | Back on its animation at once, wherever the body is (a respawn). |
 | `useSet(name)` | Switches to another of the skeleton's reaction sets, by id or name. |
 | `setStrength(v)` | Multiplies every muscle from now on (1 normal). |
@@ -86,8 +86,10 @@ this.reactions?.bail({ velocity: carVelocity, exitDirection: carLeft, vehicle: c
 | `reacting` | Anything but `'animated'`. |
 | `isDown` | Off its feet: falling, tumbling, down, getting up or dead. |
 | `ragdolled` | The body is the physics': falling, tumbling, lying or dead (not getting up). |
-| `canGetUp` | Lying still and alive, ready to rise (or asked to by `getUp()`). |
+| `canGetUp` | Lying still and alive, ready to rise (or asked to by `getUp()`), on its back if it had to roll over first. |
 | `faceUp` | Lying (or falling) face up: its hips and chest together. |
+| `lying` | Off its feet, how it lies: `1` on its back, `-1` on its front, `0` on its side (0 on its feet). |
+| `rollingOver` | Rolling onto its back to get up. |
 | `hitCount`, `hitAngle`, `hitHeight`, `hitStrength` | The hits taken so far, and the last one's side (degrees from the facing, counter-clockwise: `0` front, `+90` its left), height up the body (`0`–`1`) and strength (`0`–`1`). The animator's [reaction parameters](../editor/animation.md#reaction-parameters) read these. |
 | `alive`, `health` | Whether it can still get up, and its health 0..1 (settable). |
 | `wounds` | Where it was hit: part, point and normal in the part's frame, impulse, when, and the hand that holds it. |
@@ -124,9 +126,9 @@ export default class Dummy extends CharacterNode {
 | `Stagger` | It is knocked off balance and steps to stay up. |
 | `Fell` | It comes off its feet: `fallHeight` so far. |
 | `Landed` | It hits the ground: `impactSpeed`, `fallHeight`. |
-| `Down` | It is lying on the ground: `faceUp`. |
-| `Settled` | It has come to rest: `faceUp`. |
-| `GettingUp` | It starts getting up: `faceUp`. |
+| `Down` | It is lying on the ground: `faceUp`, `lying`. |
+| `Settled` | It has come to rest: `faceUp`, `lying`. |
+| `GettingUp` | It starts getting up: `faceUp`, `lying`. |
 | `GotUp` | It is back on its animation after getting up. |
 | `Recovered` | It is back on its animation without having fallen (a flinch, a stagger it stood through). |
 | `Died` | It was killed (`kill()`, or a hit that took its last health). |

@@ -333,6 +333,7 @@ between two states, with its conditions.
 | **Starts** | A Ragdoll state: what entering it does to a character on its feet — **Fall** (it falls the way it was moving), **Trip** (its feet are taken from under it) or **Limp** (it drops out cold). Entered when a hit has already knocked it down, it adds nothing. |
 | **Without a body** | A Ragdoll state: the clip under the body, and what shows where no body can be made. None holds the pose it was entered with. |
 | **On back**, **On front** | A Get Up state: the clip it rises on lying on its back, and on its front. Empty uses the rig's own get-up clips (its [Reactions tab](reactions.md#get-up)). |
+| **from first frame** | A Get Up state: play the clip from its first frame. Off (the default), it joins the clip where the body in it starts to rise: a motion-capture get-up often lies still a second or more first. |
 | **React** | [Reaction effects](#reaction-effects): how the body takes hits while this state plays — **Full**, **Flinch** or **None**. |
 | **Hands** | Reaction effects: hands that stay on what they hold rather than reach for a wound. **Auto** is both while a support-hand IK holds a weapon. |
 | **Force ×**, **Shove ×** | Reaction effects: hits land, and shoves carry it, this many times as hard. |
@@ -573,8 +574,11 @@ a fall, a knockout or a get-up is wired like any other state, with no script. Th
   feet, the character falls as its **Starts** says; entered after a hit has already knocked it down, it only holds
   the body. Either way **the body never gets up by itself while the graph is there**: the graph decides when.
 - **A Get Up state** — **Plays ▸ Get up**. The body rises on its clip, **On back** or **On front** as it lies,
-  lined up with where it lies and blended from it. The transition's own blend, root motion and foot placement do
-  not apply, and the character is held still. Entered before the body lies still, it waits on its first frame.
+  lined up with where it lies and blended from it, joined where the body in the clip starts to rise (unless
+  **from first frame**). The transition's own blend, root motion and foot placement do not apply, and the
+  character is held still. Entered before the body lies still, it waits on that frame. A body on its front or side
+  rolls onto its back before **CanGetUp** turns true (the rig's [Roll over](reactions.md#roll-over)), so the
+  **On back** clip is the one that plays.
 - While the graph is in either, the other layers fade out (unless one [plays over them](#layers-and-bone-masks)),
   and a way in from anywhere (Any State, **Enter on trigger**) to an ordinary state waits: a ragdoll is not pulled
   into a car. Its trigger is taken, so it does not fire later.
@@ -591,7 +595,7 @@ The usual wiring, which the graph toolbar's **Reaction presets ▸ Knock-down st
 The graph can also start a fall by itself: a trigger into the Ragdoll state (the Sandbox's **Trip** key) knocks a
 character on its feet down as **Starts** says. Leave the Ragdoll state for anything but a Get Up state and the
 reactions get the body up themselves, on the rig's own clips. A script's `reactions.getUp()` while the graph holds
-the body makes **CanGetUp** true. With no reactions (another backend) a Ragdoll state plays its clip or holds its
+the body makes **CanGetUp** true (once it has rolled onto its back, if it had to). With no reactions (another backend) a Ragdoll state plays its clip or holds its
 pose, and a Get Up state plays as an ordinary clip.
 
 ### Reaction effects

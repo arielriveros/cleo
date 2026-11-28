@@ -37,6 +37,19 @@ export interface ContactList {
 export interface SensorDetail { sweep: boolean; terrain: boolean; under: boolean }
 const ALL_DETAIL: SensorDetail = { sweep: true, terrain: true, under: true };
 
+/**
+ * How a body lies, from how far the front of its hips and chest faces up (BodySensors.bellyUp): 1 on its back, −1 on
+ * its front, 0 on its side. Past ±0.35 from nothing known; once it is one, it stays that until it is well into the
+ * next (±0.25 to leave a side, ±0.45 to reach one), so a body rocking on the line does not flicker between them.
+ */
+export function classifyLying(bellyUp: number, previous: -1 | 0 | 1 | null): -1 | 0 | 1 {
+    const s = bellyUp;
+    if (previous === 1) return s > 0.25 ? 1 : s < -0.45 ? -1 : 0;
+    if (previous === -1) return s < -0.25 ? -1 : s > 0.45 ? 1 : 0;
+    if (previous === 0) return s > 0.45 ? 1 : s < -0.45 ? -1 : 0;
+    return s > 0.35 ? 1 : s < -0.35 ? -1 : 0;
+}
+
 /** How far ahead the fall is predicted, and in how many straight pieces. */
 const SWEEP_SECONDS = 1.2;
 const SWEEP_PIECES = 10;
@@ -51,6 +64,11 @@ export class BodySensors {
     public uprightness = 1;
     /** Lying on its back (chest facing up) rather than its front. */
     public faceUp = true;
+    /**
+     * How far the front of the hips and the chest faces up, averaged: 1 flat on its back, −1 flat on its front, near 0
+     * on its side (what classifyLying reads).
+     */
+    public bellyUp = 1;
     /** The trunk's turning speed (rad/s): tumbling, rolling. */
     public trunkSpin = 0;
     /** Parts touching something that is not themselves this step. */
@@ -132,6 +150,7 @@ export class BodySensors {
         this.faceUp = fwd[1] > 0;
         const pq = pelvis.body.quaternion;
         const pf = vec3.transformQuat(vec3.create(), [0, 0, 1], [pq.x, pq.y, pq.z, pq.w]);
+        this.bellyUp = chest === pelvis ? pf[1] : (pf[1] + fwd[1]) / 2;
         const py = vec3.transformQuat(vec3.create(), [0, 1, 0], [pq.x, pq.y, pq.z, pq.w]);
         // Lying, the pelvis's forward points up or down: its heading is along the body then.
         const flat = Math.hypot(pf[0], pf[2]) > 0.3 ? pf : [py[0], 0, py[2]];
