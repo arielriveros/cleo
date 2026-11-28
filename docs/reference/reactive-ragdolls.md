@@ -261,6 +261,63 @@ With them, the procedural humanoid stays up to a 145 N·s shove in every directi
 (`tests/reactionBalance.test.ts`), and an arm's ringing after a chest hit while a recoil fires drops by about two
 thirds with the recoil drawn over the body (`tests/reactionWiggle.test.ts`).
 
+## Priority on its feet (2026-11-28)
+
+Off its feet a reaction already has the whole character: the Collider leaves the world, the animator's Ragdoll and
+Get Up states hold it, foot IK and hand IK fade out. On its feet the body and the animation share it (physical
+animation: the legs the animation's, the upper body the muscles'), and nothing held the character's own control. A
+Sandbox civilian shot once sprinted off on the same frame: its brain fled at once, its capsule turned toward the run
+at 480° a second through the 1.4 s flinch, faster than the kinematic hips could follow (their animated spin is capped
+at 8 rad/s), so the simulated trunk lagged and swung round after them. A second round staggered it in mid-turn, and
+its legs, switched from kinematic to dynamic, kept the turn as they stepped. The capsule went on turning under the
+stepping body, and when it was caught, the drawing put back on the animated hips turned the whole body to the
+capsule's heading in one frame. Its free arms went out and circled besides: Arms out read the chest's turn in the
+world, and a walk's turn is one. And the worst of it was not the reaction's at all: the AI Controller's whiskers (the
+rays it steers round obstacles by, cast from the hips), its sight and its look ahead ignored the pawn's capsule but
+not the limbs of its reacting body round it, so the moment a body was made the agent swerved from itself, one way and
+then the other, every frame: its brain steered it 15° one tick and −45° to −170° the next, the capsule turning after
+it at full speed.
+
+Who has what now:
+
+| | Standing hit | Stagger (stepping) | Knocked down | Getting up |
+|---|---|---|---|---|
+| Walk and turning (the AI's, the input's) | held from the first hit for **Hold control** (0.35 s), back over **Hand back** (0.3 s), turning at most **Turn while reacting** (half) until the hit reaction is over | held; the facing follows the body's heading | none: the Collider is out of the world | the Get Up state holds it |
+| Root motion | the animation's | none: the body moves the capsule | none | none |
+| Foot IK, foot lock | the animation's (unchanged) | foot lock off; the stepping legs the balancer's | faded out over 0.15 s, foot lock with them | off |
+| Look and aim layers | the muscles follow them; a held character's look stays where it was (the Sandbox) | the upper body held as shoved | muted | muted |
+| Support-hand IK | on; that hand never sent to a wound | on the target | faded | off |
+| Legs | kinematic on the animation | dynamic, the balancer's steps | the body's | pinned to the clip |
+| Capsule | the walk's (held) | follows the body | over the hips | placed by the get-up |
+
+The pieces:
+
+- `CharacterNode.reactionHold` (`move`, `turn`, `heading`): what the reaction leaves the character of its walk and its
+  turning. The walk is scaled (its own braking stops it), the turn speed scaled, turn in place off, and a turn
+  under way eases to a stop over 0.06 s rather than stopping dead under the reacting body. A Character's model with
+  **Flinch holds control** off (`ModelReactionConfig.holdsControl`) is never held: a player's.
+- The flinch counts from the first hit of a hit reaction: the rounds of a burst do not make it longer, so an enemy
+  under fire still gets to cover. It rests on how long a person takes to act on anything, a run included (a voluntary
+  movement starts 150 ms or more after the stimulus, see the timings above).
+- When a stagger's legs go dynamic, the body's common turn about the vertical is taken off it (its parts' motion
+  relative to each other kept), and while a foot grips the ground the helping hand damps what turning is left
+  (**Stops turning in**, 0.25 s): nothing else stops a body that steps while it turns. Caught, the Collider is placed
+  facing the way the body does.
+- Arms out reads the trunk's turn only while it steps on legs of its own; on legs that are the animation's a turn is
+  the walk's, and no cause.
+- The AI Controller's rays (whiskers, sight, wall and ledge ahead) pass through the pawn's own reacting limbs.
+- A shot that passes through the Collider's capsule but meets no limb grazes the part nearest at its surface, not at
+  the capsule's, whose radius made a lever that turned the whole body.
+- The `reaction:Hit` event carries the hit's `direction`, so a script shoves a character away from the gun on the
+  first round (the shot's own `weapon:Shot`, and the shooter, come after it).
+
+Measured on the procedural humanoid (`tests/reactionHold.test.ts`), before and after: shot walking and asked to run
+the other way, it turned 128° in the first 0.3 s, now none; shoved while running round in a circle, its capsule
+ended 180° off the stepping body and the drawn hips jumped 156° in one frame as it was caught, now 3° and 8° (its
+own turn at full speed). In the Sandbox (`npcsHold.test.ts`) a civilian shot facing the shooter turned 16° a tick one
+way and the other from the first frame; now it stands its flinch, then turns once toward where it runs, its brain's
+heading steady to the degree.
+
 ## How Cleo maps them
 
 | Idea | In Cleo |
@@ -311,6 +368,7 @@ happens to it, and taken away once it is back on its animation.
 | `src/physics/reactive/reactionController.ts` | The states, the Collider hand-off, get-up, events, the script API |
 | `src/physics/reactive/balancer.ts` | The stagger's steps: which foot, where, planted legs on the weight they carry, the helping hand |
 | `src/physics/reactive/nerves.ts` | Between the behaviours and the muscles: tension after a hit, gains moving with a muscle's time constants |
+| `src/core/scene/nodes/characterNode.ts` | `reactionHold`: the walk and turning a reaction leaves the character |
 | `applications/editor/src/features/rig/reactions/` | The Reactions tab, the test bench and its timeline |
 
 ## What the tests hold
@@ -333,6 +391,7 @@ procedural humanoid on Jolt, inline and in the worker, and checks that cannon an
 | With the physics worker | trips, lies and gets up as it does inline |
 | Shot in the chest while a recoil fires (`reactionWiggle.test.ts`) | with the recoil drawn over the body, the arms ring less than half as much, the elbow does not reverse more than 3 times a second, the chest still sways |
 | Shoved forward, back, left and right, 60 to 145 N·s (`reactionBalance.test.ts`) | stays up to 120 N·s, in steps no longer than 0.46 m; falls only after stepping |
+| A Character shot as it walks, and shoved as it runs round (`reactionHold.test.ts`) | no turn in the first 0.3 s, then its own; stepping, the capsule within 15° of the body and no drawn frame turning more than 10°, inline and in the worker; no arms out on a walk's turn; an AI Controller's whiskers find nothing on open ground while its pawn's body reacts |
 
 The golden physics traces are unchanged: a world with no drives steps exactly as before.
 

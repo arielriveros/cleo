@@ -861,7 +861,7 @@ export class ControllerNode extends Node {
         if (!physics) return false;
         const pawn = this._possessed;
         try {
-            const result = physics.raycast(from, to, { ignore: pawn?.body ? [pawn.body] : undefined });
+            const result = physics.raycast(from, to, { ignore: pawn?.body ? [pawn.body] : undefined, reject: this._ownLimb });
             if (!result) return false;
             // A hit ON the target is not an obstruction. Characters stand in colliders, so without this an
             // agent can never see another agent: the body's node is the Collider, the candidate under it.
@@ -1819,7 +1819,7 @@ export class ControllerNode extends Node {
                 // every agent would find itself blocking its own view.
                 const hit = physics.raycast(
                     [from[0], from[1], from[2]], [to[0], to[1], to[2]],
-                    { ignore: pawn.body ? [pawn.body] : undefined });
+                    { ignore: pawn.body ? [pawn.body] : undefined, reject: this._ownLimb });
                 // A body's node is its Collider: the target counts when the hit is the collider it stands in, or
                 // what it sits in (a car it drives).
                 return !hit || hit.node === target || (!!hit.node && hit.node === target.collider)
@@ -1878,13 +1878,13 @@ export class ControllerNode extends Node {
         try {
             if (name === 'wallAhead') {
                 const from: [number, number, number] = [feet[0] + up[0] * lift, feet[1] + up[1] * lift, feet[2] + up[2] * lift];
-                const hit = physics.raycast(from, [from[0] + forward[0], from[1], from[2] + forward[2]], { ignore });
+                const hit = physics.raycast(from, [from[0] + forward[0], from[1], from[2] + forward[2]], { ignore, reject: this._ownLimb });
                 if (!hit) return false;
                 const n = hit.normal;
                 return n[0] * up[0] + n[1] * up[1] + n[2] * up[2] < WALKABLE_NORMAL_UP;
             }
             const ahead: [number, number, number] = [feet[0] + forward[0] * 0.6, feet[1] + lift, feet[2] + forward[2] * 0.6];
-            return !physics.raycast(ahead, [ahead[0], ahead[1] - lift - 1.5, ahead[2]], { ignore });
+            return !physics.raycast(ahead, [ahead[0], ahead[1] - lift - 1.5, ahead[2]], { ignore, reject: this._ownLimb });
         } catch { return false; }
     }
 
@@ -1941,6 +1941,19 @@ export class ControllerNode extends Node {
         return (frame + this._cyclePhase) % Math.round(every) === 0;
     }
 
+    /**
+     * A ray's hit on the pawn's own body: a limb of its reactions' ragdoll, round the capsule every ray here is cast from
+     * (the capsule itself is ignored by body). Never in its way: the whiskers swerved from it, the agent turning one way
+     * and the other every frame while it reacted, and it could not see past its own head.
+     */
+    private readonly _ownLimb = (_owner: Node | null, hit: unknown): boolean => {
+        const pawn = this._possessed as Node | null;
+        const part = pawn ? (this._scene?.physics as { ragdollPartOf?(b: unknown): { ragdoll: { node: Node } } | null } | undefined)?.ragdollPartOf?.(hit) : null;
+        if (!part || !pawn) return false;
+        const n = part.ragdoll.node;
+        return n === pawn || n.isDescendantOf(pawn);
+    };
+
     private _probeObstacles(pawn: CharacterNode): void {
         this._probes.length = 0;
         const physics = this._scene?.physics;
@@ -1956,8 +1969,8 @@ export class ControllerNode extends Node {
         const lift = Math.min(1, Math.max(0.4, this.eyeHeight * 0.5));
         const from = [feet[0] + up[0] * lift, feet[1] + up[1] * lift, feet[2] + up[2] * lift];
         const target = this._steerTarget;
-        // Ground the agent could walk up is not an obstacle, and neither is the thing it is going to.
-        const reject = (owner: Node | null) => !!target && !!owner && (owner === target || owner.isDescendantOf(target));
+        // Ground the agent could walk up is not an obstacle, and neither is the thing it is going to, nor its own body.
+        const reject = (owner: Node | null, hit: unknown) => (!!target && !!owner && (owner === target || owner.isDescendantOf(target))) || this._ownLimb(owner, hit);
         const heading = Math.atan2(this._desired[0], this._desired[2]);
         const body = pawn.body;
 

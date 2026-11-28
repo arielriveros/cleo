@@ -24,7 +24,7 @@ describe('an animated model inspector shows only the per-character choices', () 
     const rows = read('features', 'nodeInspector', 'propertyEditors', 'CharacterRows.tsx')
     expect(rows).toContain("<SectionTitle title='This character' />")
     for (const label of ["label='Animator'", "label='Clip overrides'", "label='Ragdoll mass'", "label='Ragdoll push'",
-      "label='Reactions'", "label='Reaction strength'", "label='Health'", "label='Gets up'"])
+      "label='Reactions'", "label='Reaction strength'", "label='Health'", "label='Gets up'", "label='Flinch holds control'"])
       expect(rows, label).toContain(label)
     // The animator choice keeps its behaviour: a shared one is instantiated with this character's overrides.
     expect(rows).toContain('instantiateController(asset, libs, sm?.controllerId === id ? sm.clipOverrides : undefined)')

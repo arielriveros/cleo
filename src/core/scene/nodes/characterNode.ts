@@ -15,7 +15,21 @@ import type { ControlIntent } from "../../control/intent";
 import type { ControllerNode } from "./controllerNode";
 import type { RigidBody } from "../../../physics/body";
 import type { ColliderNode, ColliderShape } from "./colliderNode";
-import { finiteOr } from "../../math";
+import { finiteOr, shortestAngle } from "../../math";
+
+/** Seconds a turn under way takes to ease off when a reaction holds the character (CharacterNode.reactionHold). */
+const HOLD_TURN_EASE = 0.06;
+
+/**
+ * What a character's reactions leave it of its control while a hit has its body (CharacterNode.reactionHold): the share
+ * of its walk (`move`) and of its turning (`turn`) it has, 0 to 1, and a heading (world yaw, degrees) its facing
+ * follows instead of the intent's, or null.
+ */
+export interface ReactionHold {
+    move: number;
+    turn: number;
+    heading: number | null;
+}
 
 /**
  * A pawn: something that walks, turns and jumps because a driver told it to.
@@ -159,6 +173,13 @@ export class CharacterNode extends Node {
      * character then stops steering, and only root motion moves it. Runtime only, never saved.
      */
     public animationHold: boolean = false;
+    /**
+     * Set by its reactions while a hit has its body on its feet (ReactionController): how much of its walk and its
+     * turning it has back (`move`, `turn`: 0 none, 1 all), and a heading its facing follows instead of the intent's
+     * (degrees; its body's, while the body steps to stay up), or null. The reaction holds it a moment after a hit (a
+     * flinch, before it can act) and while it steps, then hands it back. Null: its own. Runtime only, never saved.
+     */
+    public reactionHold: ReactionHold | null = null;
     /** 0..1 of steering authority while airborne. */
     public airControl: number = 1;
     /** Seconds after walking off an edge during which a jump still launches. */
@@ -303,6 +324,8 @@ export class CharacterNode extends Node {
     public get followingBody(): boolean { return this._bodyFollowAt !== null; }
 
     private _bodyFollowAt: [number, number] | null = null;
+    /** Its facing's turn on its last step (degrees a second, signed; see reactionHold). */
+    private _turnRate = 0;
     private _bodyFollowTau = 0.12;
 
     /** The flat velocity that takes the capsule after the body it follows, or null when it walks. */
@@ -352,9 +375,15 @@ export class CharacterNode extends Node {
             this._locomotion = createLocomotionState();
         }
         if (!this._driven && !this.driveWhenUnpossessed) {
-            // Following its body (its reactions stepping), not walking: after the body.
+            // Following its body (its reactions stepping), not walking: after the body, facing its way.
             const follow = this._bodyFollowVelocity();
-            if (follow) { const v = this.velocity; this.velocity = [follow[0], v[1], follow[1]] as [number, number, number]; return; }
+            if (follow) {
+                const v = this.velocity;
+                this.velocity = [follow[0], v[1], follow[1]] as [number, number, number];
+                const heading = this.reactionHold?.heading;
+                if (heading !== null && heading !== undefined) this._faceHeldHeading(heading, delta);
+                return;
+            }
             // Not walking: the shove alone moves it, by how much it changed since last frame.
             const k = this._knock, a = this._knockApplied;
             if (k[0] !== a[0] || k[2] !== a[2]) {
@@ -385,10 +414,19 @@ export class CharacterNode extends Node {
         // Held by the animation: no move, stopped at once, facing left alone. The intent itself is untouched, so
         // a jump request still waits in it for when the hold ends.
         const held = this.animationHold;
-        const intent = held ? { ...this._intent, move: [0, 0] as [number, number], sprint: false }
+        let intent: Readonly<ControlIntent> = held ? { ...this._intent, move: [0, 0] as [number, number], sprint: false }
             : this.crouched ? { ...this._intent, sprint: false, speedScale: this._intent.speedScale * Math.max(0, this.crouchSpeed) }
             : this._intent;
-        const tuning = held ? { ...this.tuning, acceleration: 0, facingMode: 'none' as const } : this.tuning;
+        let tuning = held ? { ...this.tuning, acceleration: 0, facingMode: 'none' as const } : this.tuning;
+        // Held by its reactions (a flinch after a hit, a stagger): its walk and its turning scaled down to what it has
+        // of them, its own braking bringing it to a stop. The intent itself is untouched: what it was asked to do it
+        // does once the hold lets go.
+        const hold = this.reactionHold;
+        const move = hold ? Math.max(0, Math.min(1, finiteOr(hold.move, 1))) : 1;
+        const turn = hold ? Math.max(0, Math.min(1, finiteOr(hold.turn, 1))) : 1;
+        const heading = hold && hold.heading !== null && Number.isFinite(hold.heading) ? hold.heading : null;
+        if (move < 1) intent = { ...intent, speedScale: finiteOr(intent.speedScale, 1) * move };
+        if (turn < 1 || heading !== null) tuning = { ...tuning, turnSpeed: tuning.turnSpeed * turn };
         // The shove: taken out of the velocity the walk senses, put back on the one it gives.
         const k = this._knock, applied = this._knockApplied;
         let sense = this._sense(delta);
@@ -398,6 +436,27 @@ export class CharacterNode extends Node {
         }
         const out = stepLocomotion(intent, sense, tuning, this._locomotion);
         this._locomotion = out.next;
+        let yaw = out.yaw, turnRequest = out.turnRequest;
+        if (turn < 1 || heading !== null) {
+            // No turn in place under a hold: its clip would turn the body at the clip's own pace.
+            if (turnRequest !== 0 || out.next.turning || out.next.turnPending > 0) {
+                this._locomotion = { ...out.next, turning: false, turnCode: 0, turnPending: 0 };
+                turnRequest = 0;
+            }
+            // Facing its body's heading (while the body steps), at no more than its own turn speed.
+            if (heading !== null) {
+                const diff = shortestAngle(heading - sense.bodyYaw), most = Math.max(0, this.turnSpeed) * Math.max(0, delta);
+                yaw = shortestAngle(sense.bodyYaw + (Math.abs(diff) > most ? Math.sign(diff) * most : diff));
+            } else if (delta > 0) {
+                // A turn under way as the hold came on slows to a stop over HOLD_TURN_EASE, the way it was going: stopped
+                // dead, the legs under the reacting body would whip its trunk round on the hips. None begins.
+                const carry = this._turnRate * Math.exp(-delta / HOLD_TURN_EASE);
+                const own = yaw === null ? 0 : shortestAngle(yaw - sense.bodyYaw);
+                if (Math.abs(carry * delta) > Math.abs(own)) yaw = shortestAngle(sense.bodyYaw + carry * delta);
+            }
+        }
+        // How fast it turned this frame (degrees a second, signed): what a hold eases off.
+        this._turnRate = yaw !== null && delta > 0 ? shortestAngle(yaw - sense.bodyYaw) / delta : 0;
         applied[0] = k[0]; applied[2] = k[2];
 
         this.velocity = (k[0] !== 0 || k[2] !== 0
@@ -414,11 +473,11 @@ export class CharacterNode extends Node {
         // A WORLD yaw (it came from worldForward), so it is set in world space: under a turned parent a local
         // write would face the character off its path. `setWorldQuaternion` also turns the body, which the
         // physics solver has to agree with or the capsule slides while facing elsewhere.
-        if (out.yaw !== null) this.setWorldQuaternion(quat.fromEuler(CharacterNode._yawQ, 0, out.yaw, 0));
+        if (yaw !== null) this.setWorldQuaternion(quat.fromEuler(CharacterNode._yawQ, 0, yaw, 0));
 
         this.moveDir = out.moveDir;
         this.isJumping = out.isJumping;
-        this.turnRequest = out.turnRequest;
+        this.turnRequest = turnRequest;
 
         // The step never consumes the request — it only reports that it launched — so that it can stay a
         // pure function of its arguments. Consuming is the caller's half of that bargain.
@@ -427,6 +486,14 @@ export class CharacterNode extends Node {
     }
 
     private static _yawQ = quat.create();
+
+    /** Turn its facing toward `heading` (world yaw, degrees) by no more than its turn speed over `delta`. */
+    private _faceHeldHeading(heading: number, delta: number): void {
+        const f = this.worldForward, bodyYaw = Math.atan2(f[0], f[2]) * 180 / Math.PI;
+        const diff = shortestAngle(heading - bodyYaw), most = Math.max(0, this.turnSpeed) * Math.max(0, delta);
+        const yaw = shortestAngle(bodyYaw + (Math.abs(diff) > most ? Math.sign(diff) * most : diff));
+        this.setWorldQuaternion(quat.fromEuler(CharacterNode._yawQ, 0, yaw, 0));
+    }
 
     // ----- crouching ------------------------------------------------------------------------------
 

@@ -3053,7 +3053,9 @@ export class Animator {
             vec3.add(this._rootDelta, this._rootDelta, worldT);
         } else {
             const target = this._nearestBodiedNode() ?? this._node;
-            if (target) {
+            // Not while its Character follows its body (its reactions stepping to stay up): the body moves it then, and
+            // a clip's travel (a stop, a running turn) would carry the capsule off the body it is to stand under.
+            if (target && !this._characterFollowsBody()) {
                 // In WORLD space, so a target under a moved or turned parent travels the clip's world delta.
                 target.setWorldPosition(vec3.add(vec3.create(), target.worldPosition, worldT));
                 // A world-space rotation delta LEFT-multiplies the target's world orientation;
@@ -4207,7 +4209,9 @@ export class Animator {
             lock.hasPrev = true;
         }
 
-        const weight = footLockWeight(lock.alpha, tuning.lockBlendCurve) * tuning.footLock;
+        // Faded with the rest of the foot IK while a reaction takes the legs (off its feet): a planted foot let go
+        // over that fade, not dropped in the frame its placement gives out.
+        const weight = footLockWeight(lock.alpha, tuning.lockBlendCurve) * tuning.footLock * this._footIkReaction;
         plan.lockWeight = weight;
         plan.lockPlanar = !!toeG;
         if (weight <= 0) return;
@@ -4896,6 +4900,14 @@ export class Animator {
             n = n.parent;
         }
         return null;
+    }
+
+    /** The Character over this model follows its body (CharacterNode.followBody: its reactions stepping). */
+    private _characterFollowsBody(): boolean {
+        for (let n: Node | null = this._node?.parent ?? null; n; n = n.parent) {
+            if (n.nodeType === 'character') return !!(n as { followingBody?: boolean }).followingBody;
+        }
+        return false;
     }
 
     /** Resolve the node a 'variable' parameter reads from, relative to this animator's model node. */

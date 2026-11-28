@@ -253,6 +253,11 @@ function ReactionRows({ node, rigId, config, onChange }: {
             <Toggle checked={config.getUp !== false} doc={false} title='Off: a reaction that ends on the ground stays there'
               onChange={v => set({ getUp: v ? undefined : false })} />
           </PropertyRow>
+          <PropertyRow label='Flinch holds control'>
+            <Toggle checked={config.holdsControl !== false} doc={false}
+              title="Off: a hit never holds its walk and its turning (a player's character, whose input is never taken from it). On: a moment's flinch after a hit before it can act, and none while it steps to stay up"
+              onChange={v => set({ holdsControl: v ? undefined : false })} />
+          </PropertyRow>
         </>
       )}
     </>

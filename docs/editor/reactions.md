@@ -245,6 +245,9 @@ what the animation does.
 | **On one foot** | How much of a hit a body on one foot takes (stepping): it cannot brace on both. |
 | **Off its feet** | How much of a hit a body off its feet takes: with nothing to push against it is carried rather than snapped. |
 | **Lasts** | How long a hit reaction runs before the character is back on its animation. |
+| **Hold control** | How long after the first hit its Character neither walks nor turns, in seconds: a flinch, before it can act on anything (running off included). The rounds that follow do not make it longer. A character whose **Flinch holds control** is off is never held. |
+| **Hand back** | How long its walk and its turning take to come back after that, and after a stagger. |
+| **Turn while reacting** | The share of its turn speed it has while the hit reaction lasts: a body turned faster than its legs can follow under it swings round after them. |
 | **Pain** | How far the spine bows over a hit to the chest or the gut, in radians, for as bad as it is: up in 0.2 s, held a second, easing off over 1.5 s. |
 | **Shock spin** | How far a hit to the chest turns it, in radians, the way the hit pushes the side it struck. |
 | **Gut fold** | How far a hit to the gut folds the body over it, in radians, for about two seconds. |
@@ -299,6 +302,7 @@ its walk still turns and aims it. Turning the behaviour off makes every hit that
 | **Steps** | How many steps it takes before it gives up and falls, if they have not caught it. |
 | **Tires to** | The strength its legs keep with each step after the second (0.7: 70% of the step before). |
 | **Help** | A hand keeping the trunk upright, the hips from sinking and the body slowing over its feet while a foot is down (Euphoria's StayUpright and resistAcc), on top of what its legs do (0: those alone). |
+| **Stops turning in** | How quickly a body turning about the vertical as it steps comes to a stop while a foot grips the ground, in seconds (part of **Help**; 0: not at all). |
 | **Falls above** | A shove faster than this (m/s) knocks it straight down: no step could catch it. |
 | **Falls past** | How far, in radians, the trunk may lean from upright before it falls. |
 | **For** | How long it must lean that far to fall. |
@@ -314,18 +318,19 @@ its velocity times √(height ÷ g)). Scripts read the steps on `reactions.balan
 
 ### Arms out
 
-Shoved, or its trunk turning fast, on its feet: the free arms go out to the sides to keep its balance, and circle
-when it turns faster still (Euphoria's bodyBalance arms out and ArmsWindmill). A hand on a weapon stays there, and a
-hand holding a wound holds it.
+Shoved, or its trunk turning fast as it steps to stay up: the free arms go out to the sides to keep its balance, and
+circle when it turns faster still (Euphoria's bodyBalance arms out and ArmsWindmill). A turn on legs that are the
+animation's is its walk turning it (running off, facing something) and puts no arms out. A hand on a weapon stays
+there, and a hand holding a wound holds it.
 
 | Setting | What it does |
 |---|---|
-| **After a turn of** | The trunk turning faster than this (rad/s) puts the arms out. |
+| **After a turn of** | The trunk turning about the vertical faster than this (rad/s) as it steps puts the arms out. |
 | **Or a shove of** | A shove at least this fast (m/s) puts the arms out. |
 | **Out** | How far the arms go out from the sides, in radians. |
 | **Elbows** | How far the elbows bend, in radians. |
 | **Stiffness** | How firmly the arms are held out, in Hz. |
-| **Circle above** | Turning faster than this (rad/s), the arms circle. |
+| **Circle above** | Turning faster than this (rad/s) as it steps, the arms circle. |
 | **Hold for** | How long the arms stay out after it has steadied, in seconds. |
 
 ### Catch the fall

@@ -70,6 +70,7 @@ what each character decides for itself:
 | **Reaction strength** | Multiplies every muscle of its set: above 1 a tough character that shrugs hits off, below 1 a weak one. |
 | **Health** | 0 to 1, what each reaction starts from. Hits take it down; a wounded character staggers sooner and holds itself up less. |
 | **Gets up** | Off: a reaction that ends on the ground stays there. |
+| **Flinch holds control** | On (the default): after a hit its Character neither walks nor turns for a moment (the hit reaction's **Hold control**), and while it steps to stay up its facing follows its body; then its control comes back. Off: a hit never holds it (a player's character, whose input is never taken from it). |
 
 > A node **attached to a socket** has its transform rewritten every frame, so editing its Transform
 > while attached does nothing visible. Move the socket's offset in the rig editor instead, or set the

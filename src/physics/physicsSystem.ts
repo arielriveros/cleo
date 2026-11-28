@@ -1817,12 +1817,12 @@ export class PhysicsSystem {
       }
       // The capsule round a character, not the character: the limb the shot goes on to meet, along its line
       // (from a metre back, for a ray that started inside the capsule), where it meets it. A shot that passes
-      // the body by inside its capsule grazes the part nearest.
+      // the body by inside its capsule grazes the part nearest, on its axis: at the capsule's surface it would push
+      // the part from as far off it as the capsule is wide, and turn the whole body with it.
       const n = Math.hypot(direction[0], direction[1], direction[2]) || 1, d = [direction[0] / n, direction[1] / n, direction[2] / n];
       const p = hit.point;
-      const struck = options.part === undefined
-        ? reactions.partByRay([p[0] - d[0], p[1] - d[1], p[2] - d[2]], [p[0] + d[0] * 2, p[1] + d[1] * 2, p[2] + d[2] * 2])
-        : null;
+      const from = [p[0] - d[0], p[1] - d[1], p[2] - d[2]], to = [p[0] + d[0] * 2, p[1] + d[1] * 2, p[2] + d[2] * 2];
+      const struck = options.part === undefined ? reactions.partByRay(from, to) ?? reactions.partNearRay(from, to) : null;
       reactions.hit({ ...options, point: struck ? struck.point : p, direction, impulse, ...(struck ? { part: struck.part } : {}) });
       return true;
     }

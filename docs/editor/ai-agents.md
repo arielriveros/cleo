@@ -132,7 +132,8 @@ goal reads: `maxSpeed` (3), `arriveRadius` (0.4), `slowRadius` (2.5), `standoff`
 Fans **Whiskers** rays ahead and steers around what they hit. A **Look ahead** of 0 switches it off
 entirely and fires no rays at all; the physics engine has no sphere cast, so a fan of rays is the
 approximation available. `avoidDistance` (the look ahead, **0 — off by default**), `avoidStrength`
-(1.5), `whiskerCount` (3), `whiskerSpread` (60°, the total fan).
+(1.5), `whiskerCount` (3), `whiskerSpread` (60°, the total fan). The rays, like its sight, pass through its own
+pawn: its capsule and the limbs of its body while that reacts to a hit.
 
 | Field | Meaning |
 |---|---|

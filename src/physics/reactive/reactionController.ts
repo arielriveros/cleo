@@ -8,7 +8,7 @@ import type { PhysicsBody } from '../physicsBody';
 import { LAYER } from '../collisionLayers';
 import type { Ragdoll } from '../ragdoll';
 import { resolveEvent } from '../../core/events/hub';
-import { clamp, closestSegmentSegment, planarSignedAngle, quatConjugateTuple, quatMultiplyTuple, quatRotateTuple, quatToRotationVector, rotationVectorToQuat, yawFromDirection } from '../../core/math';
+import { clamp, closestSegmentSegment, planarSignedAngle, quatConjugateTuple, quatMultiplyTuple, quatRotateTuple, quatToRotationVector, rotationVectorToQuat, wrapDegrees, yawFromDirection } from '../../core/math';
 import { cachedRagdollLayout, ragdollPartPoseInto, skinRagdollProfile, type RagdollLayout } from '../ragdollProfile';
 import { physicsStats } from '../physicsStats';
 import type { mat4 } from 'gl-matrix';
@@ -70,6 +70,8 @@ export interface ReactionEventInfo {
     point?: [number, number, number];
     /** Hit: where on the body it landed. */
     zone?: HitZone;
+    /** Hit: the way it was going (world, unit): away from whoever fired it. */
+    direction?: [number, number, number];
     fallHeight?: number;
     impactSpeed?: number;
     faceUp?: boolean;
@@ -89,6 +91,11 @@ export interface ModelReactionConfig {
     getUp?: boolean;
     /** False: no reactions at all (hits go to the capsule, as before). */
     enabled?: boolean;
+    /**
+     * False: a hit never holds its Character's walk and turning (CharacterNode.reactionHold), a player's character,
+     * whose input is never taken from it. Default true: a moment's flinch after a hit, and none while it steps.
+     */
+    holdsControl?: boolean;
 }
 
 const REACTION_SLOT = 'Reaction';
@@ -336,6 +343,29 @@ export class ReactionController implements AnimatorReactionLink {
     }
 
     /**
+     * The part a ray from `from` to `to` passes nearest when it meets none (a shot through the capsule round the body,
+     * past its limbs), and the point of that part's surface nearest the ray: where a graze lands, no farther from the
+     * part's middle than a hit on it would be. Null with no parts.
+     */
+    public partNearRay(from: ArrayLike<number>, to: ArrayLike<number>): { part: string; point: [number, number, number] } | null {
+        const segs = this._segments();
+        const a: [number, number, number] = [from[0], from[1], from[2]], b: [number, number, number] = [to[0], to[1], to[2]];
+        let best: { part: string; point: [number, number, number] } | null = null, bestD = Infinity;
+        for (const s of segs) {
+            const k = Math.max(0, s.half - s.r);
+            const hit = closestSegmentSegment(a, b, [s.c[0] - s.y[0] * k, s.c[1] - s.y[1] * k, s.c[2] - s.y[2] * k], [s.c[0] + s.y[0] * k, s.c[1] + s.y[1] * k, s.c[2] + s.y[2] * k]);
+            const dist = Math.sqrt(hit.dist2), d = dist - s.r;
+            if (!(d < bestD)) continue;
+            bestD = d;
+            // Out from the axis toward the ray, by the part's radius.
+            const u = dist > 1e-6 ? s.r / dist : 0;
+            const c = hit.c2;
+            best = { part: s.name, point: [c[0] + (hit.c1[0] - c[0]) * u, c[1] + (hit.c1[1] - c[1]) * u, c[2] + (hit.c1[2] - c[2]) * u] };
+        }
+        return best;
+    }
+
+    /**
      * The body's parts as capsule segments (centre, long axis, half-length, radius): the simulated parts while a
      * reaction has it, else the parts as the animation poses them.
      */
@@ -392,7 +422,7 @@ export class ReactionController implements AnimatorReactionLink {
         if (fx.react === 'none' && !dying) {
             // The hit counts (its event, the graph's hit parameters); the body does not take it.
             const point = h.point ? [h.point[0], h.point[1], h.point[2]] as [number, number, number] : [0, 0, 0] as [number, number, number];
-            this._emit('Hit', { part: -1, partName: this._partNameOf(h.part), impulse, point });
+            this._emit('Hit', { part: -1, partName: this._partNameOf(h.part), impulse, point, direction: [dir[0], dir[1], dir[2]] });
             return;
         }
         const full = fx.react === 'full';
@@ -413,7 +443,7 @@ export class ReactionController implements AnimatorReactionLink {
         if (!r) {
             if (!this.ragdoll && this.node.animator && this._skin) {
                 const point = h.point ? [h.point[0], h.point[1], h.point[2]] as [number, number, number] : [0, 0, 0] as [number, number, number];
-                this._emit('Hit', { part: -1, partName: this._partNameOf(h.part), impulse, point });
+                this._emit('Hit', { part: -1, partName: this._partNameOf(h.part), impulse, point, direction: [dir[0], dir[1], dir[2]] });
             }
             if (staggers) this._knockBack(dir, impulse);
             return;
@@ -443,7 +473,7 @@ export class ReactionController implements AnimatorReactionLink {
         }
         const zone = this._wound(part, point, dir, impulse);
         const before = this._state;
-        this._emit('Hit', { part, partName: r.parts[part].name, impulse, point: point as [number, number, number], zone });
+        this._emit('Hit', { part, partName: r.parts[part].name, impulse, point: point as [number, number, number], zone, direction: [dir[0], dir[1], dir[2]] });
         if (dying) { this.kill(); return; }
         // A listener took it further (a script's push knocked it down): that stands.
         if (this._state !== before) return;
@@ -942,8 +972,12 @@ export class ReactionController implements AnimatorReactionLink {
         body.followSpin = Math.max(0, Math.min(1, this.set.behaviours.hitReact.params.followSpin ?? 1));
         body.begin(dt, this._physics.posesLag ? dt : 0);
         if (this._split) this._driveKinematic(body, dt);
-        // A stagger's shove, the step after its legs went dynamic (a body switched and pushed in one step keeps neither).
-        if (this._stepping && this._shoveWait-- <= 0) this._applyShove();
+        // A stagger's shove, the step after its legs went dynamic (a body switched and pushed in one step keeps neither),
+        // and the turn its walk had it in taken off it first.
+        if (this._stepping && this._shoveWait-- <= 0) {
+            if (this._yawStrip) { this._yawStrip = false; this._stripYaw(body); }
+            this._applyShove();
+        }
         this._applySpread(body, dt);
         // Looseness wears off at the rate the set's Recover in says (a part as weak as a hit leaves it, back in that time).
         const H = this.set.behaviours.hitReact.params, ease = dt / Math.max(1e-3, H.weaknessTime);
@@ -1025,6 +1059,7 @@ export class ReactionController implements AnimatorReactionLink {
         if (!this.ragdoll || !this._body) return;
         this._fade(dt);
         this._follow();
+        this._holdControl(dt);
         // Drop wounds long healed.
         // Kept longer the worse they were (a bad one hurts for a while).
         const keep = this.set.behaviours.hitReact.params.holdTime + this.set.behaviours.hitReact.params.reachDelay + 1;
@@ -1258,6 +1293,7 @@ export class ReactionController implements AnimatorReactionLink {
             if (stepping) {
                 this._balancer = new Balancer();
                 this._shoveWait = 1;
+                this._yawStrip = true;
                 this._shoveV[0] = this._shoveV[2] = 0;
                 // The walk it was taking, braced against (most of it).
                 const c = this._character() as { velocity?: ArrayLike<number> } | null;
@@ -1269,8 +1305,13 @@ export class ReactionController implements AnimatorReactionLink {
         if (onFeet) this._setSplit(true);
         else if (next !== 'animated') this._setSplit(false);
         this._tiltFor = 0;
+        // The control it is handed back from as it recovers: what it had at the end of the hit reaction, none after a
+        // stagger (see _holdControl).
+        if (next === 'recover') { this._holdStart[0] = from === 'hitReact' ? this._holdOut.move : 0; this._holdStart[1] = from === 'hitReact' ? this._holdOut.turn : 0; }
         switch (next) {
             case 'hitReact':
+                // The flinch's hold runs from here, however many rounds follow while it lasts.
+                this._holdFrom = this._time;
                 break;
             case 'stagger':
                 this._emit('Stagger', { from });
@@ -1303,8 +1344,11 @@ export class ReactionController implements AnimatorReactionLink {
                 this._emit('GettingUp', { from, faceUp: this._lyingFaceUp(), lying: this.lying });
                 break;
             case 'recover':
-                // Up from the ground, or caught after stepping: the Collider under the body, the animation there.
-                if (from === 'getUp' || wasStepping) this._placeCharacterAtBody(false);
+                // Up from the ground, or caught after stepping: the Collider under the body, the animation there. After
+                // stepping, facing the way the body does (its heading followed it while it stepped), or the drawing, put
+                // back on the animated hips, would turn the whole body to the capsule's in one frame.
+                if (from === 'getUp') this._placeCharacterAtBody(false);
+                else if (wasStepping) this._placeCharacterAtBody(this.config.holdsControl !== false);
                 this._resume();
                 break;
             case 'animated':
@@ -1358,6 +1402,7 @@ export class ReactionController implements AnimatorReactionLink {
 
     private _release(): void {
         if (this._stepping) { this._stepping = false; this._unfollow(); }
+        this._clearHold();
         this._setSplit(false);
         this._knockV[0] = this._knockV[2] = 0;
         this._playClip(null);
@@ -1521,11 +1566,113 @@ export class ReactionController implements AnimatorReactionLink {
     /** Whether a hand may leave what it holds for a wound (see {@link busyHands}). */
     private _handFree(side: 'L' | 'R'): boolean {
         if (this.busyHands) return !this.busyHands[side];
-        // The graph's states (AnimationState.reactions busyHands), then the support-hand IK.
+        // A hand the support-hand IK holds on a weapon is on it, whatever the state says of the other: sent to a wound
+        // as well, it would be pulled two ways at once.
+        const animator = this.node.animator as { handIkActive?: 'left' | 'right' | null } | null | undefined;
+        const held = animator?.handIkActive ?? null;
+        if (held && (held === 'left') === (side === 'L')) return false;
+        // The graph's states (AnimationState.reactions busyHands), then the support-hand IK (both hands on the weapon).
         const fx = this._effectsNow();
         if (fx.busyHands) return !fx.busyHands[side];
-        const animator = this.node.animator as { handIkActive?: 'left' | 'right' | null } | null | undefined;
-        return !animator?.handIkActive;
+        return !held;
+    }
+
+    // ---- its control, held while the hit has it (CharacterNode.reactionHold) ----
+
+    /** When (reaction clock) the hit reaction under way began: its flinch's hold counts from there. */
+    private _holdFrom = -Infinity;
+    /** The heading the capsule follows while the body steps (degrees, eased after the body's), or null. */
+    private _holdHeading: number | null = null;
+    /** The hold as it is now (what goes to the Character), and what it was as the recovery began (move, turn). */
+    private readonly _holdOut: { move: number; turn: number; heading: number | null } = { move: 1, turn: 1, heading: null };
+    private readonly _holdStart: [number, number] = [1, 1];
+    /** The stagger's legs went dynamic: the walk's turn is to be taken off the body on its first step. */
+    private _yawStrip = false;
+
+    /**
+     * What the character keeps of its control while the hit has its body on its feet (CharacterNode.reactionHold):
+     * none for the hit reaction's Hold control from its first hit (a flinch: a person takes about that long to act on
+     * anything), then its walk and its turning back over Hand back, the turning no faster than Turn while reacting
+     * until the hit reaction is over; none while it steps to stay up, its facing following the body's heading; and back
+     * over Hand back as it recovers. Off its feet nothing (its Collider is out of the world), nor once it got up.
+     */
+    private _holdControl(dt: number): void {
+        const c = this._character() as { reactionHold?: { move: number; turn: number; heading: number | null } | null } | null;
+        if (!c || !('reactionHold' in c)) return;
+        if (this.config.holdsControl === false || !this._holdNow(dt)) { this._clearHold(); return; }
+        const out = this._holdOut, h = c.reactionHold ??= { move: 1, turn: 1, heading: null };
+        h.move = out.move; h.turn = out.turn; h.heading = out.heading;
+    }
+
+    /** The hold for now into `_holdOut`; false when there is none. */
+    private _holdNow(dt: number): boolean {
+        const H = this.set.behaviours.hitReact.params, st = this._state, out = this._holdOut;
+        const release = Math.max(1e-3, H.holdRelease ?? 0.3);
+        const ramp = (t: number) => (t <= 0 ? 0 : t >= 1 ? 1 : t);
+        if (st === 'stagger') {
+            out.move = 0; out.turn = 0;
+            if (this._stepping) {
+                // After the body's heading, eased (its hips sway as it steps), from the way the capsule faced.
+                const f = this.sensors.forward, yaw = yawFromDirection(f[0], f[2]);
+                const was = this._holdHeading ?? this._yawNow();
+                this._holdHeading = was + wrapDegrees(yaw - was) * (1 - Math.exp(-Math.max(0, dt) / 0.1));
+                out.heading = this._holdHeading;
+            } else { out.heading = null; this._holdHeading = null; }
+            return true;
+        }
+        this._holdHeading = null;
+        out.heading = null;
+        if (st === 'hitReact') {
+            // Given back from Hold control on (a turn under way when it was hit slows to a stop, not in a step: the
+            // Character eases it, CharacterNode.reactionHold).
+            const since = this._time - this._holdFrom;
+            const back = ramp((since - Math.max(0, H.holdControl ?? 0.35)) / release);
+            out.move = back;
+            out.turn = Math.min(back, Math.max(0, Math.min(1, H.reactTurn ?? 0.5)));
+            return true;
+        }
+        if (st === 'recover' && !this._recoverFromGetUp) {
+            const back = ramp(this._stateTime / release);
+            out.move = this._holdStart[0] + (1 - this._holdStart[0]) * back;
+            out.turn = this._holdStart[1] + (1 - this._holdStart[1]) * back;
+            return back < 1;
+        }
+        return false;
+    }
+
+    /** Its control all its own again. */
+    private _clearHold(): void {
+        this._holdHeading = null;
+        const c = this._character() as { reactionHold?: unknown } | null;
+        if (c && c.reactionHold) c.reactionHold = null;
+    }
+
+    /**
+     * Take the body's turning about the vertical off it: each part's share of the whole body's yaw rate (its spin, and
+     * its swing round the centre of mass), as impulses, the parts' motion relative to each other kept. The legs and hips
+     * were the animation's, turning with the walk (a locomotion turn, a turn to run): on their own legs they would carry
+     * that turn on through every step, the body spinning as it tried to catch itself.
+     */
+    private _stripYaw(body: ReactionBody): void {
+        let m = 0, cx = 0, cz = 0;
+        for (const p of body.parts) { const q = p.body.position; m += p.mass; cx += q.x * p.mass; cz += q.z * p.mass; }
+        if (!(m > 0)) return;
+        cx /= m; cz /= m;
+        let L = 0, I = 0;
+        for (const p of body.parts) {
+            const q = p.body.position, v = p.body.velocity, w = p.body.angularVelocity;
+            const rx = q.x - cx, rz = q.z - cz, own = p.mass * (p.radius * p.radius * 0.4 + p.halfLength * p.halfLength / 3);
+            L += p.mass * (rz * v.x - rx * v.z) + own * w.y;
+            I += p.mass * (rx * rx + rz * rz) + own;
+        }
+        const yawRate = I > 1e-6 ? L / I : 0;
+        if (!(Math.abs(yawRate) > 1e-3) || !Number.isFinite(yawRate)) return;
+        for (const p of body.parts) {
+            const q = p.body.position, rx = q.x - cx, rz = q.z - cz;
+            const own = p.mass * (p.radius * p.radius * 0.4 + p.halfLength * p.halfLength / 3);
+            p.body.applyImpulse([-yawRate * rz * p.mass, 0, yawRate * rx * p.mass]);
+            this._angularImpulse(p.index, 0, -yawRate * own, 0);
+        }
     }
 
     /** Targets, gains, strings and drawing, to the ragdoll. */

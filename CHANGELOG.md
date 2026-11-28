@@ -155,6 +155,27 @@ in a hand. Turn-in-place picks the right clip when the camera swings behind.
     behaviour puts the free arms out, and circles them, on a shove or a fast turn. A shove is counted once.
   - Joint drives take a chain to be sized against, an inertia named outright, and a torque on top of their spring
     (`PhysicsWorld.setJointDrive`, `setJointTarget`).
+- **Fix: a character shot on its feet spun round, and its walk, its look and its arms fought the reaction.** Shot, an
+  NPC ran off on the same frame, its capsule turning faster than the reacting body's legs could follow; a stagger
+  begun in that turn stepped while it spun, and was put back on its animation with the whole body snapped round to
+  the capsule's heading.
+  - A hit holds the character's walk and turning a moment (the hit reaction's **Hold control**, 0.35 s from the first
+    hit, the rounds after it not counting), then hands them back (**Hand back**), turning at most at **Turn while
+    reacting** until the hit reaction is over; while a stagger steps, its facing follows its body. A turn under way
+    eases to a stop. `CharacterNode.reactionHold` carries it; a character's **Flinch holds control** row turns it off
+    (the Sandbox's player has it off).
+  - A stagger's legs no longer keep the walk's turn as they go dynamic, a planted foot damps what turning is left
+    (**Stops turning in**), and the Collider is put down facing the body.
+  - **Arms out** reads the trunk's turn only while the body steps on legs of its own: a walk's turn is no cause.
+  - An AI Controller's whiskers, its sight and its look ahead no longer meet its own pawn's reacting limbs: shot, an
+    agent swerved from its own body one way and the other every frame, the capsule turning after it.
+  - A shot through a character's capsule that meets no limb grazes the nearest part at its surface, not at the
+    capsule's; a hand on a weapon by its support-hand IK is never sent to a wound; a knocked-down character's planted
+    foot lets go over the IK's fade; a clip's root motion does not move a capsule that follows its stepping body.
+  - The `reaction:Hit` event carries the hit's `direction`.
+- **The Sandbox: three rounds to stagger, a flinch before an NPC runs, a look that does not whip round.** **Stagger
+  Shock** 40 (two rounds were already past 30), a round that knocks an NPC down knocks it away from the gun, and a
+  look past 110° off the body fades out instead of flipping from one shoulder to the other.
 - **Fix: renaming an AI brain's state, parameter or layer.** The name changes on Enter or on leaving the field, not
   on every key (the field lost focus after one character), and everything that names it follows: a state's
   transitions and the Layer state parameters reading it, a parameter's conditions in every layer.

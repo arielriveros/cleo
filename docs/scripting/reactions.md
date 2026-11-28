@@ -16,7 +16,10 @@ const reactions = this.scene.physics.reactionsFor(node)   // a Character, its mo
 ```
 
 While a character is on its feet (`reactions.hasControl`: flinching or staggering, not `isDown`) it keeps its
-Collider and its control: a script goes on moving, aiming and firing it. Off its feet `isDown` is true and
+Collider and its control: a script goes on moving, aiming and firing it. A hit holds its walk and its turning a
+moment, though (the hit reaction's **Hold control**), and none while it steps to stay up, its facing following its
+body: the Character's `reactionHold` (`move` and `turn`, 0 to 1, and `heading`, or null) says how much it has, and
+its locomotion takes it into account by itself. `reactions: { holdsControl: false }` turns that off (a player's). Off its feet `isDown` is true and
 `hasControl` false, until a get-up is quite over: its clip played out and the skin back on the animation (the
 `recover` that follows `getUp`), so a brain or a stick does not walk the body out of it. `reactions.busyHands = { L, R }` tells it
 which hands hold something and must not leave it for a wound (null, the default: both while the animator's
@@ -125,7 +128,7 @@ export default class Dummy extends CharacterNode {
 | Event | When |
 |---|---|
 | `Started` | A reaction begins (it was on its animation). |
-| `Hit` | A hit lands: `part`, `partName` (the part it struck, a leg's included), `impulse`, `point`, `zone` (`'head'`, `'chest'`, `'gut'`, `'back'`, `'arm'` or `'leg'`). |
+| `Hit` | A hit lands: `part`, `partName` (the part it struck, a leg's included), `impulse`, `point`, `zone` (`'head'`, `'chest'`, `'gut'`, `'back'`, `'arm'` or `'leg'`), `direction` (the way it was going, a unit vector in the world). |
 | `Stagger` | It is knocked off balance and steps to stay up. |
 | `Fell` | It comes off its feet: `fallHeight` so far. |
 | `Landed` | It hits the ground: `impactSpeed`, `fallHeight`. |
@@ -153,6 +156,7 @@ model.ragdollConfig = { ...model.ragdollConfig, reactions: { set: 'Tough', stren
 | `strength` | Multiplies every muscle. |
 | `health` | Health 0..1 each reaction starts with. |
 | `getUp` | `false`: a reaction that ends on the ground stays there. |
+| `holdsControl` | `false`: a hit never holds its Character's walk and turning (see above). |
 | `enabled` | `false`: no reactions at all; hits push its capsule and `startRagdoll` falls limp, as before. |
 
 ## Lower level

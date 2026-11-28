@@ -199,6 +199,29 @@ export class Balancer {
             const share = m / mTrunk;
             ctx.impulse(i, (fx * across + bx * share) * dt * help, lift * share * dt * help, (fz * across + bz * share) * dt * help);
         }
+        // And its turning about the vertical slowed while a foot grips the ground (what a planted foot does against a
+        // twist): the whole body's yaw rate down by most of itself over Yaw damp, each part its share, its motion
+        // relative to the others kept. Nothing else stops a body that steps while it turns.
+        const yawDamp = P.yawDamp ?? 0.25;
+        if (s.feetDown > 0 && yawDamp > 0) {
+            let L = 0, I = 0;
+            for (const p of body.parts) {
+                const q = p.body.position, vb = p.body.velocity, wb = p.body.angularVelocity;
+                const rx = q.x - com[0], rz = q.z - com[2], own = p.mass * (p.radius * p.radius * 0.4 + p.halfLength * p.halfLength / 3);
+                L += p.mass * (rz * vb.x - rx * vb.z) + own * wb.y;
+                I += p.mass * (rx * rx + rz * rz) + own;
+            }
+            const yawRate = I > 1e-6 ? L / I : 0;
+            const k = Math.min(1, dt / yawDamp) * help;
+            if (Number.isFinite(yawRate) && Math.abs(yawRate) > 1e-3 && k > 0) {
+                for (const p of body.parts) {
+                    const q = p.body.position, rx = q.x - com[0], rz = q.z - com[2];
+                    const own = p.mass * (p.radius * p.radius * 0.4 + p.halfLength * p.halfLength / 3);
+                    ctx.impulse(p.index, -yawRate * rz * p.mass * k, 0, yawRate * rx * p.mass * k);
+                    ctx.angularImpulse(p.index, 0, -yawRate * own * k, 0);
+                }
+            }
+        }
     }
 
     /** The foot to step with: each aimed, the one whose step leaves the capture point closest to the feet it stands on. */

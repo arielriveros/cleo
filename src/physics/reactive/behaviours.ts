@@ -320,6 +320,16 @@ const stepBalance: ReactionBehaviour = {
 const ARMS_OUT = new WeakMap<ReactionBody, number>();
 
 /**
+ * How fast the trunk turns about the vertical where that can cost it its balance (rad/s): stepping on legs of its own
+ * (a stagger). On legs that are the animation's a turn is the walk's (running off, facing something), the legs under it
+ * whatever the trunk does: no cause to throw the arms out.
+ */
+function turningOff(ctx: ReactionContext): number {
+    if (!ctx.balancer) return 0;
+    return Math.abs(ctx.body.parts[ctx.body.chest].body.angularVelocity.y);
+}
+
+/**
  * Shoved, or its trunk turning fast, on its feet: the free arms go out to the sides to keep its balance, and circle
  * when it turns faster still (Euphoria's bodyBalance arms out and ArmsWindmill). A hand on a weapon stays there; a
  * hand holding a wound holds it (hitReact composes after this).
@@ -328,15 +338,13 @@ const armsOut: ReactionBehaviour = {
     id: 'armsOut', states: ['stagger', 'hitReact'], fade: 0.15,
     wants(ctx, c) {
         const P = c.params, body = ctx.body;
-        const wv = body.parts[body.chest].body.angularVelocity, spin = Math.hypot(wv.x, wv.y, wv.z);
-        if (spin > P.spin || Math.hypot(ctx.knock[0], ctx.knock[2]) > P.shove) ARMS_OUT.set(body, ctx.time);
+        if (turningOff(ctx) > P.spin || Math.hypot(ctx.knock[0], ctx.knock[2]) > P.shove) ARMS_OUT.set(body, ctx.time);
         const last = ARMS_OUT.get(body);
         return last !== undefined && ctx.time - last < P.hold;
     },
     update(ctx, c, w) {
         const P = c.params, body = ctx.body, s = ctx.sensors;
-        const wv = body.parts[body.chest].body.angularVelocity, spin = Math.hypot(wv.x, wv.y, wv.z);
-        const mill = P.windmill > 0 && spin > P.windmill;
+        const mill = P.windmill > 0 && turningOff(ctx) > P.windmill;
         for (const side of ['L', 'R'] as const) {
             const arm = body.arms[side];
             if (!arm || !ctx.handFree(side)) continue;
