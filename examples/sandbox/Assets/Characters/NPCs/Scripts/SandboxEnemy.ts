@@ -22,6 +22,8 @@ const CLAIMS = new WeakMap<object, Map<string, Node>>()
  *             moving target, and better the longer it holds it in its sights
  *   close in  the player too far: the nav mesh toward it, firing
  *   back off  the player too close: away from it, firing
+ *   car engage the player driving: steps off the car's path (the brain's strafe, its side away from where the car
+ *             is going), firing at the cabin
  *   cover     hit, or nearly hit twice: sprints to a spot the player cannot see (a Cover Point, or a ring of probes)
  *   in cover  crouched there, reloading, then
  *   peek      stands up and fires a burst, and back down; after a few, it fights in the open
@@ -101,6 +103,9 @@ export default class SandboxEnemyNode extends SandboxNpcNode {
     private _clear: boolean = true
 
     public get team(): string { return 'enemy' }
+    /** The player driving is still its target: its brain's car engage states step off the car's path, firing. */
+    protected get fightsDrivers(): boolean { return true }
+    protected get fightingVehicle(): boolean { return this.state === 'car engage' }
 
     // ----- what the brain reads ------------------------------------------------------------------------------
 
@@ -206,6 +211,7 @@ export default class SandboxEnemyNode extends SandboxNpcNode {
                 this._nextBurst = Math.max(this._nextBurst, this._now + 0.4)
                 break
             case 'close in': this._gait = 'jog'; break
+            case 'car engage': this._gait = 'jog'; break
             case 'back off': this._gait = 'walk'; break
             case 'cover': this._takeCover(); break
             case 'in cover': this.stop(); this._stateFor = this.between(this.coverMin, this.coverMax); break
@@ -235,7 +241,7 @@ export default class SandboxEnemyNode extends SandboxNpcNode {
             case 'look': this.face(this._sweepYaw + Math.sin(this._stateTime * 0.8) * 70); break
             case 'alert': if (this._threatAt) this.lookAt([this._threatAt[0], this._threatAt[1] + 1.2, this._threatAt[2]]); break
             case 'engage': this._fight(delta); break
-            case 'close in': case 'back off': this._faceTarget(); this._shoot(delta); break
+            case 'close in': case 'back off': case 'car engage': this._faceTarget(); this._shoot(delta); break
             case 'in cover':
                 this.crouch(true)
                 this._faceThreat()
@@ -488,6 +494,6 @@ export default class SandboxEnemyNode extends SandboxNpcNode {
 }
 
 /** The brain's states, grouped: fighting (aiming), in cover, and going about its patrol. */
-const FIGHTING = new Set(['engage', 'close in', 'back off', 'peek', 'alert'])
+const FIGHTING = new Set(['engage', 'close in', 'back off', 'peek', 'alert', 'car engage'])
 const COVERED = new Set(['cover', 'in cover', 'peek'])
 const CALM = new Set(['patrol', 'look', 'return'])

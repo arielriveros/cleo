@@ -101,6 +101,24 @@
           "kind": "builtin",
           "name": "threatDistance"
         }
+      },
+      {
+        "name": "Knock",
+        "type": "trigger",
+        "default": false,
+        "source": {
+          "kind": "reaction",
+          "name": "knockCount"
+        }
+      },
+      {
+        "name": "Hurt For",
+        "type": "number",
+        "default": 0,
+        "source": {
+          "kind": "layerTime",
+          "layer": "Health"
+        }
       }
     ],
     "states": [
@@ -412,6 +430,62 @@
             }
           ]
         }
+      }
+    ],
+    "layers": [
+      {
+        "name": "Health",
+        "states": [
+          {
+            "name": "Fine",
+            "goal": "idle",
+            "isEntry": true,
+            "x": 40,
+            "y": 40
+          },
+          {
+            "name": "Hurt",
+            "goal": "idle",
+            "outputs": [
+              {
+                "field": "hurt",
+                "value": true
+              }
+            ],
+            "x": 300,
+            "y": 40
+          }
+        ],
+        "transitions": [
+          {
+            "from": "*",
+            "to": "Hurt",
+            "restart": true,
+            "condition": {
+              "op": "and",
+              "children": [
+                {
+                  "param": "Knock",
+                  "op": "trigger"
+                }
+              ]
+            }
+          },
+          {
+            "from": "Hurt",
+            "to": "Fine",
+            "condition": {
+              "op": "and",
+              "children": [
+                {
+                  "param": "Hurt For",
+                  "op": "gt",
+                  "value": 12
+                }
+              ]
+            }
+          }
+        ]
       }
     ]
   },

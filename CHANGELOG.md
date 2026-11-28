@@ -96,6 +96,46 @@ in a hand. Turn-in-place picks the right clip when the camera swings behind.
   - Foot placement, foot locking and the support hand's IK fade out while a reaction has the body and back in after,
     starting over (`Animator.ikSuppressed`, the new `handIkSuppressed`).
   - The time limit on a reaction counts from that reaction's start.
+- **Reactions that look alive, hurt, and step: what makes a reaction convincing, from shipped games and the
+  literature (the Reactive ragdolls reference), done.**
+  - Off its feet a body falls alive: it holds a reference pose (the pose it fell in, bracing; or the state's clip)
+    instead of the body's current pose, so the bend, flex and turn of a behaviour never run away, and it relaxes only
+    once it has settled. Thrown from a car it tucks (knees, hips, chin, arms in), reaches for the ground before it
+    lands, and rolls with it; a backward fall reaches back.
+  - Lying on its front or side a body rolls onto its back, then gets up on its face-up clip, joined where the body in
+    the clip starts to rise (`clipRiseStart`, or the Get Up state's **From first frame**), not seconds of lying still.
+    Face up, down or on its side by its belly (`reactions.lying`), with hysteresis.
+  - A shove steps it: a balancer places short quick steps by the capture point on legs of its own (0.4 m at most,
+    a quarter second each, tiring after two) while the capsule follows the body and the character keeps its control;
+    too much for its steps, it falls. Each stagger and fall counts (`reactions.knockCount`).
+  - A hit reacts by where it lands: the head snaps, the chest turns and bows in pain, the gut folds, a hit from
+    behind arches the back, an arm goes loose and turns the trunk, a leg gives and it steps on it. Its impulse is
+    spread along the spine over a tenth of a second, and a hit on a leg stays on the leg. Wounds keep their zone and
+    how bad they were; the pain (`reactions.pain`) leans it over them for a while.
+  - No more wiggling arms: a let-go is latched, the animation's spin is kept, a busy arm is drawn closer to its
+    animation, and reaching reads the body where the physics worker will have it.
+  - The reactions are built-in parameters of animator graphs and AI brains alike (`REACTION_VALUES`), with
+    KnockCount, Lying and Pain new.
+- **AI brains run layers beside their states, and set the pawn's fields.**
+  - Layers: machines of their own on the same brain, each in a state of its own, reading the same parameters; only
+    the base layer steers. A state's **Outputs** write fields of the pawn while it is active (the last layer wins;
+    the field goes back when no state writes it).
+  - New parameter sources: a reaction value (a counter such as KnockCount fires a trigger once each time it rises), a
+    layer's time in its state, and whether a layer is in a given state. A transition can **Restart** the state it
+    enters.
+  - A **Strafe** goal sidesteps round the target facing it, keeping a distance, on the side away from where the
+    target is going (or left, or right). New senses: the target's speed, approach and lateral speed, and whether it
+    is in a vehicle; a character seated in a car is seen through the car, at the car's speed.
+  - Player contract 56.
+- **The Sandbox's NPCs hurt, change weapons, and fight the car.**
+  - Staggered or knocked down, an NPC is hurt for twelve seconds (a **Health** layer on both brains): its left hand
+    holds its chest and its trunk bows over it on two animator layers above every other (**Pain Hold**, **Pain
+    Arch**, made in Cleo Creator), weighted by the character's eased `painWeight`.
+  - An enemy's **Weapon** layer picks its gun: the rifle, the shotgun with the player within 3 m, and the pistol while
+    it is hurt, fired one-handed.
+  - The player driving, in sight, an enemy strafes off the car's path, away from where it is going, keeping 9 m and
+    firing at the cabin (**car engage**).
+  - Every body gets up on Mixamo's *Stand Up*, rolling onto its back first when it lies on its front.
 - **Fix: saving a base template and reloading the scene drew the player as a ball and the NPCs in the base's
   colour.** A model inside a placed template copy, rebuilt from its changed model asset (as a Reload rebuilds every
   one), took the asset's own material instead of the one its template gave it (a variant's colour), and the rebuilt

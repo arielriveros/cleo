@@ -1487,6 +1487,277 @@
                     }
                   }
                 ],
+                "ragdollProfile": {
+                  "version": 1,
+                  "totalMass": 70,
+                  "parts": [
+                    {
+                      "name": "Pelvis",
+                      "bone": "mixamorig1:Hips",
+                      "tipBone": "mixamorig1:Spine1",
+                      "shape": "capsule",
+                      "radius": 0.12118379633865561,
+                      "length": 0.21208817103673833,
+                      "depth": 0.17773623463002824,
+                      "massFraction": 0.142,
+                      "joint": {
+                        "type": "cone",
+                        "swing": 0,
+                        "twist": 0,
+                        "hingeMin": 0,
+                        "hingeMax": 0
+                      }
+                    },
+                    {
+                      "name": "Spine",
+                      "bone": "mixamorig1:Spine1",
+                      "tipBone": "mixamorig1:Spine2",
+                      "shape": "capsule",
+                      "radius": 0.09694703707092449,
+                      "massFraction": 0.139,
+                      "joint": {
+                        "type": "cone",
+                        "swing": 15,
+                        "twist": 16,
+                        "hingeMin": 0,
+                        "hingeMax": 0,
+                        "tilt": [0, 0]
+                      }
+                    },
+                    {
+                      "name": "Chest",
+                      "bone": "mixamorig1:Spine2",
+                      "tipBone": "mixamorig1:Neck",
+                      "shape": "capsule",
+                      "radius": 0.10837495896857169,
+                      "length": 0.19103699504396557,
+                      "depth": 0.2055387152852222,
+                      "massFraction": 0.216,
+                      "joint": {
+                        "type": "cone",
+                        "swing": 19,
+                        "twist": 17,
+                        "hingeMin": 0,
+                        "hingeMax": 0
+                      }
+                    },
+                    {
+                      "name": "Head",
+                      "bone": "mixamorig1:Neck",
+                      "shape": "capsule",
+                      "radius": 0.08755862272848422,
+                      "length": 0.2451532767239011,
+                      "massFraction": 0.081,
+                      "joint": {
+                        "type": "cone",
+                        "swing": 26,
+                        "twist": 26,
+                        "hingeMin": 0,
+                        "hingeMax": 0
+                      }
+                    },
+                    {
+                      "name": "Upper Arm L",
+                      "bone": "mixamorig1:LeftArm",
+                      "tipBone": "mixamorig1:LeftForeArm",
+                      "shape": "capsule",
+                      "radius": 0.04345334082932909,
+                      "massFraction": 0.028,
+                      "joint": {
+                        "type": "cone",
+                        "swing": 80,
+                        "twist": 50,
+                        "hingeMin": 0,
+                        "hingeMax": 0,
+                        "tilt": [20, 40.79024517146466]
+                      }
+                    },
+                    {
+                      "name": "Forearm L",
+                      "bone": "mixamorig1:LeftForeArm",
+                      "tipBone": "mixamorig1:LeftHand",
+                      "shape": "capsule",
+                      "radius": 0.032765732796483746,
+                      "massFraction": 0.016,
+                      "joint": {
+                        "type": "hinge",
+                        "swing": 0,
+                        "twist": 0,
+                        "hingeMin": 0,
+                        "hingeMax": 140,
+                        "bendDir": [0.004664249252527952, 0, 0.9999891519546509]
+                      }
+                    },
+                    {
+                      "name": "Hand L",
+                      "bone": "mixamorig1:LeftHand",
+                      "tipBone": "mixamorig1:LeftHandMiddle1",
+                      "shape": "capsule",
+                      "radius": 0.04461829582974682,
+                      "length": 0.19830353702109701,
+                      "depth": 0.043378898723364964,
+                      "massFraction": 0.006,
+                      "joint": {
+                        "type": "cone",
+                        "swing": 55,
+                        "twist": 90,
+                        "hingeMin": 0,
+                        "hingeMax": 0
+                      }
+                    },
+                    {
+                      "name": "Thigh L",
+                      "bone": "mixamorig1:LeftUpLeg",
+                      "tipBone": "mixamorig1:LeftLeg",
+                      "shape": "capsule",
+                      "radius": 0.07274271843425541,
+                      "massFraction": 0.1,
+                      "joint": {
+                        "type": "cone",
+                        "swing": 31,
+                        "twist": 30,
+                        "hingeMin": 0,
+                        "hingeMax": 0,
+                        "tilt": [25, 0]
+                      }
+                    },
+                    {
+                      "name": "Shin L",
+                      "bone": "mixamorig1:LeftLeg",
+                      "tipBone": "mixamorig1:LeftFoot",
+                      "shape": "capsule",
+                      "radius": 0.050608503908616195,
+                      "massFraction": 0.0465,
+                      "joint": {
+                        "type": "hinge",
+                        "swing": 0,
+                        "twist": 0,
+                        "hingeMin": 0,
+                        "hingeMax": 140,
+                        "bendDir": [-0.004664249252527952, 0, -0.9999891519546509]
+                      }
+                    },
+                    {
+                      "name": "Foot L",
+                      "bone": "mixamorig1:LeftFoot",
+                      "tipBone": "mixamorig1:LeftToeBase",
+                      "shape": "capsule",
+                      "radius": 0.035601022484969956,
+                      "length": 0.21846081979413384,
+                      "massFraction": 0.0145,
+                      "joint": {
+                        "type": "cone",
+                        "swing": 30,
+                        "twist": 90,
+                        "hingeMin": 0,
+                        "hingeMax": 0
+                      }
+                    },
+                    {
+                      "name": "Upper Arm R",
+                      "bone": "mixamorig1:RightArm",
+                      "tipBone": "mixamorig1:RightForeArm",
+                      "shape": "capsule",
+                      "radius": 0.0434708132890802,
+                      "massFraction": 0.028,
+                      "joint": {
+                        "type": "cone",
+                        "swing": 80,
+                        "twist": 50,
+                        "hingeMin": 0,
+                        "hingeMax": 0,
+                        "tilt": [20, 40.791940642721976]
+                      }
+                    },
+                    {
+                      "name": "Forearm R",
+                      "bone": "mixamorig1:RightForeArm",
+                      "tipBone": "mixamorig1:RightHand",
+                      "shape": "capsule",
+                      "radius": 0.032762393213374104,
+                      "massFraction": 0.016,
+                      "joint": {
+                        "type": "hinge",
+                        "swing": 0,
+                        "twist": 0,
+                        "hingeMin": 0,
+                        "hingeMax": 140,
+                        "bendDir": [0.004664249252527952, 0, 0.9999891519546509]
+                      }
+                    },
+                    {
+                      "name": "Hand R",
+                      "bone": "mixamorig1:RightHand",
+                      "tipBone": "mixamorig1:RightHandMiddle1",
+                      "shape": "capsule",
+                      "radius": 0.043967862483903226,
+                      "length": 0.19541272215068103,
+                      "depth": 0.04274653297046147,
+                      "massFraction": 0.006,
+                      "joint": {
+                        "type": "cone",
+                        "swing": 55,
+                        "twist": 90,
+                        "hingeMin": 0,
+                        "hingeMax": 0
+                      }
+                    },
+                    {
+                      "name": "Thigh R",
+                      "bone": "mixamorig1:RightUpLeg",
+                      "tipBone": "mixamorig1:RightLeg",
+                      "shape": "capsule",
+                      "radius": 0.07271904294532228,
+                      "massFraction": 0.1,
+                      "joint": {
+                        "type": "cone",
+                        "swing": 30,
+                        "twist": 30,
+                        "hingeMin": 0,
+                        "hingeMax": 0,
+                        "tilt": [25, 0]
+                      }
+                    },
+                    {
+                      "name": "Shin R",
+                      "bone": "mixamorig1:RightLeg",
+                      "tipBone": "mixamorig1:RightFoot",
+                      "shape": "capsule",
+                      "radius": 0.050615618862983505,
+                      "massFraction": 0.0465,
+                      "joint": {
+                        "type": "hinge",
+                        "swing": 0,
+                        "twist": 0,
+                        "hingeMin": 0,
+                        "hingeMax": 140,
+                        "bendDir": [-0.004664249252527952, 0, -0.9999891519546509]
+                      }
+                    },
+                    {
+                      "name": "Foot R",
+                      "bone": "mixamorig1:RightFoot",
+                      "tipBone": "mixamorig1:RightToeBase",
+                      "shape": "capsule",
+                      "radius": 0.035773057048072654,
+                      "length": 0.21951648643135493,
+                      "massFraction": 0.0145,
+                      "joint": {
+                        "type": "cone",
+                        "swing": 30,
+                        "twist": 90,
+                        "hingeMin": 0,
+                        "hingeMax": 0
+                      }
+                    }
+                  ],
+                  "selfCollision": true,
+                  "linearDamping": 0.02,
+                  "angularDamping": 0.2,
+                  "solverIterations": 20,
+                  "friction": 0.8,
+                  "restitution": 0.05
+                },
                 "reactionSets": {
                   "version": 1,
                   "defaultSet": "default",
@@ -1679,13 +1950,12 @@
                         "getUp": {
                           "enabled": true,
                           "params": {
-                            "delay": 1,
+                            "delay": 0.6,
                             "strength": 1.5,
                             "regainTime": 0.8,
                             "blendTime": 0.25
                           },
                           "clips": {
-                            "faceDown": "Getting Up",
                             "faceUp": "Stand Up"
                           }
                         }
@@ -2238,6 +2508,17 @@
                   "name": "Trip",
                   "type": "trigger",
                   "default": false
+                },
+                {
+                  "name": "Pain",
+                  "type": "variable",
+                  "default": 0,
+                  "variable": {
+                    "nodeRef": "parent",
+                    "varName": "painWeight",
+                    "varType": "number",
+                    "source": "variable"
+                  }
                 }
               ],
               "states": [
@@ -3772,8 +4053,7 @@
                   "loop": false,
                   "speed": 1,
                   "getUp": {
-                    "faceUp": "Stand Up",
-                    "faceDown": "Getting Up"
+                    "faceUp": "Stand Up"
                   },
                   "x": 306,
                   "y": 0
@@ -13118,6 +13398,70 @@
                     }
                   ],
                   "transitions": []
+                },
+                {
+                  "name": "Pain Arch",
+                  "blend": "additive",
+                  "weightParam": "Pain",
+                  "maskId": "a7968f10f9bd4d38aeeb3fd0750203f9",
+                  "mask": {
+                    "mixamorig1:Spine": 1,
+                    "mixamorig1:Spine1": 1,
+                    "mixamorig1:Spine2": 1,
+                    "mixamorig1:Neck": 1,
+                    "mixamorig1:Head": 1
+                  },
+                  "states": [
+                    {
+                      "name": "Pain",
+                      "clipName": "Pain Arch",
+                      "loop": false,
+                      "speed": 1,
+                      "isEntry": true,
+                      "x": 40,
+                      "y": 40
+                    }
+                  ],
+                  "transitions": []
+                },
+                {
+                  "name": "Pain Hold",
+                  "blend": "override",
+                  "weightParam": "Pain",
+                  "maskId": "6085f0c3ac584018a4a2b8ceb3f8550e",
+                  "mask": {
+                    "mixamorig1:LeftShoulder": 1,
+                    "mixamorig1:LeftArm": 1,
+                    "mixamorig1:LeftForeArm": 1,
+                    "mixamorig1:LeftHand": 1,
+                    "mixamorig1:LeftHandThumb1": 1,
+                    "mixamorig1:LeftHandThumb2": 1,
+                    "mixamorig1:LeftHandThumb3": 1,
+                    "mixamorig1:LeftHandIndex1": 1,
+                    "mixamorig1:LeftHandIndex2": 1,
+                    "mixamorig1:LeftHandIndex3": 1,
+                    "mixamorig1:LeftHandMiddle1": 1,
+                    "mixamorig1:LeftHandMiddle2": 1,
+                    "mixamorig1:LeftHandMiddle3": 1,
+                    "mixamorig1:LeftHandRing1": 1,
+                    "mixamorig1:LeftHandRing2": 1,
+                    "mixamorig1:LeftHandRing3": 1,
+                    "mixamorig1:LeftHandPinky1": 1,
+                    "mixamorig1:LeftHandPinky2": 1,
+                    "mixamorig1:LeftHandPinky3": 1
+                  },
+                  "states": [
+                    {
+                      "name": "Pain",
+                      "clipName": "Pain Hold",
+                      "loop": true,
+                      "speed": 1,
+                      "isEntry": true,
+                      "x": 40,
+                      "y": 40
+                    }
+                  ],
+                  "transitions": []
                 }
               ],
               "reroutes": {
@@ -14103,6 +14447,24 @@
                     "kind": "builtin",
                     "name": "threatDistance"
                   }
+                },
+                {
+                  "name": "Knock",
+                  "type": "trigger",
+                  "default": false,
+                  "source": {
+                    "kind": "reaction",
+                    "name": "knockCount"
+                  }
+                },
+                {
+                  "name": "Hurt For",
+                  "type": "number",
+                  "default": 0,
+                  "source": {
+                    "kind": "layerTime",
+                    "layer": "Health"
+                  }
                 }
               ],
               "states": [
@@ -14407,6 +14769,62 @@
                       }
                     ]
                   }
+                }
+              ],
+              "layers": [
+                {
+                  "name": "Health",
+                  "states": [
+                    {
+                      "name": "Fine",
+                      "goal": "idle",
+                      "isEntry": true,
+                      "x": 40,
+                      "y": 40
+                    },
+                    {
+                      "name": "Hurt",
+                      "goal": "idle",
+                      "x": 300,
+                      "y": 40,
+                      "outputs": [
+                        {
+                          "field": "hurt",
+                          "value": true
+                        }
+                      ]
+                    }
+                  ],
+                  "transitions": [
+                    {
+                      "from": "*",
+                      "to": "Hurt",
+                      "condition": {
+                        "op": "and",
+                        "children": [
+                          {
+                            "param": "Knock",
+                            "op": "trigger"
+                          }
+                        ]
+                      },
+                      "restart": true
+                    },
+                    {
+                      "from": "Hurt",
+                      "to": "Fine",
+                      "condition": {
+                        "op": "and",
+                        "children": [
+                          {
+                            "param": "Hurt For",
+                            "op": "gt",
+                            "value": 12
+                          }
+                        ]
+                      }
+                    }
+                  ]
                 }
               ]
             },
@@ -14768,6 +15186,24 @@
                     "kind": "builtin",
                     "name": "threatDistance"
                   }
+                },
+                {
+                  "name": "Knock",
+                  "type": "trigger",
+                  "default": false,
+                  "source": {
+                    "kind": "reaction",
+                    "name": "knockCount"
+                  }
+                },
+                {
+                  "name": "Hurt For",
+                  "type": "number",
+                  "default": 0,
+                  "source": {
+                    "kind": "layerTime",
+                    "layer": "Health"
+                  }
                 }
               ],
               "states": [
@@ -15072,6 +15508,62 @@
                       }
                     ]
                   }
+                }
+              ],
+              "layers": [
+                {
+                  "name": "Health",
+                  "states": [
+                    {
+                      "name": "Fine",
+                      "goal": "idle",
+                      "isEntry": true,
+                      "x": 40,
+                      "y": 40
+                    },
+                    {
+                      "name": "Hurt",
+                      "goal": "idle",
+                      "x": 300,
+                      "y": 40,
+                      "outputs": [
+                        {
+                          "field": "hurt",
+                          "value": true
+                        }
+                      ]
+                    }
+                  ],
+                  "transitions": [
+                    {
+                      "from": "*",
+                      "to": "Hurt",
+                      "condition": {
+                        "op": "and",
+                        "children": [
+                          {
+                            "param": "Knock",
+                            "op": "trigger"
+                          }
+                        ]
+                      },
+                      "restart": true
+                    },
+                    {
+                      "from": "Hurt",
+                      "to": "Fine",
+                      "condition": {
+                        "op": "and",
+                        "children": [
+                          {
+                            "param": "Hurt For",
+                            "op": "gt",
+                            "value": 12
+                          }
+                        ]
+                      }
+                    }
+                  ]
                 }
               ]
             },

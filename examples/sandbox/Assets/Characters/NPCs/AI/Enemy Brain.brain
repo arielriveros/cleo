@@ -128,6 +128,43 @@
           "kind": "builtin",
           "name": "peeksDone"
         }
+      },
+      {
+        "name": "Knock",
+        "type": "trigger",
+        "default": false,
+        "source": {
+          "kind": "reaction",
+          "name": "knockCount"
+        }
+      },
+      {
+        "name": "Hurt For",
+        "type": "number",
+        "default": 0,
+        "source": {
+          "kind": "layerTime",
+          "layer": "Health"
+        }
+      },
+      {
+        "name": "Is Hurt",
+        "type": "boolean",
+        "default": false,
+        "source": {
+          "kind": "layerState",
+          "layer": "Health",
+          "state": "Hurt"
+        }
+      },
+      {
+        "name": "In Vehicle",
+        "type": "boolean",
+        "default": false,
+        "source": {
+          "kind": "sense",
+          "name": "targetInVehicle"
+        }
       }
     ],
     "states": [
@@ -228,6 +265,14 @@
         "speedScale": 1,
         "x": 920,
         "y": 160
+      },
+      {
+        "name": "car engage",
+        "goal": "strafe",
+        "targetKey": "target",
+        "strafeDistance": 9,
+        "x": 520,
+        "y": 380
       }
     ],
     "transitions": [
@@ -240,6 +285,237 @@
             {
               "param": "Knocked",
               "op": "true"
+            }
+          ]
+        }
+      },
+      {
+        "from": "patrol",
+        "to": "car engage",
+        "condition": {
+          "op": "and",
+          "children": [
+            {
+              "param": "In Sight",
+              "op": "true"
+            },
+            {
+              "param": "In Vehicle",
+              "op": "true"
+            }
+          ]
+        }
+      },
+      {
+        "from": "look",
+        "to": "car engage",
+        "condition": {
+          "op": "and",
+          "children": [
+            {
+              "param": "In Sight",
+              "op": "true"
+            },
+            {
+              "param": "In Vehicle",
+              "op": "true"
+            }
+          ]
+        }
+      },
+      {
+        "from": "alert",
+        "to": "car engage",
+        "condition": {
+          "op": "and",
+          "children": [
+            {
+              "param": "In Sight",
+              "op": "true"
+            },
+            {
+              "param": "In Vehicle",
+              "op": "true"
+            }
+          ]
+        }
+      },
+      {
+        "from": "engage",
+        "to": "car engage",
+        "condition": {
+          "op": "and",
+          "children": [
+            {
+              "param": "In Sight",
+              "op": "true"
+            },
+            {
+              "param": "In Vehicle",
+              "op": "true"
+            }
+          ]
+        }
+      },
+      {
+        "from": "close in",
+        "to": "car engage",
+        "condition": {
+          "op": "and",
+          "children": [
+            {
+              "param": "In Sight",
+              "op": "true"
+            },
+            {
+              "param": "In Vehicle",
+              "op": "true"
+            }
+          ]
+        }
+      },
+      {
+        "from": "back off",
+        "to": "car engage",
+        "condition": {
+          "op": "and",
+          "children": [
+            {
+              "param": "In Sight",
+              "op": "true"
+            },
+            {
+              "param": "In Vehicle",
+              "op": "true"
+            }
+          ]
+        }
+      },
+      {
+        "from": "search",
+        "to": "car engage",
+        "condition": {
+          "op": "and",
+          "children": [
+            {
+              "param": "In Sight",
+              "op": "true"
+            },
+            {
+              "param": "In Vehicle",
+              "op": "true"
+            }
+          ]
+        }
+      },
+      {
+        "from": "scan",
+        "to": "car engage",
+        "condition": {
+          "op": "and",
+          "children": [
+            {
+              "param": "In Sight",
+              "op": "true"
+            },
+            {
+              "param": "In Vehicle",
+              "op": "true"
+            }
+          ]
+        }
+      },
+      {
+        "from": "return",
+        "to": "car engage",
+        "condition": {
+          "op": "and",
+          "children": [
+            {
+              "param": "In Sight",
+              "op": "true"
+            },
+            {
+              "param": "In Vehicle",
+              "op": "true"
+            }
+          ]
+        }
+      },
+      {
+        "from": "peek",
+        "to": "car engage",
+        "condition": {
+          "op": "and",
+          "children": [
+            {
+              "param": "In Sight",
+              "op": "true"
+            },
+            {
+              "param": "In Vehicle",
+              "op": "true"
+            }
+          ]
+        }
+      },
+      {
+        "from": "in cover",
+        "to": "car engage",
+        "condition": {
+          "op": "and",
+          "children": [
+            {
+              "param": "In Sight",
+              "op": "true"
+            },
+            {
+              "param": "In Vehicle",
+              "op": "true"
+            }
+          ]
+        }
+      },
+      {
+        "from": "cover",
+        "to": "car engage",
+        "condition": {
+          "op": "and",
+          "children": [
+            {
+              "param": "In Sight",
+              "op": "true"
+            },
+            {
+              "param": "In Vehicle",
+              "op": "true"
+            }
+          ]
+        }
+      },
+      {
+        "from": "car engage",
+        "to": "engage",
+        "condition": {
+          "op": "and",
+          "children": [
+            {
+              "param": "In Vehicle",
+              "op": "false"
+            }
+          ]
+        }
+      },
+      {
+        "from": "car engage",
+        "to": "search",
+        "condition": {
+          "op": "and",
+          "children": [
+            {
+              "param": "Since Seen",
+              "op": "gt",
+              "value": 2
             }
           ]
         }
@@ -685,6 +961,168 @@
             }
           ]
         }
+      }
+    ],
+    "layers": [
+      {
+        "name": "Health",
+        "states": [
+          {
+            "name": "Fine",
+            "goal": "idle",
+            "isEntry": true,
+            "x": 40,
+            "y": 40
+          },
+          {
+            "name": "Hurt",
+            "goal": "idle",
+            "outputs": [
+              {
+                "field": "hurt",
+                "value": true
+              }
+            ],
+            "x": 300,
+            "y": 40
+          }
+        ],
+        "transitions": [
+          {
+            "from": "*",
+            "to": "Hurt",
+            "restart": true,
+            "condition": {
+              "op": "and",
+              "children": [
+                {
+                  "param": "Knock",
+                  "op": "trigger"
+                }
+              ]
+            }
+          },
+          {
+            "from": "Hurt",
+            "to": "Fine",
+            "condition": {
+              "op": "and",
+              "children": [
+                {
+                  "param": "Hurt For",
+                  "op": "gt",
+                  "value": 12
+                }
+              ]
+            }
+          }
+        ]
+      },
+      {
+        "name": "Weapon",
+        "states": [
+          {
+            "name": "Rifle",
+            "goal": "idle",
+            "isEntry": true,
+            "outputs": [
+              {
+                "field": "preferredWeapon",
+                "value": 2
+              }
+            ],
+            "x": 40,
+            "y": 40
+          },
+          {
+            "name": "Shotgun",
+            "goal": "idle",
+            "outputs": [
+              {
+                "field": "preferredWeapon",
+                "value": 3
+              }
+            ],
+            "x": 300,
+            "y": 40
+          },
+          {
+            "name": "Pistol",
+            "goal": "idle",
+            "outputs": [
+              {
+                "field": "preferredWeapon",
+                "value": 1
+              }
+            ],
+            "x": 170,
+            "y": 200
+          }
+        ],
+        "transitions": [
+          {
+            "from": "*",
+            "to": "Pistol",
+            "condition": {
+              "op": "and",
+              "children": [
+                {
+                  "param": "Is Hurt",
+                  "op": "true"
+                }
+              ]
+            }
+          },
+          {
+            "from": "Pistol",
+            "to": "Rifle",
+            "condition": {
+              "op": "and",
+              "children": [
+                {
+                  "param": "Is Hurt",
+                  "op": "false"
+                }
+              ]
+            }
+          },
+          {
+            "from": "Rifle",
+            "to": "Shotgun",
+            "condition": {
+              "op": "and",
+              "children": [
+                {
+                  "param": "Distance",
+                  "op": "lt",
+                  "value": 3
+                },
+                {
+                  "param": "Has Target",
+                  "op": "true"
+                }
+              ]
+            }
+          },
+          {
+            "from": "Shotgun",
+            "to": "Rifle",
+            "condition": {
+              "op": "or",
+              "children": [
+                {
+                  "param": "Distance",
+                  "op": "gt",
+                  "value": 4
+                },
+                {
+                  "param": "Has Target",
+                  "op": "false"
+                }
+              ]
+            }
+          }
+        ]
       }
     ]
   },

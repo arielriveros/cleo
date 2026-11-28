@@ -10,11 +10,13 @@ import { packExampleGame } from '@host/exampleGame';
 //
 //   Civilian (blue)  SandboxCivilian: waits at what there is to look at, walks off elsewhere, looks at the player
 //                    and moves on, runs from shots and cars
-//   Enemy (red)      SandboxEnemy: patrols a route in pairs with a rifle, shoots the player on sight, takes cover
-//                    when shot at
+//   Enemy (red)      SandboxEnemy: patrols a route in pairs with a rifle, shoots the player on sight (the shotgun
+//                    within 3 m, the pistol while hurt), takes cover when shot at, strafes off the path of a car
+//                    the player drives
 //
 // Both are SandboxNpc, a SandboxCharacter (the player's body, model, rig and animations) with an AI Controller for a
-// brain; they never die (a knock-down always gets up), and the player is not knocked about by gunshots at all.
+// brain; they never die (a knock-down always gets up, and a stagger or a fall hurts them for 12 s: the pain pose),
+// and the player is not knocked about by gunshots at all.
 
 const present = dataReady();
 const TICK = 30;
@@ -532,6 +534,136 @@ describe.skipIf(!present)(`the Sandbox's NPCs (${TEST_PHYSICS})`, { timeout: 300
         expect(base.join('>')).toMatch(/^[^>]+>Ragdoll>Get Up>/);
         expect(civ.reactions.state).toBe('animated');
         expect(movedRising, 'moving while it got up').toBeLessThan(0.2);
+    });
+
+    it('down on its front, it rolls onto its back and gets up on Stand Up, from where the body in the clip starts to rise', async () => {
+        const p = await play({ npcs: { 'Civilian 1': { at: [32, 0, -24], yaw: 180 } }, player: { at: AWAY } });
+        const civ = p.npc('Civilian 1');
+        const played = actionsOf(civ);
+        const a = civ.children.find((c: any) => c.nodeType === 'model' && c.animator).animator;
+        await p.run(1);
+        const { trail, note } = reactionTrail(civ);
+        // Tripped, it falls forward onto its front.
+        civ.reactions.trip();
+        let lowest = 1, lyingAtRise: number | null = null, risingFor = 0, clip: any = null;
+        await p.run(30, () => {
+            note();
+            const s = civ.reactions.state;
+            if (s === 'down') lowest = Math.min(lowest, civ.reactions.lying);
+            if (s === 'getUp') { if (lyingAtRise === null) lyingAtRise = civ.reactions.lying; risingFor += 1 / TICK; clip ??= a.currentAnimation; }
+            if (trail.includes('getUp') && s === 'animated') return true;
+        });
+        expect(lowest, 'it lay on its front').toBe(-1);
+        expect(lyingAtRise, 'on its back when it rose').toBe(1);
+        expect(trail.join('>')).toMatch(/falling.*down>getUp>recover>animated/);
+        // One get-up, on Stand Up, started past the 1.4 s it lies still at its start.
+        expect(played.map(x => x.clip)).toEqual(['Stand Up']);
+        expect(clip?.name).toBe('Stand Up');
+        const length = Math.max(...clip.samplers.map((x: any) => x.input[x.input.length - 1]));
+        expect(risingFor, `rising, of a ${length.toFixed(1)} s clip`).toBeLessThan(length - 1.2);
+    });
+
+    it('a round lands where it struck: the leg, the arm, the chest and the head each a wound of their own zone', async () => {
+        // The player near (a flinch takes a body only near the camera), its back to it.
+        const p = await play({ npcs: { 'Civilian 1': { at: [32, 0, -24], yaw: 180 } }, player: { at: [32, 0.02, -30], yaw: 180 } });
+        const civ = p.npc('Civilian 1');
+        await p.run(1);
+        const zones: string[] = [];
+        for (const part of ['Thigh L', 'Upper Arm R', 'Chest', 'Head']) {
+            const f = civ.worldForward;
+            civ.reactions.hit({ part, direction: [-f[0], 0, -f[2]], impulse: 8 });
+            await p.run(0.1);
+            // The newest on the physics clock (the reaction clock starts over with each body).
+            const latest = [...civ.reactions.wounds].sort((a: any, b: any) => b.clock - a.clock)[0];
+            zones.push(latest?.zone ?? 'none');
+            await p.run(1.6);
+        }
+        expect(zones).toEqual(['leg', 'arm', 'chest', 'head']);
+        expect(civ.reactions.alive).toBe(true);
+    });
+
+    it('staggered, an enemy is hurt twelve seconds: its left hand on its chest, the pistol in its right, then the rifle again', async () => {
+        const p = await play({ npcs: { 'Enemy Pillars 1': { at: [32, 0, -24], yaw: 180 } }, player: { at: AWAY } });
+        const en = p.npc('Enemy Pillars 1');
+        const a = en.children.find((c: any) => c.nodeType === 'model' && c.animator).animator;
+        await p.run(1);
+        expect([en.hurt, en.weapon, en.controller.behaviorLayerState('Health'), en.controller.behaviorLayerState('Weapon')]).toEqual([false, 2, 'Fine', 'Rifle']);
+        const knocks = en.reactions.knockCount;
+        const { trail, note } = reactionTrail(en);
+        // A shove past its stagger: it steps to stay up (or, past its steps, falls). Either way it is hurt.
+        const f = en.worldForward;
+        en.reactions.push([-f[0] * 1.5, 0, -f[2] * 1.5]);
+        let hurtAt = -1, pistolAt = -1, healedAt = -1, rifleAgainAt = -1, pain = 0, painParam = 0, support = 1;
+        await p.run(18, (t) => {
+            note();
+            if (en.hurt && hurtAt < 0) hurtAt = t;
+            if (en.hurt && en.weapon === 1 && pistolAt < 0) pistolAt = t;
+            if (en.hurt) { pain = Math.max(pain, en.painWeight); painParam = Math.max(painParam, Number(a.getParam('Pain'))); }
+            if (en.hurt && en.weapon === 1 && pain === 1) support = Math.min(support, en.supportHand);
+            if (hurtAt >= 0 && !en.hurt && healedAt < 0) healedAt = t;
+            if (healedAt >= 0 && en.weapon === 2 && rifleAgainAt < 0) rifleAgainAt = t;
+        });
+        expect(trail.join('>')).toMatch(/stagger/);
+        expect(en.reactions.knockCount).toBeGreaterThan(knocks);
+        // Hurt at once, the pistol drawn; the hand on the chest at full weight, off the pistol.
+        expect(hurtAt, 'hurt').toBeGreaterThanOrEqual(0);
+        expect(hurtAt).toBeLessThan(1);
+        expect(pistolAt, 'the pistol').toBeGreaterThanOrEqual(0);
+        expect(pistolAt - hurtAt).toBeLessThan(3);
+        expect([pain, painParam]).toEqual([1, 1]);
+        expect(support, 'the left hand off the pistol').toBe(0);
+        // Past ten seconds (the brain's twelve), then the rifle again and the pain eased off.
+        expect(healedAt - hurtAt, 'hurt for').toBeGreaterThan(10);
+        expect(rifleAgainAt, 'the rifle again').toBeGreaterThanOrEqual(0);
+        expect([en.hurt, en.painWeight, en.controller.behaviorLayerState('Health')]).toEqual([false, 0, 'Fine']);
+    });
+
+    it('an enemy fights the player within 3 m with the shotgun, and farther with the rifle', async () => {
+        const p = await play({ npcs: { 'Enemy Pillars 1': { at: [32, 0, -24], yaw: 180 } }, player: { at: [32, 0.02, -26.2], yaw: 0 } });
+        const en = p.npc('Enemy Pillars 1');
+        p.watch(en);
+        let shotgunAt = -1;
+        await p.run(4, (t) => { if (en.weapon === 3 && shotgunAt < 0) { shotgunAt = t; return true; } });
+        expect(shotgunAt, 'the shotgun up close').toBeGreaterThanOrEqual(0);
+        expect(en.controller.behaviorLayerState('Weapon')).toBe('Shotgun');
+        // The player 10 m off: the rifle.
+        p.player.teleport([32, 0.02, -34]);
+        let rifleAt = -1;
+        await p.run(4, (t) => { if (en.weapon === 2 && rifleAt < 0) { rifleAt = t; return true; } });
+        expect(rifleAt, 'the rifle farther').toBeGreaterThanOrEqual(0);
+        expect(en.controller.behaviorLayerState('Weapon')).toBe('Rifle');
+    });
+
+    it('the player driving past, an enemy steps off the car\'s path, the side away from where it is going, firing at it', async () => {
+        // North of the car's line (z 1.5), facing it; the car parked west of it, nose to the east (+X).
+        const p = await play({ npcs: { 'Enemy Pillars 1': { at: [30, 0, 13], yaw: 180 } }, player: { at: AWAY } });
+        const en = p.npc('Enemy Pillars 1');
+        const car = p.named('Car');
+        const zone = car.children.find((c: any) => c.name === 'Door Zone');
+        const gun = en.children.find((c: any) => c.name === 'Weapons').children.find((c: any) => c.name === 'Rifle Grip');
+        p.watch(en);
+        await p.run(0.3);
+        p.player.teleport([zone.worldPosition[0], 0.02, zone.worldPosition[2]]);
+        await p.run(0.3);
+        car._board();
+        await p.run(6, () => car._state === 'driving');
+        expect(car._state, 'the player at the wheel').toBe('driving');
+        expect(p.player.inVehicle).toBe(true);
+        let enteredX: number | null = null, westmost = Infinity, shotsAt = 0;
+        await p.run(5, () => {
+            // East at 5 m/s, the way its nose points.
+            car.velocity = [5, car.velocity[1], 0];
+            if (en.state === 'car engage') {
+                if (enteredX === null) { enteredX = en.worldPosition[0]; shotsAt = gun.shots; }
+                westmost = Math.min(westmost, en.worldPosition[0]);
+            }
+        });
+        expect(p.states.get(en)!).toContain('car engage');
+        // The car going east, it went west.
+        expect(enteredX, 'car engage').not.toBeNull();
+        expect(enteredX! - westmost, 'off its path, west').toBeGreaterThan(1);
+        expect(gun.shots - shotsAt, 'firing at the car').toBeGreaterThan(0);
+        expect(finite(en.worldPosition)).toBe(true);
     });
 
     it('flinches on its Hit Reaction layer by where a hit came from: in front, then its right', async () => {

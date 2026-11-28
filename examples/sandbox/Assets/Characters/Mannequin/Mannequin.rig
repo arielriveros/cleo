@@ -1037,7 +1037,9 @@
     "cr_motion_mwzjqvqezcpeoi",
     "cr_motion_mwzjqwtong5h1b",
     "cr_motion_mwzjqxpfx0bicd",
-    "cr_motion_mwzjqymu8cz68n"
+    "cr_motion_mwzjqymu8cz68n",
+    "cr_motion_mwztj5snmkpl7c",
+    "cr_motion_mwztj6xo0d0udq"
   ],
   "sockets": [
     {
@@ -1290,13 +1292,12 @@
           "getUp": {
             "enabled": true,
             "params": {
-              "delay": 1,
+              "delay": 0.6,
               "strength": 1.5,
               "regainTime": 0.8,
               "blendTime": 0.25
             },
             "clips": {
-              "faceDown": "Getting Up",
               "faceUp": "Stand Up"
             }
           }

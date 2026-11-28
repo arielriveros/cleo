@@ -939,6 +939,24 @@
         "hidden": true
       },
       {
+        "name": "hurt",
+        "type": {
+          "kind": "boolean"
+        },
+        "access": "public",
+        "default": false,
+        "hidden": true
+      },
+      {
+        "name": "painWeight",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 0,
+        "hidden": true
+      },
+      {
         "name": "reloading",
         "type": {
           "kind": "boolean"

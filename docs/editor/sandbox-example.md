@@ -579,12 +579,15 @@ The mannequin reacts with its whole body, with the [reactions](reactions.md) of 
 
 - **T** trips it: the player's script fires the animator's **Trip** trigger, and the graph's Ragdoll state takes its
   feet from under it; it falls forward onto its hands, lies a moment and gets up.
-- **G** shoves it back: it is carried back on its feet, its legs walking it out, and keeps its control.
+- **G** shoves it back: it steps to stay up, short quick steps on legs of its own, and keeps its control; shoved too
+  hard for its steps, it falls.
 - **Bailing out** of the car at speed (above) throws it out to tumble along the ground.
 - **A shot** that strikes a character (its capsule, or a limb of a body already reacting) is its reactions'
   (SandboxGun hands it to `physics.applyHit`), on the limb the shot meets: a sway of the upper body on whatever it is
   doing (a free hand to the wound; a hand on a weapon stays there), a stumble for a heavy round in the trunk, a
-  stagger, or a fall, by how hard it lands and how many land at once. Shoot an NPC to see it. The player is not moved by shots at all (its `reactsToShots` is false): an enemy's rounds hit it, and it plays
+  stagger, or a fall, by how hard it lands and how many land at once; and by where it lands (the head snaps, the
+  chest turns and bows in pain, the gut folds, a hit from behind arches the back, an arm goes loose and turns the
+  trunk, a leg gives and it steps on it). Shoot an NPC to see it. The player is not moved by shots at all (its `reactsToShots` is false): an enemy's rounds hit it, and it plays
   on.
 - **The car** hitting a character faster than its **Knock Speed** (2.5 m/s, closing) throws it (`struckByVehicle`,
   the reactions' `impact`): the legs are taken out first and the body pivots over the bonnet, its knees and hips
@@ -593,11 +596,13 @@ The mannequin reacts with its whole body, with the [reactions](reactions.md) of 
 On its feet (a flinch, a stumble, a stagger) a character keeps its control: it goes on walking, aiming and firing,
 its legs on their animation and its weapon in hand, while its upper body sways and a shove carries it. Off its feet
 (it falls, lies or gets up) the stick does nothing and the weapon is put away; foot placement, foot locking and the
-support hand's IK fade out while the body has it and back in after (on its feet they stay on). Nothing in the Sandbox has health: a body that falls always gets up. It gets
-up on Mixamo's *Getting Up* lying face down and *Stand Up* lying face up (the set's **Get up** clips, in
-`/Characters/Mannequin/Animation/Clips/Get Up`). The clip is turned to lie the way the body lies, and the skin blends
-from the body onto its first frame before it plays, so the body does not turn round to meet it. A hit while it gets
-up knocks it back down (or off balance, if it was nearly up).
+support hand's IK fade out while the body has it and back in after (on its feet they stay on). Nothing in the Sandbox has health: a body that falls always gets up. Off
+its feet it is alive: it braces as it falls, tucks when thrown from the car, and lies in the pose it came to rest
+in. Lying on its front or side it rolls onto its back, then gets up on Mixamo's *Stand Up* (the set's **Get up**
+clip, in `/Characters/Mannequin/Animation/Clips/Get Up`), joined where the body in it starts to rise: the clip
+lies still 1.4 s first, which the character skips. The clip is turned to lie the way the body lies, and the skin
+blends from the body onto it before it plays, so the body does not turn round to meet it. A hit while it gets up
+knocks it back down (or off balance, if it was nearly up).
 
 The course's surfaces have a friction of 0.7, so a falling body grips the ground and rolls; the props keep their own
 0.3 (a pair of surfaces takes the smaller), so they slide as before.
@@ -626,6 +631,18 @@ the chest (or the head) away from the hit at 0.08 s, overshoots a little at 0.26
 `/Creator/Motion` and are linked to the Mannequin rig (retargeted by name, through the **Creator Mannequin** rig in
 `/Characters/Mannequin/Animation/Clips/Hit`). Their documents, with the script that wrote them, are in
 `build/creator/hit-reactions` (Assets ▸ Import in the Creator opens one).
+
+### In pain
+
+An NPC staggered or knocked down is **hurt** for twelve seconds (its brain's **Health** layer, below): its left hand
+holds its chest and its trunk bows a little over it, whatever else it is doing. Two layers of the animator do it,
+above every other, weighted by **Pain** (the character's `painWeight`: its `hurt` field, which the brain sets, eased
+in and out over 0.4 s so the pose never pops). **Pain Hold** (override, over the **Pain Arm** mask: the left
+shoulder, arm, forearm and hand) plays the *Pain Hold* clip, the hand on the chest with a slow breath in it, and
+**Pain Arch** (additive, over **Pain Spine**: the spine, the neck and the head) bows the trunk over it, the head
+kept up. Hurt, an enemy carries its pistol: its left hand lets go of it for the chest (SandboxCharacter's
+`supportHand` follows `hurt`), so it fires one-handed. Both clips were made in Cleo Creator's Motion tool on its
+mannequin as the flinches above were (in `/Creator/Motion`); their documents are in `build/creator/pain`.
 
 ## The NPCs
 
@@ -672,9 +689,17 @@ A danger (a near miss after its startle, a hit, a car) sends a civilian to **fle
 | **scan** | stand, looking round | **return** after 6 s |
 | **return** | the nav mesh to its route | **patrol** |
 | **knocked** | stand | **cover** once its reactions let it go |
+| **car engage** | a strafe round the car (**Auto**: off its path), keeping 9 m | **engage** once the player is out of the car, **search** with it unseen 2 s |
 
 The player in sight sends an enemy that is going about its patrol (patrol, look, alert, search, scan, return) to
-**engage**; being hit, or nearly hit twice, sends it to **cover** from anywhere.
+**engage**, or, driving, from any of its fighting states to **car engage**; being hit, or nearly hit twice, sends it to
+**cover** from anywhere.
+
+**Layers.** Beside its states both brains run a **Health** layer: **Fine**, and **Hurt** on **Knock** (a trigger on
+the reactions' `knockCount`: each stagger and each fall from its feet), back to Fine after 12 s in Hurt (**Hurt For**:
+the layer's time; another knock starts it over). Hurt outputs `hurt` (the pain pose). The enemy's also runs a
+**Weapon** layer, whose states output its `preferredWeapon`: **Rifle** (the entry), **Shotgun** with the player within
+3 m (back past 4 m), and **Pistol** while it is hurt, whatever the distance.
 
 **The classes.** `SandboxNpc.ts` (`/Characters/NPCs/Scripts`) extends SandboxCharacter with what both kinds need:
 
@@ -686,8 +711,9 @@ The player in sight sends an enemy that is going about its patrol (patrol, look,
 - **Senses.** Sight is its AI Controller's perception (range, cone and reaction time from its **Senses**
   attributes), of the character whose `team` is the player's. A shot fired within **Hearing** (35 m) is heard, one
   whose line passes within **Near Miss** (2.5 m) nearly hit it, one that struck it hit it; a car bearing down on it
-  warns it (the car's `dodgeVehicle`) and it steps off the car's line at a sprint. Each comes to its subclass as a
-  threat.
+  warns it (the car's `dodgeVehicle`) and it steps off the car's line at a sprint, unless its brain is already
+  fighting the car (an enemy's **car engage**). Each comes to its subclass as a threat. The player at the wheel is
+  still an enemy's target (its `fightsDrivers`); a civilian's only on foot.
 - **Knock-downs.** One round is a flinch. Hits add up (**Stagger Shock**, **Knockdown Shock**, fading by half every
   **Shock Half Life**): past the first it staggers, past the second, or hit in the legs running, it falls.
 - **It never dies.** Its health is kept full, a body lying longer than **Down Seconds** is got up, and one reacting
@@ -716,6 +742,8 @@ the danger before it calms down. Once up after a fall, it runs.
   without a long way round, not taken by another enemy), crouches, reloads, and stands up to fire a burst now and
   then. After a few, or once the spot is seen, it moves.
 - **Search** where the player was last seen, then **return** to its route.
+- **The car.** The player driving, in sight (seen through the car): it steps off the car's path, the side away from
+  where the car is going, keeping 9 m, facing the cabin and firing at it.
 
 Its magazine is topped up from a reserve that never runs out. Its rounds hit the player but do not move it, and the
 player has no health.

@@ -328,8 +328,18 @@ export default class SandboxCharacterNode extends CharacterNode {
      * muzzle-down), all the way while it is not aimed, lifting as it aims.
      */
     public loweredWeight: number = 0
-    /** SupportHand: the pistol's left hand on it (the Pistol layer's hand IK), let go over a sprint. */
+    /** SupportHand: the pistol's left hand on it (the Pistol layer's hand IK), let go over a sprint, and while hurt. */
     public supportHand: number = 1
+
+    /**
+     * Hurt: an NPC's brain sets it (its Health layer's Hurt state outputs it) after a stagger or a knock-down, for a
+     * while. The animator's Pain (its pain layers: the left hand on the chest, the trunk bowed over it) reads it eased
+     * (`painWeight`), and the pistol's left hand lets go of it for the chest.
+     */
+    public hurt: boolean = false
+
+    /** Pain: `hurt` eased in and out over 0.4 s, the animator's Pain (its pain layers' weight), so the pose never pops. */
+    public painWeight: number = 0
     /** Reloading: the weapon in the hands is being reloaded (the Reload pose). */
     public reloading: boolean = false
     /** The spread of the weapon in the hands now, degrees (the crosshair's). */
@@ -767,7 +777,9 @@ export default class SandboxCharacterNode extends CharacterNode {
         this.loweredWeight = Math.max(...weights) * (1 - this._aim)
         // The pistol's left hand lets go over a sprint, as the arms go over to the sprint's (0.3 s, as their blend).
         const supportStep = delta > 0 ? delta / 0.3 : 0
-        this.supportHand = Math.max(0, Math.min(1, this.supportHand + (this.sprinting && !this.aiming ? -supportStep : supportStep)))
+        this.supportHand = Math.max(0, Math.min(1, this.supportHand + ((this.sprinting && !this.aiming) || this.hurt ? -supportStep : supportStep)))
+        const painStep = delta > 0 ? delta / 0.4 : 0
+        this.painWeight = Math.max(0, Math.min(1, this.painWeight + (this.hurt ? painStep : -painStep)))
         // Where the camera aims off the body: the aim layers' blend.
         this.aimYaw = Math.max(-90, Math.min(90, this._wrap(yaw)))
         this.aimPitch = Math.max(-60, Math.min(60, pitch))

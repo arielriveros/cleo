@@ -395,10 +395,12 @@ export default class SandboxNpcNode extends SandboxCharacterNode {
         }
         const brain = this._brain as any
         const player = this._player
-        const onFoot = !!player && !(player as any).inVehicle
-        if (brain) brain.setBlackboard('target', onFoot ? player!.id : undefined)
+        // On foot the player is its target; at the wheel too for one that fights drivers (an enemy: its brain has
+        // states for a car, and its perception sees what sits in one).
+        const target = !!player && (this.fightsDrivers || !(player as any).inVehicle)
+        if (brain) brain.setBlackboard('target', target ? player!.id : undefined)
         let sees = false
-        if (brain && onFoot) {
+        if (brain && target) {
             for (const s of brain.sightings ?? []) {
                 if (s.id !== player!.id) continue
                 sees = !!(s.visible && s.noticed)
@@ -414,6 +416,12 @@ export default class SandboxNpcNode extends SandboxCharacterNode {
         // The knocks fade.
         if (this._shock > 0 && delta > 0) this._shock *= Math.pow(0.5, delta / Math.max(0.05, this.shockHalfLife))
     }
+
+    /** Whether the player at the wheel is still its target (an enemy's is: SandboxEnemy). */
+    protected get fightsDrivers(): boolean { return false }
+
+    /** Its brain is in a state that fights a vehicle (the car's warning is no reflex then). */
+    protected get fightingVehicle(): boolean { return false }
 
     /** Seconds since the player was last in sight. */
     protected get sinceSeen(): number { return this._now - this._seenAt }
@@ -475,7 +483,8 @@ export default class SandboxNpcNode extends SandboxCharacterNode {
      * travel, away from its line, for a moment, whatever its brain is doing (a reflex, not a decision).
      */
     public dodgeVehicle(vehicle: Node, velocity: ArrayLike<number>): void {
-        if (this.reactions?.isDown || this._now < this._dodgeUntil) return
+        // Its brain is fighting the car (it steps off its path as it shoots): no reflex over it.
+        if (this.reactions?.isDown || this._now < this._dodgeUntil || this.fightingVehicle) return
         const p = vehicle.worldPosition
         this._threat('vehicle', [p[0], p[1], p[2]], vehicle)
         const speed = Math.hypot(velocity[0], velocity[2])

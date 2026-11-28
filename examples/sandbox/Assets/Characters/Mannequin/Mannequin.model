@@ -1148,13 +1148,12 @@
                 "getUp": {
                   "enabled": true,
                   "params": {
-                    "delay": 1,
+                    "delay": 0.6,
                     "strength": 1.5,
                     "regainTime": 0.8,
                     "blendTime": 0.25
                   },
                   "clips": {
-                    "faceDown": "Getting Up",
                     "faceUp": "Stand Up"
                   }
                 }
