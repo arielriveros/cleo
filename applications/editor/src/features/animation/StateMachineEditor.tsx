@@ -1213,7 +1213,7 @@ function builtinDefault(b: AnimationVariableBinding | undefined): number | boole
  */
 function CounterPicker({ value, onPick }: { value?: AnimationVariableBinding; onPick: (b: AnimationVariableBinding | undefined) => void }) {
   const counters = Object.entries(NODE_BUILTINS).filter(([, d]) => d.counter).map(([name]) => name)
-  const label: Record<string, string> = { hitCount: 'Each hit' }
+  const label: Record<string, string> = { hitCount: 'Each hit', knockCount: 'Each knock' }
   return (
     <Select className={cn(tight, 'w-[96px]')} value={value?.varName ?? ''}
       title='What fires this trigger: a script (by name), or each time a count the engine keeps rises — Each hit fires it on every hit the character takes (its reactions)'

@@ -34,7 +34,7 @@ import {
 import type { Condition, ConditionGroup, ConditionNode, ConditionOp } from '../core/conditions';
 import type { TriggerName } from '../core/scripting/fieldTypes';
 import {
-    NO_REACTION_EFFECTS, type AnimationRagdollStart, type AnimationReactionEffects, type AnimatorReactionLink,
+    NO_REACTION_EFFECTS, REACTION_VALUES, type AnimationRagdollStart, type AnimationReactionEffects, type AnimatorReactionLink,
     type GetUpClock, type ReactionEffectsNow,
 } from './reactionLink';
 export type { AnimationRagdollStart, AnimationReactionEffects, AnimatorReactionLink, GetUpClock, ReactionEffectsNow } from './reactionLink';
@@ -144,17 +144,14 @@ export const NODE_BUILTINS: Record<string, {
     groundDistance: { type: 'number',  read: n => n.groundDistance },
     slopeAngle:     { type: 'number',  read: n => n.slopeAngle },
 
-    // Reactions (physics/reactive/): what the character's body is doing, and the last hit it took.
-    ragdolled:   { type: 'boolean', reactions: r => r.ragdolled, read: n => !!reactionsOfNode(n)?.ragdolled },
-    canGetUp:    { type: 'boolean', reactions: r => r.canGetUp, read: n => !!reactionsOfNode(n)?.canGetUp },
-    faceUp:      { type: 'boolean', reactions: r => r.faceUp, read: n => !!reactionsOfNode(n)?.faceUp },
-    reacting:    { type: 'boolean', reactions: r => r.reacting, read: n => !!reactionsOfNode(n)?.reacting },
-    hasControl:  { type: 'boolean', reactions: r => r.hasControl, none: true, read: n => reactionsOfNode(n)?.hasControl ?? true },
-    staggering:  { type: 'boolean', reactions: r => r.staggering, read: n => !!reactionsOfNode(n)?.staggering },
-    hitAngle:    { type: 'number', signed: true, reactions: r => r.hitAngle, read: n => reactionsOfNode(n)?.hitAngle ?? 0 },
-    hitHeight:   { type: 'number', reactions: r => r.hitHeight, read: n => reactionsOfNode(n)?.hitHeight ?? 0 },
-    hitStrength: { type: 'number', reactions: r => r.hitStrength, read: n => reactionsOfNode(n)?.hitStrength ?? 0 },
-    hitCount:    { type: 'number', counter: true, reactions: r => r.hitCount, read: n => reactionsOfNode(n)?.hitCount ?? 0 },
+    // Reactions (physics/reactive/): what the character's body is doing, and the last hit it took. One table
+    // (REACTION_VALUES, shared with the brains' Reaction source), each read from the character's reactions.
+    ...Object.fromEntries(Object.entries(REACTION_VALUES).map(([name, v]) => [name, {
+        type: v.type, ...(v.signed ? { signed: true } : {}), ...(v.counter ? { counter: true } : {}),
+        ...(v.none !== false && v.none !== 0 ? { none: v.none } : {}),
+        reactions: (r: AnimatorReactionLink) => v.read(r),
+        read: (n: Node) => { const r = reactionsOfNode(n); return r ? v.read(r) : v.none; },
+    }])),
 };
 
 /** A node's reactions, structurally (a ModelNode's or a Character's `reactions`), or null. */

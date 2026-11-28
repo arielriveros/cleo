@@ -276,7 +276,9 @@ export { Ragdoll, RAGDOLL_DEFAULTS } from "./physics/ragdoll";
 export type { RagdollOptions, RagdollPartInfo, RagdollRegion, RagdollPartHit } from "./physics/ragdoll";
 // Reactions: reactive (powered) ragdolls, Euphoria-style (physics/reactive/).
 export { ReactionController } from "./physics/reactive/reactionController";
-export type { ReactionHit, ReactionEventInfo, ModelReactionConfig, ReactionState, ReactionWound } from "./physics/reactive/reactionController";
+export type { ReactionHit, ReactionEventInfo, ModelReactionConfig, ReactionState, ReactionWound, HitZone } from "./physics/reactive/reactionController";
+export { REACTION_VALUES } from "./animation/reactionLink";
+export type { ReactionValue } from "./animation/reactionLink";
 export {
     defaultReactionSet, parseReactionSet, parseReactionSets, pickReactionSet, reactionParamKeys,
     REACTION_PRESETS, BEHAVIOUR_SPECS, BEHAVIOUR_IDS, MUSCLE_SPECS, MUSCLE_DEFAULTS, MUSCLE_REGIONS, PIN_SPECS, THRESHOLD_SPECS,

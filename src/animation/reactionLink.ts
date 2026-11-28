@@ -30,6 +30,12 @@ export interface AnimatorReactionLink {
     readonly hitHeight: number;
     /** How hard the last hit was, 0..1 (its impulse against the set's fall threshold). */
     readonly hitStrength: number;
+    /** Times it has been knocked off balance: rises by one with each stagger and each fall from its feet. */
+    readonly knockCount: number;
+    /** Off its feet, how it lies: 1 on its back, -1 on its front, 0 on its side (0 on its feet). */
+    readonly lying: number;
+    /** How much it hurts now, 0..1: each hit's pain, rising over a fifth of a second and easing off over seconds. */
+    readonly pain: number;
     /** The rig's own get-up clips (its reaction set's): what a Get Up state naming none plays. */
     readonly getUpClips: { faceUp?: string; faceDown?: string };
     /** The graph entered a Ragdoll state: on its feet the body falls (`start`); off them it is only held. */
@@ -37,6 +43,35 @@ export interface AnimatorReactionLink {
     /** The graph entered a Get Up state: lying and ready, the body rises on it now (else when it is). */
     graphGetUp(): void;
 }
+
+/** A value of a character's reactions as a graph reads it: the animator's reaction parameters, a brain's Reaction source. */
+export interface ReactionValue {
+    type: 'number' | 'boolean';
+    /** Can go below zero. */
+    signed?: boolean;
+    /** Only ever rises (a count of events): a trigger on it fires each time it does. */
+    counter?: boolean;
+    /** What it reads where there are no reactions (a backend without them, reactions off). */
+    none: number | boolean;
+    read(r: AnimatorReactionLink): number | boolean;
+}
+
+/** Every reaction value by name: one table for the animator's built-ins and the brains' sources. */
+export const REACTION_VALUES: Readonly<Record<string, ReactionValue>> = {
+    ragdolled: { type: 'boolean', none: false, read: r => r.ragdolled },
+    canGetUp: { type: 'boolean', none: false, read: r => r.canGetUp },
+    faceUp: { type: 'boolean', none: false, read: r => r.faceUp },
+    reacting: { type: 'boolean', none: false, read: r => r.reacting },
+    hasControl: { type: 'boolean', none: true, read: r => r.hasControl },
+    staggering: { type: 'boolean', none: false, read: r => r.staggering },
+    hitAngle: { type: 'number', signed: true, none: 0, read: r => r.hitAngle },
+    hitHeight: { type: 'number', none: 0, read: r => r.hitHeight },
+    hitStrength: { type: 'number', none: 0, read: r => r.hitStrength },
+    hitCount: { type: 'number', counter: true, none: 0, read: r => r.hitCount },
+    knockCount: { type: 'number', counter: true, none: 0, read: r => r.knockCount ?? 0 },
+    lying: { type: 'number', signed: true, none: 0, read: r => r.lying ?? 0 },
+    pain: { type: 'number', none: 0, read: r => r.pain ?? 0 },
+};
 
 /**
  * A get-up's clock, as the reaction controller follows it: a Get Up state's clip on the base layer, or an action

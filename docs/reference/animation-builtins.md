@@ -51,11 +51,14 @@ names. With no reactions they read their default (`hasControl`: true).
 | `faceUp` | boolean | | Lying on its back. |
 | `reacting` | boolean | | Any reaction has the body. |
 | `hasControl` | boolean | | On its feet: flinching, staggering or untouched. |
-| `staggering` | boolean | | Shoved back on its feet. |
+| `staggering` | boolean | | Shoved back on its feet, stepping to stay up. |
 | `hitAngle` | number | ✔ | Where the last hit came from, against the facing: `0` front, `−90` right, `+90` left, `±180` behind. |
 | `hitHeight` | number | | Where up the body the last hit landed, `0`–`1`, on the skeleton at rest. |
 | `hitStrength` | number | | How hard, `0`–`1` against the reaction set's fall threshold. |
 | `hitCount` | number | | Hits taken so far. A **counter**: a Trigger parameter linked to it fires each time it rises. |
+| `knockCount` | number | | Times it has been knocked off balance: each stagger and each fall from its feet. A **counter**. |
+| `lying` | number | ✔ | Off its feet, how it lies: `1` on its back, `−1` on its front, `0` on its side (`0` on its feet). |
+| `pain` | number | | How much it hurts now, `0`–`1`: each wound's, by how bad, rising over 0.2 s and easing off over seconds. |
 
 > **Only the signed ones can go below zero.** A state's Speed parameter clamps at 0, so a blend-space
 > sample authored at a negative coordinate on an unsigned axis is simply unreachable — the probe can

@@ -171,11 +171,14 @@ const BUILTIN_HINTS: Record<string, string> = {
   faceUp: 'True while the body lies on its back (its hips and chest facing up).',
   reacting: 'True while any reaction has the body: a flinch, a stagger, a fall.',
   hasControl: 'True while the character keeps its control: on its feet, flinching or staggering. True where there are no reactions. A hit-reaction layer’s weight.',
-  staggering: 'True while it is shoved back on its feet, walking it out.',
+  staggering: 'True while it is shoved back on its feet, stepping to stay up.',
   hitAngle: 'Where the last hit came from against the way the character faces, degrees: 0 in front, −90 its right, +90 its left, ±180 behind (counter-clockwise, like planarAngle). A hit-reaction blend space’s x axis: make it wrap.',
   hitHeight: 'Where up the body the last hit landed: 0 the feet, 1 the top of the head, on the skeleton at rest (a crouch does not change what a head shot is).',
   hitStrength: 'How hard the last hit was, 0 to 1 against the reaction set’s fall threshold.',
   hitCount: 'Hits taken so far, whether the body reacted or not. A Trigger parameter set to fire on Each hit fires on every one.',
+  knockCount: 'Times it has been knocked off balance: each stagger and each fall from its feet. A Trigger parameter set to fire on Each knock fires on every one.',
+  lying: 'Off its feet, how it lies: 1 on its back, −1 on its front, 0 on its side (0 on its feet).',
+  pain: 'How much it hurts now, 0 to 1: each wound’s, by how bad it was, rising over a fifth of a second and easing off over seconds. A pain layer’s weight.',
 }
 
 /**

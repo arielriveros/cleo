@@ -238,9 +238,26 @@ what the animation does.
 | **Reach pull** | How firmly a string draws the hand onto the wound, as a share of the **Strings** (0: the muscles of the arm alone). While it reaches, the forearm and the hand pass through the rest of the body. |
 | **Look for** | How long the head turns toward the wound. |
 | **Lasts** | How long a hit reaction runs before the character is back on its animation. |
+| **Pain** | How far the spine bows over a hit to the chest or the gut, in radians, for as bad as it is: up in 0.2 s, held a second, easing off over 1.5 s. |
+| **Shock spin** | How far a hit to the chest turns it, in radians, the way the hit pushes the side it struck. |
+| **Gut fold** | How far a hit to the gut folds the body over it, in radians, for about two seconds. |
+| **Back arch** | How far a hit from behind arches the back, in radians, for 0.7 s. |
+| **Arm twist** | How far a hit to an arm turns the trunk with it, in radians; the arm goes loose a moment too. |
+| **Knee gives** | How far a hit leg's knee gives (at 0.3 s), in radians, on legs of its own: in a stagger, or off its feet. |
+| **Leg stagger** | A hit to a leg at least this share of the thresholds' **Stumble at** staggers it: the hit leg gives and it steps. |
 | **Flinch** | Pose: the body's recoil from a hit, blended in for a moment (spine, neck, arms). |
 
 A wounded arm is not used to reach: the other hand goes to it, across the body if it has to.
+
+**Where it lands decides how it reacts** (Euphoria's shot behaviours). Every hit is read as one of six zones:
+the **head** (the neck goes loose and comes back over 0.4 s, the snap is the neck's), the **chest** (it spins the
+way the hit pushed the side it struck, and the spine bows in pain), the **gut** (it folds over the wound), the
+**back** (a hit from behind arches it), an **arm** (the arm goes loose, the trunk turns with it, the other hand
+holds it) and a **leg** (the leg gives: a hard enough one staggers it, the knee bending as it steps). A hit's kick
+is shaped as a bullet's is: most of it at once where it struck, the rest along the spine over a tenth of a second;
+on its feet a hit to a leg kicks the trunk's centre, never the chest at the leg's height. How bad a wound was keeps
+it: a bad one stays longer (its hand, its pain), and of the four wounds kept the slightest goes first.
+`reactions.pain` (0 to 1) is how much it hurts now, and the `Hit` event names the part and the zone.
 
 ### Stagger
 

@@ -15,12 +15,12 @@ import type { mat4 } from 'gl-matrix';
 import { BodySensors, classifyLying, type ContactList, type Raycaster, type SensorDetail } from './bodySensors';
 import { clipRiseStart } from '../../animation/clipRiseStart';
 import { ReactionBody } from './reactionBody';
-import { BAILS, BEHAVIOURS, rollAngle, STRUCK, type ReactionBehaviour, type ReactionContext, type ReactionState, type ReactionWound } from './behaviours';
+import { BAILS, BEHAVIOURS, rollAngle, STRUCK, type HitZone, type ReactionBehaviour, type ReactionContext, type ReactionState, type ReactionWound } from './behaviours';
 import { NO_REACTION_EFFECTS, type AnimationRagdollStart, type AnimatorReactionLink, type GetUpClock, type ReactionEffectsNow } from '../../animation/reactionLink';
 import { pickReactionSet, parseReactionSets, type ReactionSet } from './reactionSet';
 import { Balancer } from './balancer';
 
-export type { ReactionState, ReactionWound } from './behaviours';
+export type { HitZone, ReactionState, ReactionWound } from './behaviours';
 
 // A character's reactions: Euphoria's reactive ragdoll for one skinned model. It owns a POWERED ragdoll while
 // a reaction runs (physics/ragdoll.ts — the animation keeps playing underneath as the muscles' target) and
@@ -67,6 +67,8 @@ export interface ReactionEventInfo {
     partName?: string;
     impulse?: number;
     point?: [number, number, number];
+    /** Hit: where on the body it landed. */
+    zone?: HitZone;
     fallHeight?: number;
     impactSpeed?: number;
     faceUp?: boolean;
@@ -265,6 +267,20 @@ export class ReactionController implements AnimatorReactionLink {
     public get balance(): Balancer | null { return this._balancer; }
     /** Times it has been knocked off balance so far: each stagger and each fall from its feet. */
     public get knockCount(): number { return this._knockCount; }
+    /**
+     * How much it hurts now, 0..1 (Euphoria's conscious pain): each wound's, by how hard it was against the fall
+     * threshold, rising over 0.2 s, held a second, easing off over 1.5 s; a knock off balance hurts too.
+     */
+    public get pain(): number {
+        let p = 0;
+        const now = this._physics.simulatedTime;
+        for (const w of this._wounds) {
+            const age = now - w.clock, sev = w.severity;
+            const rise = Math.min(1, Math.max(0, age / 0.2));
+            p += sev * rise * (age < 1.2 ? 1 : Math.exp(-(age - 1.2) / 1.5));
+        }
+        return Math.min(1, p);
+    }
     /** Hits taken so far (each a shot, a blow, a car's), whether the body reacted or not. */
     public get hitCount(): number { return this._lastHit.count; }
     /** The last hit's side: where it came from against the way the character faces, degrees (front 0, its left +90). */
@@ -385,8 +401,11 @@ export class ReactionController implements AnimatorReactionLink {
         const r = this._ensure(falls ? 'fall' : 'flinch');
         // Rocked back by a hard hit, a burst adding up, or a heavy round in the trunk: a stagger, kept on its feet.
         const region = this._regionOf(h.part, h.point);
+        const legHit = region === 'legs' || region === 'feet';
         const staggers = full && onFeet && stepping && !falls && fx.shove > 0 && (impulse >= T.staggerImpulse || recent >= T.staggerImpulse
-            || ((region === 'pelvis' || region === 'spine') && T.stumbleImpulse > 0 && impulse >= T.stumbleImpulse));
+            || ((region === 'pelvis' || region === 'spine') && T.stumbleImpulse > 0 && impulse >= T.stumbleImpulse)
+            // A leg hit gives the leg: it steps on it.
+            || (legHit && T.stumbleImpulse > 0 && impulse >= T.stumbleImpulse * this.set.behaviours.hitReact.params.legStagger));
         if (!r) {
             if (!this.ragdoll && this.node.animator && this._skin) {
                 const point = h.point ? [h.point[0], h.point[1], h.point[2]] as [number, number, number] : [0, 0, 0] as [number, number, number];
@@ -399,25 +418,36 @@ export class ReactionController implements AnimatorReactionLink {
         // again, unless its state takes flinches only).
         if (falls || (this._state === 'getUp' && full)) this._go('falling');
         const kept = onFeet && this._state !== 'falling';
-        let part = this._resolvePart(h.part, h.point);
+        const part = this._resolvePart(h.part, h.point);
         const p = r.parts[part];
         const point = h.point ? [h.point[0], h.point[1], h.point[2]] : [p.body.position.x, p.body.position.y, p.body.position.z];
         if ((kept && this._physicsCanStand()) || (!full && this._state === 'getUp')) {
-            // On its feet the struck part takes a kick, no more: what is left of the hit is the shove's. A part that is
-            // the animation's (a leg, the hips) passes it to the trunk.
-            if (LOWER(p.region)) part = this._body!.chest;
-            const q = r.parts[part], P = this.set.behaviours.hitReact.params;
+            // On its feet the struck part takes a kick, no more: what is left of the hit is the shove's. Shaped as
+            // Euphoria shapes a bullet: most of it at once where it struck, the rest along the spine over 0.1 s. A part
+            // that is the animation's (a leg, the hips) passes it to the trunk's centre: at the leg's point it would
+            // tip the chest toward the shooter.
+            const lower = LOWER(p.region) && !!this._body?.kinematic[part];
+            const kickPart = lower ? this._body!.chest : part;
+            const q = r.parts[kickPart], P = this.set.behaviours.hitReact.params;
             const kick = Math.min(impulse, P.maxKick, MAX_KICK_SPEED * q.mass);
-            r.applyImpulse([dir[0] * kick, dir[1] * kick, dir[2] * kick], point, part);
+            const at = lower ? [q.body.position.x, q.body.position.y, q.body.position.z] : point;
+            r.applyImpulse([dir[0] * kick * 0.6, dir[1] * kick * 0.6, dir[2] * kick * 0.6], at, kickPart);
+            this._spread(dir, kick * 0.4);
         } else r.applyImpulse([dir[0] * impulse, dir[1] * impulse, dir[2] * impulse], point, part);
-        this._wound(part, point, dir, impulse);
+        const zone = this._wound(part, point, dir, impulse);
         const before = this._state;
-        this._emit('Hit', { part, partName: r.parts[part].name, impulse, point: point as [number, number, number] });
+        this._emit('Hit', { part, partName: r.parts[part].name, impulse, point: point as [number, number, number], zone });
         if (dying) { this.kill(); return; }
         // A listener took it further (a script's push knocked it down): that stands.
         if (this._state !== before) return;
         if (kept && !this._standingState()) this._go('hitReact');
         if (staggers) { this._go('stagger'); this._knockBack(dir, impulse); }
+    }
+
+    /** A free hand still holding a wound (its reach under way). */
+    private _holdingWound(): boolean {
+        const P = this.set.behaviours.hitReact.params;
+        return this._wounds.some(w => !!w.hand && this._handFree(w.hand) && this._time - w.at < P.reachDelay + P.holdTime);
     }
 
     /** The body region a hit lands on: its part's, on the body or, before there is one, on the layout as animated. */
@@ -507,6 +537,30 @@ export class ReactionController implements AnimatorReactionLink {
         }
         sv[0] = sv[2] = 0;
         bv[0] = bv[2] = 0;
+    }
+
+    /** Part of a hit's kick given along the spine over the next 0.1 s (a bullet's impulse spread, not one spike). */
+    private _spread(dir: ArrayLike<number>, amount: number): void {
+        if (!(amount > 0)) return;
+        this._spreadKick.push({ dir: [dir[0], dir[1], dir[2]], left: amount, per: amount / 0.1 });
+    }
+    private readonly _spreadKick: { dir: number[]; left: number; per: number }[] = [];
+
+    /** This step's share of the spread kicks, on the spine's parts by their mass. */
+    private _applySpread(body: ReactionBody, dt: number): void {
+        if (!this._spreadKick.length) return;
+        const spine = body.partsOf(['spine']).filter(i => !body.kinematic[i]);
+        let mass = 0;
+        for (const i of spine) mass += body.parts[i].mass;
+        for (let k = this._spreadKick.length - 1; k >= 0; k--) {
+            const s = this._spreadKick[k], now = Math.min(s.left, s.per * Math.max(dt, 1 / 240));
+            s.left -= now;
+            if (mass > 0) for (const i of spine) {
+                const share = now * body.parts[i].mass / mass;
+                body.parts[i].body.applyImpulse([s.dir[0] * share, s.dir[1] * share, s.dir[2] * share]);
+            }
+            if (s.left <= 1e-6) this._spreadKick.splice(k, 1);
+        }
     }
 
     /** A linear impulse (N·s, world) at part `i`'s centre. */
@@ -860,10 +914,11 @@ export class ReactionController implements AnimatorReactionLink {
         if (!r || !body || r.destroyed || r.frozen) return;
         // The get-up clip waits on its first frame while the skin blends onto it.
         if (this._state === 'getUp' && this._getUpAction && this._stateTime < this._getUpHold()) this._getUpAction.seek(0);
-        body.begin(dt);
+        body.begin(dt, this._physics.executor === 'worker' ? dt : 0);
         if (this._split) this._driveKinematic(body, dt);
         // A stagger's shove, the step after its legs went dynamic (a body switched and pushed in one step keeps neither).
         if (this._stepping && this._shoveWait-- <= 0) this._applyShove();
+        this._applySpread(body, dt);
         this._evolveRef(body, dt);
         this._base(body, dt);
         const ctx = this._context(dt);
@@ -936,8 +991,12 @@ export class ReactionController implements AnimatorReactionLink {
         this._fade(dt);
         this._follow();
         // Drop wounds long healed.
+        // Kept longer the worse they were (a bad one hurts for a while).
         const keep = this.set.behaviours.hitReact.params.holdTime + this.set.behaviours.hitReact.params.reachDelay + 1;
-        for (let i = this._wounds.length - 1; i >= 0; i--) if (this._time - this._wounds[i].at > keep && this._state !== 'down') this._wounds.splice(i, 1);
+        for (let i = this._wounds.length - 1; i >= 0; i--) {
+            const w = this._wounds[i];
+            if (this._time - w.at > keep + 6 * w.severity && this._state !== 'down') this._wounds.splice(i, 1);
+        }
     }
 
     /** The model left the world: end everything. */
@@ -951,8 +1010,10 @@ export class ReactionController implements AnimatorReactionLink {
         if (this._time - this._reactionStart > T.maxReactionSeconds && ['falling', 'tumble'].includes(this._state)) { this._go('down'); return; }
         switch (this._state) {
             case 'hitReact': {
+                // Over once its time is up and no free hand is still holding a wound (it would be let go of the moment
+                // the body is handed back to its walk).
                 if (this._tippedOver(dt)) this._go('falling');
-                else if (t > B.hitReact.params.duration || this._time - this._reactionStart > T.maxReactionSeconds) this._go('recover');
+                else if ((t > B.hitReact.params.duration && !this._holdingWound()) || this._time - this._reactionStart > T.maxReactionSeconds) this._go('recover');
                 break;
             }
             case 'stagger': {
@@ -1036,6 +1097,7 @@ export class ReactionController implements AnimatorReactionLink {
         }
     }
     private _balancedFor = 0;
+    private _letGo = false;
 
     /**
      * On its feet, tipped too far to stay up: the chest farther from where the animation has it (against the hips)
@@ -1136,6 +1198,7 @@ export class ReactionController implements AnimatorReactionLink {
         this._state = next;
         this._stateTime = 0;
         this._balancedFor = 0;
+        this._letGo = false;
         // Off the ground's rest: its bodies back in the world (they left it lying still).
         if (from === 'down' && next !== 'dead' && this.ragdoll?.frozen) this.ragdoll.unfreeze();
         if (from === 'down') this._riseAsked = false;
@@ -1352,7 +1415,9 @@ export class ReactionController implements AnimatorReactionLink {
         // couple of seconds (and on the ground, below).
         const fatigue = (state === 'falling' || state === 'tumble') && Number.isFinite(this._fallStart) ? Math.max(0.25, Math.exp(-(this._time - this._fallStart) / 1.8)) : 0;
         // Back on its animation once the upper body follows it closely: until then the drawing stays the body's.
-        const letGo = state === 'recover' && standing && (this._stateTime > 0.6 || this._trackingError() < TRACKED);
+        // Latched: once let go back to the animation, it stays let go (a tracking error that rises again does not
+        // hand the drawing back to the body, flickering between the two).
+        const letGo = this._letGo ||= state === 'recover' && standing && (this._stateTime > 0.6 || this._trackingError() < TRACKED);
         for (const p of body.parts) {
             const i = p.index;
             const m = p.region === 'pelvis' ? set.muscles.spine : set.muscles[p.region as keyof typeof set.muscles];
@@ -1385,7 +1450,7 @@ export class ReactionController implements AnimatorReactionLink {
                 // The legs and hips are the animation's; the upper body is drawn simulated (a hand on a weapon a
                 // little less, so it stays on its grip), until it is let go back to the animation.
                 const arm = (p.region === 'arms' || p.region === 'hands') && p.side ? p.side : null;
-                map = body.kinematic[i] ? 0 : letGo ? 0 : arm && !this._handFree(arm) && !this._stepping ? 0.6 : 1;
+                map = body.kinematic[i] ? 0 : letGo ? 0 : arm && !this._handFree(arm) && !this._stepping ? 0.3 : 1;
             } else if (state === 'hitReact') {
                 const legs = p.region === 'legs' || p.region === 'feet';
                 pin = legs ? pins.legs : 1;
@@ -1595,7 +1660,19 @@ export class ReactionController implements AnimatorReactionLink {
         return this._body!.chest;
     }
 
-    private _wound(part: number, point: ArrayLike<number>, dir: ArrayLike<number>, impulse: number): void {
+    /** Where a hit on `part` pushing along `dir` landed: the zone it reacts by. */
+    private _zoneOf(part: number, dir: ArrayLike<number>): HitZone {
+        const p = this._body!.parts[part];
+        if (p.region === 'neck' || p.role === 'head' || p.role === 'neck') return 'head';
+        if (p.region === 'arms' || p.region === 'hands') return 'arm';
+        if (p.region === 'legs' || p.region === 'feet') return 'leg';
+        // The trunk: from behind (it pushes the way the body faces), the back; low on it, the gut; else the chest.
+        const f = this._forward();
+        if (dir[0] * f[0] + dir[2] * f[2] > 0.35) return 'back';
+        return p.region === 'pelvis' || p.role === 'spine' ? 'gut' : 'chest';
+    }
+
+    private _wound(part: number, point: ArrayLike<number>, dir: ArrayLike<number>, impulse: number): HitZone {
         const body = this._body!, p = body.parts[part];
         const q = quatConjugateTuple(body.simRotation(part));
         const c = p.body.position;
@@ -1609,8 +1686,16 @@ export class ReactionController implements AnimatorReactionLink {
             const d = (s: 'L' | 'R') => vec3.distance(body.pivot(body.arms[s]!.end), point as vec3);
             hand = d('L') <= d('R') ? 'L' : 'R';
         }
-        this._wounds.push({ part, local, normal, impulse: [dir[0] * impulse, dir[1] * impulse, dir[2] * impulse], at: this._time, hand });
-        if (this._wounds.length > 4) this._wounds.shift();
+        const zone = this._zoneOf(part, dir);
+        const severity = Math.min(1, impulse / Math.max(1, this.set.thresholds.fallImpulse) * 2);
+        this._wounds.push({ part, local, normal, impulse: [dir[0] * impulse, dir[1] * impulse, dir[2] * impulse], at: this._time, hand, zone, severity, clock: this._physics.simulatedTime });
+        // Four at most: the slightest goes first (the oldest of equals), not merely the oldest.
+        if (this._wounds.length > 4) {
+            let worst = 0;
+            for (let i = 1; i < this._wounds.length; i++) if (this._wounds[i].severity < this._wounds[worst].severity) worst = i;
+            this._wounds.splice(worst, 1);
+        }
+        return zone;
     }
 
     // ---- the character ----

@@ -13,6 +13,12 @@ import type { Balancer } from './balancer';
 /** What a running reaction is at: which state, how long into it. */
 export type ReactionState = 'animated' | 'hitReact' | 'stagger' | 'falling' | 'tumble' | 'down' | 'getUp' | 'recover' | 'dead';
 
+/**
+ * Where on the body a hit lands, for how it reacts (Euphoria's shot behaviours): the head snaps, the chest spins and
+ * leans in pain, the gut folds, the back arches, an arm goes loose and the trunk turns with it, a leg gives.
+ */
+export type HitZone = 'head' | 'chest' | 'gut' | 'back' | 'arm' | 'leg';
+
 /** A wound: where a hit landed on a part, kept in that part's frame so a hand can follow it. */
 export interface ReactionWound {
     part: number;
@@ -26,6 +32,12 @@ export interface ReactionWound {
     at: number;
     /** The hand that goes to it ('L' | 'R'), or null when neither can. */
     hand: 'L' | 'R' | null;
+    /** Where on the body it is. */
+    zone: HitZone;
+    /** How bad, 0..1: its impulse against the set's fall threshold (twice as bad as that is the worst). */
+    severity: number;
+    /** The physics' seconds it happened at: what the pain is measured by after the reaction ends. */
+    clock: number;
 }
 
 /** What a behaviour reads and writes, once a frame. */
@@ -126,6 +138,7 @@ const hitReact: ReactionBehaviour = {
             const age = ctx.time - wound.at;
             const part = body.parts[wound.part];
             if (!part) continue;
+            zoneReaction(ctx, P, wound, age, w);
             // The struck part loses strength for a moment, then gets it back: on its feet only that part gives, so the
             // hit reads as a sway on what the animation is doing. Off them its neighbours give a little too.
             const keep = P.weakness + (1 - P.weakness) * smooth(age / Math.max(1e-3, P.weaknessTime));
@@ -200,6 +213,77 @@ const hitReact: ReactionBehaviour = {
         }
     },
 };
+
+/** 0 → 1 over `rise` seconds, held to `hold`, back to 0 over `fall`: a reflex's envelope. */
+function envelope(age: number, rise: number, hold: number, fall: number): number {
+    if (age < 0) return 0;
+    if (age < rise) return smooth(age / Math.max(1e-3, rise));
+    if (age < hold) return 1;
+    return 1 - smooth((age - hold) / Math.max(1e-3, fall));
+}
+
+/**
+ * How a hit reacts by where it landed (Euphoria's ShotHeadLook, ShockSpin, ShotInGuts, ShotFromBehind,
+ * ShotInjuredArm and ShotInjuredLeg), on top of the weakness, snap, look and reach every hit has; and the pain lean
+ * (its conscious pain: the spine bowing over the wound, up in a fifth of a second, eased off over a second and a half).
+ */
+function zoneReaction(ctx: ReactionContext, P: Record<string, number>, wound: ReactionWound, age: number, w: number): void {
+    const body = ctx.body, sev = wound.severity, spine = body.partsOf(['spine']);
+    const per = (amount: number) => amount / Math.max(1, spine.length);
+    const pain = P.painLean * sev * envelope(age, 0.2, 1.0, 1.5);
+    switch (wound.zone) {
+        case 'head': {
+            // The neck goes loose and comes back over 0.4 s; the snap is the neck's.
+            const keep = 0.3 + 0.7 * smooth(age / 0.4);
+            for (const i of body.partsOf(['neck'])) { body.torque[i] *= keep; body.frequency[i] *= 0.5 + 0.5 * keep; }
+            break;
+        }
+        case 'chest': {
+            // The shock spins the chest the way the hit pushes the side it struck, decaying fast; and the pain lean.
+            const kick = Math.hypot(...wound.impulse);
+            const p = body.simPoint(wound.part, wound.local), c = body.simPosition(body.pelvis);
+            const rx = p[0] - c[0], rz = p[2] - c[2];
+            const turn = kick > 0 ? (rz * wound.impulse[0] - rx * wound.impulse[2]) / kick : 0;
+            const spin = Math.max(-1, Math.min(1, turn * 6)) * P.shockSpin * sev * Math.exp(-age / 0.25) * smooth(age / 0.05);
+            for (const i of spine) body.turnWorld(i, axisAngle([0, 1, 0], per(spin)), w);
+            for (const i of spine) flex(ctx, i, -per(pain), w);
+            break;
+        }
+        case 'gut': {
+            // It folds over the wound: up in 0.2 s, held, unfolding by 2 s.
+            const fold = (P.gutFold * sev + pain) * envelope(age, 0.2, 1.2, 0.8);
+            for (const i of spine) flex(ctx, i, -per(fold), w);
+            break;
+        }
+        case 'back': {
+            // Arched back from a hit behind, for 0.7 s.
+            const arch = P.backArch * sev * envelope(age, 0.1, 0.35, 0.35);
+            for (const i of spine) flex(ctx, i, per(arch), w);
+            break;
+        }
+        case 'arm': {
+            // The arm goes loose a moment, and the trunk turns the way the hit pushed its shoulder.
+            const part = body.parts[wound.part], arm = part.side ? body.arms[part.side] : undefined;
+            const keep = 0.25 + 0.75 * smooth((age - 0.1) / 0.3);
+            if (arm) for (const i of [arm.root, arm.mid, arm.end]) { body.torque[i] *= keep; body.frequency[i] *= 0.5 + 0.5 * keep; }
+            // The turn the hit gives the trunk about the vertical, by where it struck: the shoulder pushed goes with it.
+            const p = body.simPoint(wound.part, wound.local), c = body.simPosition(body.pelvis);
+            const turn = (p[2] - c[2]) * wound.impulse[0] - (p[0] - c[0]) * wound.impulse[2];
+            const twist = P.armTwist * sev * envelope(age, 0.08, 0.25, 0.5) * Math.sign(turn);
+            for (const i of spine) body.turnWorld(i, axisAngle([0, 1, 0], per(twist)), w);
+            break;
+        }
+        case 'leg': {
+            // The leg gives: weak for 0.4 s, the knee bending at 0.3 s, on legs of its own (a stagger, off its feet).
+            const part = body.parts[wound.part], leg = part.side ? body.legs[part.side] : undefined;
+            if (!leg || body.kinematic[leg.mid]) break;
+            const keep = 0.7 + 0.3 * smooth((age - 0.4) / 0.4);
+            for (const i of [leg.root, leg.mid, leg.end]) { body.torque[i] *= keep; body.frequency[i] *= 0.6 + 0.4 * keep; }
+            body.bend(leg.mid, P.kneeGive * sev * envelope(age - 0.25, 0.15, 0.4, 0.4), w);
+            break;
+        }
+    }
+}
 
 /**
  * Knocked back on its feet (a stagger): it steps to stay up (balancer.ts: short quick steps on legs of its own, aimed a

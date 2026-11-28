@@ -3,7 +3,7 @@ import type { Skin } from '../../animation/animatedModel';
 import type { AnimationPose } from '../../animation/animationPose';
 import { solveTwoBone } from '../../animation/ik';
 import { normalizeBoneName } from '../../animation/boneNames';
-import { quatFromToTuple, quatMultiplyTuple, quatConjugateTuple, quatRotateTuple, quatSlerpTuple, quatToRotationVector } from '../../core/math';
+import { quatFromToTuple, quatMultiplyTuple, quatConjugateTuple, quatRotateTuple, quatSlerpTuple, quatToRotationVector, rotationVectorToQuat } from '../../core/math';
 import type { Ragdoll, RagdollPartInfo } from '../ragdoll';
 import { rigidRotation } from '../ragdollProfile';
 
@@ -115,9 +115,17 @@ export class ReactionBody {
      * animation's motion since the last call too: each target's spin and each part's animated velocity (none across
      * a jump of the animated hips of half a metre or more: a teleport, a new clip's first frame).
      */
-    public begin(dt = 0): void {
+    public begin(dt = 0, ahead = 0): void {
         const r = this.ragdoll;
         for (const p of this.parts) r.simulatedPose(p.index, this.sim[p.index]);
+        // With the physics worker the pose read here is a step old: carried on by its velocity to where it is now,
+        // so what reaches, pulls and looks from it does not chase where the body was.
+        if (ahead > 0) for (const p of this.parts) {
+            const s = this.sim[p.index], v = p.body.velocity, w = p.body.angularVelocity;
+            s[0] += v.x * ahead; s[1] += v.y * ahead; s[2] += v.z * ahead;
+            const q = quatMultiplyTuple(rotationVectorToQuat([w.x * ahead, w.y * ahead, w.z * ahead]), [s[3], s[4], s[5], s[6]]);
+            s[3] = q[0]; s[4] = q[1]; s[5] = q[2]; s[6] = q[3];
+        }
         r.animatedPartPoses(this.anim);
         const pa = this.anim[this.pelvis], pp = this._prevAnim[this.pelvis];
         const moving = dt > 1e-4 && this._begun && Math.hypot(pa[0] - pp[0], pa[1] - pp[1], pa[2] - pp[2]) < 0.5;
@@ -182,13 +190,17 @@ export class ReactionBody {
 
     // ---- writing targets ----
 
-    /** Turn part `i`'s target toward rotation `rel` (in its parent's frame) by `w` (0..1). */
-    public blend(i: number, rel: ArrayLike<number>, w: number): void {
+    /**
+     * Turn part `i`'s target toward rotation `rel` (in its parent's frame) by `w` (0..1). `keepSpin`: an offset on
+     * top of the animation (a turn, a lean), which still moves as the animation does.
+     */
+    public blend(i: number, rel: ArrayLike<number>, w: number, keepSpin = false): void {
         if (!(w > 0) || i < 0) return;
         const t = this.target[i];
         const q = w >= 1 ? [rel[0], rel[1], rel[2], rel[3]] : quatSlerpTuple(t, rel, w);
         t[0] = q[0]; t[1] = q[1]; t[2] = q[2]; t[3] = q[3];
         // The animation's spin goes with as much of the target as is still the animation's.
+        if (keepSpin) return;
         const s = this.spin[i], k = 1 - Math.min(1, w);
         s[0] *= k; s[1] *= k; s[2] *= k;
     }
@@ -265,7 +277,8 @@ export class ReactionBody {
     /** A part's target turned further by `rotation` (in its parent's frame, applied on the parent's side). */
     public turn(i: number, rotation: ArrayLike<number>, w: number): void {
         if (i < 0) return;
-        this.blend(i, quatMultiplyTuple([rotation[0], rotation[1], rotation[2], rotation[3]], this.target[i]), w);
+        // An offset on what the target is: the animation's spin stays (a lean on a swinging arm still swings).
+        this.blend(i, quatMultiplyTuple([rotation[0], rotation[1], rotation[2], rotation[3]], this.target[i]), w, true);
     }
 
     /**

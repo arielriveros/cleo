@@ -91,6 +91,7 @@ this.reactions?.bail({ velocity: carVelocity, exitDirection: carLeft, vehicle: c
 | `lying` | Off its feet, how it lies: `1` on its back, `-1` on its front, `0` on its side (0 on its feet). |
 | `balance` | The steps it is taking to stay up in a stagger, or took in its last: `steps`, `stepLengths` (m), `swinging` (`'L'`, `'R'` or null), `outcome` and, if it fell, `gaveUp` (`'steps'`, `'capture'`, `'height'`, `'tilt'`, `'air'`, `'time'`). Null before its first stagger. |
 | `knockCount` | Times it has been knocked off balance: each stagger, and each fall from its feet. |
+| `pain` | How much it hurts now, 0 to 1: each wound's, by how bad it was, rising over 0.2 s and easing off over seconds. |
 | `rollingOver` | Rolling onto its back to get up. |
 | `hitCount`, `hitAngle`, `hitHeight`, `hitStrength` | The hits taken so far, and the last one's side (degrees from the facing, counter-clockwise: `0` front, `+90` its left), height up the body (`0`–`1`) and strength (`0`–`1`). The animator's [reaction parameters](../editor/animation.md#reaction-parameters) read these. |
 | `alive`, `health` | Whether it can still get up, and its health 0..1 (settable). |
@@ -124,7 +125,7 @@ export default class Dummy extends CharacterNode {
 | Event | When |
 |---|---|
 | `Started` | A reaction begins (it was on its animation). |
-| `Hit` | A hit lands: `part`, `partName`, `impulse`, `point`. |
+| `Hit` | A hit lands: `part`, `partName` (the part it struck, a leg's included), `impulse`, `point`, `zone` (`'head'`, `'chest'`, `'gut'`, `'back'`, `'arm'` or `'leg'`). |
 | `Stagger` | It is knocked off balance and steps to stay up. |
 | `Fell` | It comes off its feet: `fallHeight` so far. |
 | `Landed` | It hits the ground: `impactSpeed`, `fallHeight`. |

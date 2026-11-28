@@ -122,8 +122,8 @@ character's [reaction values](#reaction-parameters): whether its body is down, w
 last hit came from.
 
 A **Trigger** fires when a script calls `setTrigger` — or, set to **Each hit** beside it, every time the
-character takes a hit (its reactions' hit count rises). A hit nothing takes that frame is dropped, so a flinch
-never plays a second late.
+character takes a hit (its reactions' hit count rises), or to **Each knock**, every time it is staggered or knocked
+off its feet. A raise nothing takes that frame is dropped, so a flinch never plays a second late.
 
 > **Bind Speed to the built-in `planarSpeed`**, not to a script's intended speed. It is *measured*,
 > so a character jammed against a wall reads 0 and drops to idle instead of running on the spot; it
@@ -636,11 +636,14 @@ The **Built-in · Reactions** values, read from the character's reactions whatev
 | `faceUp` | boolean | Lying on its back. |
 | `reacting` | boolean | Any reaction has the body. |
 | `hasControl` | boolean | On its feet, flinching or staggering. True where there are no reactions. |
-| `staggering` | boolean | Shoved back on its feet. |
+| `staggering` | boolean | Shoved back on its feet, stepping to stay up. |
 | `hitAngle` | number | Where the last hit came from against the facing, degrees, counter-clockwise like `planarAngle`. |
 | `hitHeight` | number | Where up the body it landed, `0` the feet to `1` the top of the head, on the skeleton at rest. |
 | `hitStrength` | number | How hard, `0`–`1` against the fall threshold. |
 | `hitCount` | number | Hits taken so far: what a Trigger set to **Each hit** fires on. |
+| `knockCount` | number | Staggers and falls from its feet so far: what a Trigger set to **Each knock** fires on. |
+| `lying` | number | Off its feet, how it lies: `1` on its back, `−1` on its front, `0` on its side. |
+| `pain` | number | How much it hurts now, `0`–`1`, rising with each hit and easing off over seconds: a pain layer's weight. |
 
 ## Action slots
 
