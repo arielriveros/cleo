@@ -647,6 +647,25 @@ describe('physical animation on its feet (jolt)', () => {
         expect(seen.indexOf('falling')).toBeGreaterThan(seen.indexOf('stagger'));
     });
 
+    it("a listener's knock-down on a hit stands, and the first round of a burst counts toward it", () => {
+        const s = person();
+        // A script that knocks the body down from its Hit event (as the Sandbox's NPCs do once the hits add up).
+        let hits = 0;
+        getChannel('reaction').on('Hit', () => { if (++hits === 2) s.r.push([0, 0, -2.5]); });
+        const seen: string[] = [];
+        for (let f = 0; f < 60; f++) {
+            if (f === 5 || f === 11) s.r.hit({ part: 'Chest', direction: [0, 0, -1], impulse: 18 });
+            step(s);
+            if (seen[seen.length - 1] !== s.r.state) seen.push(s.r.state);
+        }
+        // The push took it off its feet inside the second hit, and the hit did not put it back on them.
+        expect(seen).toContain('falling');
+        expect(seen.slice(seen.indexOf('falling'))).not.toContain('hitReact');
+        // Hits a second apart at most add up: the first, which made the body, is among them.
+        const r = s.r as unknown as { _recent: { impulse: number }[] };
+        expect(r._recent.length).toBe(2);
+    });
+
     it('starts and goes back to its animation without a pop: no drawn joint jumps against its own motion', () => {
         const s = person();
         const seen: vec3[][] = [];

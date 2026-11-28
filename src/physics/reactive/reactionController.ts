@@ -368,8 +368,11 @@ export class ReactionController implements AnimatorReactionLink {
             r.applyImpulse([dir[0] * kick, dir[1] * kick, dir[2] * kick], point, part);
         } else r.applyImpulse([dir[0] * impulse, dir[1] * impulse, dir[2] * impulse], point, part);
         this._wound(part, point, dir, impulse);
+        const before = this._state;
         this._emit('Hit', { part, partName: r.parts[part].name, impulse, point: point as [number, number, number] });
         if (dying) { this.kill(); return; }
+        // A listener took it further (a script's push knocked it down): that stands.
+        if (this._state !== before) return;
         if (kept && !this._standingState()) this._go('hitReact');
         if (staggers) { this._knockBack(dir, impulse); this._go('stagger'); }
     }
@@ -1074,7 +1077,6 @@ export class ReactionController implements AnimatorReactionLink {
         this._time = 0;
         this._split = false;
         this._mapNow = new Float64Array(r.parts.length);
-        this._recent.length = 0;
         // Where the feet are below the Collider's origin: what following the hips puts back.
         const character = this._character();
         const collider = character?.collider;
