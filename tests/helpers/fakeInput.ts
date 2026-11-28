@@ -12,6 +12,8 @@ import type { ActionChange } from '../../src/input/resolveActions';
 export interface FakeInput {
     /** The `Move` vector (x right, y up): every action named as a move action reads it. */
     setMove(x: number, y?: number): void;
+    /** Any other vector action's reading (`Look`, say), until set again. */
+    setVector(action: string, x: number, y?: number): void;
     press(action: string): void;
     release(action: string): void;
     /** A press and its release a frame later: `press` now, released by the next `endFrame`. */
@@ -28,9 +30,14 @@ export function fakeInput(moveActions: string | string[] = 'Move'): FakeInput {
     const edges = new Set<string>();
     const tapped = new Set<string>();
     const move: [number, number] = [0, 0];
+    const vectors = new Map<string, [number, number]>();
     const sys = InputSystem.instance;
     const spies = [
-        vi.spyOn(sys, 'vector').mockImplementation((action: string) => moves.has(action) ? [move[0], move[1]] : [0, 0]),
+        vi.spyOn(sys, 'vector').mockImplementation((action: string): [number, number] => {
+            if (moves.has(action)) return [move[0], move[1]];
+            const v = vectors.get(action);
+            return v ? [v[0], v[1]] : [0, 0];
+        }),
         vi.spyOn(sys, 'pressed').mockImplementation((action: string) => held.has(action)),
         vi.spyOn(sys, 'started').mockImplementation((action: string) => edges.has(action)),
         vi.spyOn(sys, 'changedThisFrame', 'get').mockImplementation((): ActionChange[] => [...edges].map(action => ({
@@ -40,6 +47,7 @@ export function fakeInput(moveActions: string | string[] = 'Move'): FakeInput {
     ];
     return {
         setMove(x, y = 0) { move[0] = x; move[1] = y; },
+        setVector(action, x, y = 0) { vectors.set(action, [x, y]); },
         press(action) { if (!held.has(action)) edges.add(action); held.add(action); },
         release(action) { held.delete(action); },
         tap(action) { this.press(action); tapped.add(action); },

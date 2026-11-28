@@ -1335,6 +1335,22 @@
         }
       },
       {
+        "name": "wheelHoldSeconds",
+        "type": {
+          "kind": "number"
+        },
+        "access": "private",
+        "default": 0.2,
+        "hidden": false,
+        "attribute": {
+          "group": "Weapons",
+          "min": 0.05,
+          "max": 1,
+          "step": 0.01,
+          "tooltip": "Seconds Equip is held before the weapon wheel opens (real time); a shorter press swaps back to the last weapon."
+        }
+      },
+      {
         "name": "eyeStand",
         "type": {
           "kind": "number"
@@ -1707,7 +1723,52 @@
         "hidden": true
       },
       {
-        "name": "_wheelWait",
+        "name": "weaponWheelOpen",
+        "type": {
+          "kind": "boolean"
+        },
+        "access": "public",
+        "default": false,
+        "hidden": true
+      },
+      {
+        "name": "_equipDown",
+        "type": {
+          "kind": "boolean"
+        },
+        "access": "private",
+        "default": false,
+        "hidden": true
+      },
+      {
+        "name": "_equipHeldFor",
+        "type": {
+          "kind": "number"
+        },
+        "access": "private",
+        "default": 0,
+        "hidden": true
+      },
+      {
+        "name": "_lastWeaponPick",
+        "type": {
+          "kind": "number"
+        },
+        "access": "private",
+        "default": 1,
+        "hidden": true
+      },
+      {
+        "name": "_pickAnswered",
+        "type": {
+          "kind": "number"
+        },
+        "access": "private",
+        "default": 0,
+        "hidden": true
+      },
+      {
+        "name": "_wheelController",
         "type": {
           "kind": "number"
         },

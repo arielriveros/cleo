@@ -59,9 +59,9 @@ It uses only what the engine has:
 - foot placement and foot locking on the skeleton;
 - one script on the Character, which handles input and writes the values the animator reads.
 
-The body is one template, **Sandbox Character** (`/Characters/Mannequin/Sandbox Character.tpl`): the Collider, the
+The body is one template, **Sandbox Character** (`/Characters/Base/Sandbox Character.tpl`): the Collider, the
 Character and its script (`SandboxCharacter`), the Mannequin, the weapons in its hands and their sounds. On its own it
-stands idle. The player is its variant **Player** (`/Characters/Mannequin/Player.tpl`): the Character's script is
+stands idle. The player is its variant **Player** (`/Characters/Player/Player.tpl`): the Character's script is
 `SandboxPlayer` (input on top of the body's), and it adds the Camera Rig and its script, the Controller, and its own
 **HUD** (a screen canvas: the crosshair, the ammunition and the reload, so every copy of the Player brings and drives
 its own). An edit to the base (a weapon's grip, the Mannequin's machine) reaches the Player and every NPC. The level is
@@ -88,7 +88,7 @@ Pack** armed; *Crouch To Stand* and *Shooting* on their own.
 | Look | the mouse (click the view to capture it) | right stick (twice the engine default's rate) |
 | Get into the car, or out of it | E, by the driver's door | Y |
 | Day, dusk, night | 1, 2, 3 | d-pad left, up, right |
-| Next weapon (pistol, rifle, shotgun, none) | Q, or the wheel (back: the last one) | RB |
+| Weapon wheel (none, pistol, rifle, shotgun) | hold Q, point with the mouse, let go; tap Q for the last weapon | hold RB, point with the right stick, let go; tap RB |
 | Aim | hold the right mouse button | hold LT |
 | Fire | the left mouse button (hold for the rifle) | RT |
 | Reload | R | B |
@@ -646,13 +646,13 @@ mannequin as the flinches above were (in `/Creator/Motion`); their documents are
 
 ## The NPCs
 
-The people share the player's body: each is a variant of **Sandbox Character** (`/Characters/NPCs`), with the same
+The people share the player's body: each is a variant of **Sandbox Character** (`/Characters/NPCs/Civilian` and `/Characters/NPCs/Enemy`, each variant's folder holding its template, its brain, its script and its material), with the same
 Mannequin, machine, clips and reactions, its own material, and an **AI Controller** under its Character for a brain.
 They are placed under the scene's **NPCs** node: six **Civilian**s over the map and four **Enemy**s, two by the
 pillars and two by the crates.
 
 **The brains.** What an NPC is doing, and when it changes, is its AI Controller's **AI Brain**: **Civilian Brain** and
-**Enemy Brain** in `/Characters/NPCs/AI`, behaviour machines you open and edit in their AI Brain tab like any other.
+**Enemy Brain** in their variants' folders, behaviour machines you open and edit in their AI Brain tab like any other.
 Each state sets the controller's goal (stand, walk the nav mesh to a point, walk toward the player, keep away from
 it), and each transition is a condition on the brain's parameters: the controller's senses of the player (**In
 Sight**, **Distance**, **Since Seen**; the player on foot is the blackboard's `target`) and what the NPC's script
@@ -776,8 +776,10 @@ anything the brain should read (a parameter whose source is **Builtin** names on
 ## The weapons
 
 Three weapons, Firing Line's: its pistol, its AK-47 rifle and its SAPS-12 shotgun, carried in the right hand.
-**Q** (RB on a pad) takes out the pistol, then the rifle, then the shotgun, then puts it away; the mouse wheel goes
-the same way round, or back. Not aimed, the weapon is held at the **low ready**, its muzzle at the ground ahead.
+Holding **Q** (RB on a pad) opens the **weapon wheel** (`/UI`: SandboxWeaponWheel on the HUD's Weapon Wheel): the game
+slows to a third, the camera stops turning, and the mouse or the right stick points at none (at the top), the pistol,
+the rifle or the shotgun, each slot showing the weapon's side and what it has left; letting go takes out the one
+pointed at. A tap of Q swaps back to the last weapon. Not aimed, the weapon is held at the **low ready**, its muzzle at the ground ahead.
 Holding the **right mouse button** aims it (LT). Aiming, the character faces the camera and strafes, turns in place
 as soon as the camera is 45 degrees round (`aimTurnThreshold`), and the camera moves in over the shoulder and zooms in,
 with a hard depth of field (see [Aiming in third person](#aiming-in-third-person)). Sprinting carries the weapon as
@@ -796,7 +798,8 @@ Player
 │  ├─ Rifle Grip          on the Rifle Grip socket: the Rifle model, and its Muzzle
 │  └─ Shotgun Grip        on the Shotgun Grip socket: the Shotgun model, and its Muzzle
 ├─ Sounds                 ShotPistol, ShotRifle, ShotShotgun
-└─ HUD                    the Player's own screen canvas: Crosshair (a dot and four ticks), Ammunition, Reloading
+└─ HUD                    the Player's own screen canvas: Crosshair (a dot and four ticks), Ammunition, Reloading,
+                          Weapon Wheel
 ```
 
 **On the hand.** Each weapon hangs on a socket of its own on the right hand (`Pistol Grip`, `Rifle Grip`,
@@ -984,11 +987,13 @@ the **Stair Ramp** layer (`passThroughLayers`: the ramps are there to be walked 
 steps.
 
 **What a hit does.** A dynamic body hit takes an `impulse` along the shot at the point it was hit (14 N·s from the
-pistol, 18 from the AK-47, 27 shared by the shotgun's pellets, a few times a real bullet's), so a crate shoves and
+pistol, 18 from the AK-47, 90 shared by the shotgun's pellets, a few times a real bullet's), so a crate shoves and
 tips, a barrel rolls, a ball flies; no hit speeds anything up by more than `maxPushSpeed` (2.5 m/s), so a 3 kg ball
 is not shot off the course. A hit on a hard surface (the ground, the car, a prop) sprays sparks and dust (**Bullet
 Impact**) and leaves a hole (**Bullet Hole**, a decal that fades after 40 s), which moves with the body it is on. A
-character throws nothing and keeps no hole: its body's reaction is the hit. No decal lands on one at all: the three
+character throws nothing and keeps no hole: its body's reaction is the hit. The pellets that strike one character land
+on it as one hit, their shares summed, so a shotgun blast at close range staggers or fells it where each pellet alone
+would only make it flinch. No decal lands on one at all: the three
 Mannequin materials have **Receive decals** off (see [Models and materials](models-and-materials.md#sections)), so a
 hole in the ground at a character's feet stops at its shoes. The shot draws a **Tracer** from the
 muzzle and, in third person, a **Muzzle Flash** (particles and a point light) and the weapon's shot (its cue in the

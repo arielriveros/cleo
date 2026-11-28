@@ -16,7 +16,7 @@
     "height": 720,
     "fullscreen": false,
     "resizable": true,
-    "onlyUsedShaders": false,
+    "onlyUsedShaders": true,
     "webgl2Fallback": false,
     "graphicsBackend": "editor",
     "excludedScenes": []
@@ -25,7 +25,7 @@
     "version": "1.0.0",
     "appId": "",
     "icon": "",
-    "cover": ""
+    "cover": "cover-12888014.jpg"
   },
   "features": {
     "disabled": []

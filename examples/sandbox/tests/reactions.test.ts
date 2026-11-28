@@ -154,9 +154,9 @@ describe('the Sandbox scripts use the reactions', () => {
 
     it('every Sandbox character sits out its reactions, and the player trips and is shoved on its keys', () => {
         // The body (SandboxCharacter, the player's and every NPC's): no input while a reaction has it.
-        const body = source('Characters', 'Mannequin', 'Scripts', 'SandboxCharacter.ts');
+        const body = source('Characters', 'Base', 'Scripts', 'SandboxCharacter.ts');
         expect(body).toMatch(/onUpdate\(delta: number\) \{\n\s+if \(this\._carPhase !== 'none'\) \{ this\._ride\(delta\); return \}\n\s+if \(this\._reacting\(delta\)\) return/);
-        const player = source('Characters', 'Mannequin', 'Scripts', 'SandboxPlayer.ts');
+        const player = source('Characters', 'Player', 'Scripts', 'SandboxPlayer.ts');
         expect(player).toMatch(/export default class SandboxPlayerNode extends SandboxCharacterNode/);
         expect(player).toContain("Input.started('Trip')");
         // The Trip key is the animator's Trip trigger (its Ragdoll state), fired by name.
@@ -170,7 +170,7 @@ describe('the Sandbox scripts use the reactions', () => {
     it('the car throws its driver out when asked to stop at speed', () => {
         const car = source('Vehicles', 'Car', 'Scripts', 'SandboxCar.ts');
         expect(car).toContain('Math.abs(vehicle.speed) > this.bailSpeed && this._driver?.bailOut?.(');
-        const body = source('Characters', 'Mannequin', 'Scripts', 'SandboxCharacter.ts');
+        const body = source('Characters', 'Base', 'Scripts', 'SandboxCharacter.ts');
         expect(body).toContain('reactions.bail({ velocity, exitDirection, vehicle })');
     });
 
@@ -179,10 +179,10 @@ describe('the Sandbox scripts use the reactions', () => {
         expect(car).toContain('character.struckByVehicle(this, [v[0], v[1], v[2]], closing)');
         expect(car).toContain('character.dodgeVehicle(this, [v[0], v[1], v[2]])');
         expect(car).toContain('character.canDrive === true');
-        const body = source('Characters', 'Mannequin', 'Scripts', 'SandboxCharacter.ts');
+        const body = source('Characters', 'Base', 'Scripts', 'SandboxCharacter.ts');
         expect(body).toMatch(/public struckByVehicle\(vehicle: Node, velocity: ArrayLike<number>, speed: number\): boolean/);
         expect(body).toMatch(/public get canDrive\(\): boolean \{ return false \}/);
-        expect(source('Characters', 'Mannequin', 'Scripts', 'SandboxPlayer.ts')).toMatch(/public get canDrive\(\): boolean \{ return true \}/);
+        expect(source('Characters', 'Player', 'Scripts', 'SandboxPlayer.ts')).toMatch(/public get canDrive\(\): boolean \{ return true \}/);
     });
 
     it('an NPC never dies: its health kept full, a body down too long got up, its hits adding up to a fall', () => {

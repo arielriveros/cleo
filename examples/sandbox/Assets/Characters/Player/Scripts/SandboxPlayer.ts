@@ -1,7 +1,7 @@
 import { Game, Input, MathUtils, lerp } from 'cleo'
 import type { ColliderNode, Node, UIPanelNode, UITextNode } from 'cleo'
 import { animTrigger, attribute, child } from 'cleo/decorators'
-import SandboxCharacterNode from '@/Characters/Mannequin/Scripts/SandboxCharacter'
+import SandboxCharacterNode from '@/Characters/Base/Scripts/SandboxCharacter'
 
 /**
  * The Sandbox player: a Sandbox Character (SandboxCharacter: its body, its animator, its weapons, the car, its
@@ -21,8 +21,11 @@ import SandboxCharacterNode from '@/Characters/Mannequin/Scripts/SandboxCharacte
  * The Player Controller reads Move / Look / Jump / Sprint and writes the intent the base turns into the body. What is
  * the player's own:
  *
- *   - the WANTS the base asks for: Walk held walks, Aim held aims, Fire pulls the trigger, Reload reloads, Equip (or
- *     the mouse wheel) cycles none, the pistol, the rifle, the shotgun; the shot goes along the camera's aim;
+ *   - the WANTS the base asks for: Walk held walks, Aim held aims, Fire pulls the trigger, Reload reloads; the shot goes
+ *     along the camera's aim;
+ *   - the WEAPON WHEEL: Equip held (`wheelHoldSeconds`) opens it (the HUD's Weapon Wheel, SandboxWeaponWheel): the
+ *     game slows, the camera stops turning, and the mouse or the right stick points at none, the pistol, the rifle or
+ *     the shotgun; letting go of Equip takes out the one pointed at. A tap of Equip swaps back to the last weapon;
  *   - the CAMERA's part of a shot: each one kicks the camera up and a little aside, most of which comes back
  *     (`recoilRecovery`); in third person, Aim held also zooms the camera in and blurs everything but what the
  *     crosshair is on (`aimingDown`);
@@ -40,6 +43,13 @@ import SandboxCharacterNode from '@/Characters/Mannequin/Scripts/SandboxCharacte
 /** The weapons' viewmodels under the camera: 1 the pistol, 2 the rifle, 3 the shotgun. */
 const WEAPON_VIEWMODELS = ['Pistol Viewmodel', 'AK-47 Viewmodel', 'SAPS-12 Viewmodel']
 
+/** What the player asks of the HUD's Weapon Wheel (SandboxWeaponWheel). */
+interface WeaponWheel {
+    openWheel(current: number, slots: { name: string, ammo: string }[]): void
+    closeWheel(): number
+    steer(x: number, y: number, stick: boolean): void
+}
+
 export default class SandboxPlayerNode extends SandboxCharacterNode {
     /** The share of the camera's kick that comes back, and how fast (per second, of what is left). */
     @attribute('Weapons', { min: 0, max: 1, step: 0.05 })
@@ -47,6 +57,10 @@ export default class SandboxPlayerNode extends SandboxCharacterNode {
 
     @attribute('Weapons', { min: 0.5, max: 30, step: 0.5 })
     private recoilRecoverySpeed: number = 6
+
+    /** Seconds Equip is held before the weapon wheel opens (real time); a shorter press swaps back to the last weapon. */
+    @attribute('Weapons', { min: 0.05, max: 1, step: 0.01 })
+    private wheelHoldSeconds: number = 0.2
 
     /** First person: the eye's height over the feet standing, and crouched (m). The character's own, so public. */
     @attribute('First Person', { min: 0.3, max: 2.5, step: 0.01 })
@@ -135,8 +149,19 @@ export default class SandboxPlayerNode extends SandboxCharacterNode {
     private _vmDepth: number = 1
     /** The viewmodels' animator bools as last sent. */
     private _viewParams: Record<string, boolean> = {}
-    /** The wheel waits this long between two picks. */
-    private _wheelWait: number = 0
+    /** The weapon wheel (the HUD's, SandboxWeaponWheel): open while Equip is held past `wheelHoldSeconds`. */
+    @child('HUD/Weapon Wheel')
+    private _weaponWheel: (Node & WeaponWheel) | null = null
+    public weaponWheelOpen: boolean = false
+    /** Equip down (since its press), and for how long (real seconds). */
+    private _equipDown: boolean = false
+    private _equipHeldFor: number = 0
+    /** The weapon a tap of Equip swaps back to. */
+    private _lastWeaponPick: number = 1
+    /** What `pickWeapon` last answered: `current` comes back otherwise only when the base put the weapon away (a car). */
+    private _pickAnswered: number = 0
+    /** The Controller the wheel took the camera's turning from, to give it back. */
+    private _wheelController: any = null
     /** The rig's mouse speeds as authored: the aim down the sights slows them. */
     private _baseYawSens: number = -1
     private _basePitchSens: number = -1
@@ -180,18 +205,80 @@ export default class SandboxPlayerNode extends SandboxCharacterNode {
     // ----- what it wants: its input ---------------------------------------------------------------------------
 
     protected wantsWalk(): boolean { return Input.pressed('Walk') }
-    protected wantsAim(): boolean { return Input.pressed('Aim') }
-    protected triggerHeld(): boolean { return Input.pressed('Fire') }
-    protected triggerStarted(): boolean { return Input.started('Fire') }
-    protected wantsReload(): boolean { return Input.started('Reload') }
+    /** With the weapon wheel open the weapon in the hands rests: no aim, no shot, no reload. */
+    protected wantsAim(): boolean { return !this.weaponWheelOpen && Input.pressed('Aim') }
+    protected triggerHeld(): boolean { return !this.weaponWheelOpen && Input.pressed('Fire') }
+    protected triggerStarted(): boolean { return !this.weaponWheelOpen && Input.started('Fire') }
+    protected wantsReload(): boolean { return !this.weaponWheelOpen && Input.started('Reload') }
 
-    /** Equip (or the mouse wheel) picks the next weapon, or the last turned back: none, the pistol, the rifle, the shotgun. */
+    /**
+     * The weapon wheel: Equip held past `wheelHoldSeconds` opens it, Look points it while it is open, and letting go
+     * takes out the weapon it points at. A tap (let go sooner) swaps back to the last weapon (none, at first, swaps
+     * to the pistol). `current`: the weapon the hands go to now.
+     */
     protected pickWeapon(delta: number, current: number): number {
-        let step = Input.started('Equip') ? 1 : 0
-        const wheel = Input.value('Zoom')
-        this._wheelWait = Math.max(0, this._wheelWait - delta)
-        if (wheel !== 0 && this._wheelWait <= 0) { step = wheel > 0 ? 1 : -1; this._wheelWait = 0.15 }
-        return step ? (current + step + 4) % 4 : current
+        // Put away without a pick (in a car): a tap takes it back out.
+        if (current !== this._pickAnswered) {
+            if (this._pickAnswered !== 0) this._lastWeaponPick = this._pickAnswered
+            this._pickAnswered = current
+        }
+        // Real time: the open wheel slows the game.
+        const real = Game.unscaledDelta > 0 ? Game.unscaledDelta : delta
+        if (Input.started('Equip')) { this._equipDown = true; this._equipHeldFor = 0 }
+        if (this._equipDown && Input.pressed('Equip')) {
+            this._equipHeldFor += real
+            if (!this.weaponWheelOpen && this._equipHeldFor >= this.wheelHoldSeconds) this._openWeaponWheel(current)
+            const wheel = this._weaponWheel
+            if (this.weaponWheelOpen && wheel) {
+                const look = Input.vector('Look')
+                wheel.steer(look[0], look[1], Input.device('Look') === 'gamepadAxis')
+            }
+            return current
+        }
+        if (!this._equipDown) return current
+        // Let go: the wheel's pick, or a tap's swap (with nothing to swap back to, none or the pistol).
+        this._equipDown = false
+        const fromWheel = this.weaponWheelOpen
+        let next = fromWheel ? this._closeWeaponWheel() : this._lastWeaponPick
+        if (!fromWheel && next === current) next = current === 0 ? 1 : 0
+        if (next !== current) this._lastWeaponPick = current
+        this._pickAnswered = next
+        return next
+    }
+
+    /** The wheel opens on the weapon in the hands; the camera stops turning (Look points the wheel). */
+    private _openWeaponWheel(current: number) {
+        const wheel = this._weaponWheel
+        if (!wheel) return
+        const guns = this._weaponGuns()
+        const slots = [{ name: 'Unarmed', ammo: 'Holster' }]
+        for (const gun of guns) slots.push({ name: gun?.displayName ?? '', ammo: gun ? `${gun.ammo} / ${gun.reserve}` : '' })
+        wheel.openWheel(current, slots)
+        this.weaponWheelOpen = true
+        const controller: any = this.controller
+        if (controller && controller.driveAimTarget) { controller.driveAimTarget = false; this._wheelController = controller }
+    }
+
+    /** Close the wheel, giving the camera its turning back; returns the weapon it points at. */
+    private _closeWeaponWheel(): number {
+        this.weaponWheelOpen = false
+        if (this._wheelController) { this._wheelController.driveAimTarget = true; this._wheelController = null }
+        return this._weaponWheel ? this._weaponWheel.closeWheel() : this.weapon
+    }
+
+    /** The SandboxGun of each weapon (the pistol, the rifle, the shotgun), or null. */
+    private _weaponGuns(): any[] {
+        const weapons = this.getChildByName('Weapons')[0]
+        return ['Pistol Grip', 'Rifle Grip', 'Shotgun Grip'].map(n => weapons?.getChildByName(n)[0] ?? null)
+    }
+
+    /** Out of the hands' reach (in a car, knocked down): the wheel closes, picking nothing. */
+    onUpdate(delta: number) {
+        super.onUpdate(delta)
+        if (this.weaponWheelOpen && (this._carPhase !== 'none' || !Input.pressed('Equip'))) {
+            this._closeWeaponWheel()
+            this._equipDown = false
+        }
     }
 
     protected firstPersonView(): boolean { return this.firstPerson }

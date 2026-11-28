@@ -125,52 +125,45 @@
       {
         "name": "wait",
         "goal": "idle",
-        "speedScale": 1,
+        "isEntry": true,
         "x": 40,
-        "y": 160,
-        "isEntry": true
+        "y": 160
       },
       {
         "name": "roam",
         "goal": "path",
-        "speedScale": 1,
+        "targetKey": "point",
         "x": 260,
-        "y": 160,
-        "targetKey": "point"
+        "y": 160
       },
       {
         "name": "watch",
         "goal": "idle",
-        "speedScale": 1,
         "x": 260,
         "y": 20
       },
       {
         "name": "alert",
         "goal": "idle",
-        "speedScale": 1,
         "x": 480,
         "y": 20
       },
       {
         "name": "flee",
         "goal": "path",
-        "speedScale": 1,
+        "targetKey": "point",
         "x": 700,
-        "y": 160,
-        "targetKey": "point"
+        "y": 160
       },
       {
         "name": "cower",
         "goal": "idle",
-        "speedScale": 1,
         "x": 700,
         "y": 20
       },
       {
         "name": "knocked",
         "goal": "idle",
-        "speedScale": 1,
         "x": 480,
         "y": 300
       }
@@ -278,7 +271,8 @@
               "value": 22
             }
           ]
-        }
+        },
+        "minDwell": 1.25
       },
       {
         "from": "alert",
@@ -446,21 +440,20 @@
           {
             "name": "Hurt",
             "goal": "idle",
+            "x": 300,
+            "y": 40,
             "outputs": [
               {
                 "field": "hurt",
                 "value": true
               }
-            ],
-            "x": 300,
-            "y": 40
+            ]
           }
         ],
         "transitions": [
           {
             "from": "*",
             "to": "Hurt",
-            "restart": true,
             "condition": {
               "op": "and",
               "children": [
@@ -469,7 +462,8 @@
                   "op": "trigger"
                 }
               ]
-            }
+            },
+            "restart": true
           },
           {
             "from": "Hurt",

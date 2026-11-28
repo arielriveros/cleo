@@ -151,6 +151,23 @@ describe.skipIf(!present)(`the Sandbox's NPCs (${TEST_PHYSICS})`, { timeout: 300
         expect(civ.reactions.alive).toBe(true);
     });
 
+    it('a shotgun blast at 3 m lands on a civilian as one heavy hit, not a pellet each, and knocks it down', async () => {
+        const p = await play({ npcs: { 'Civilian 1': { at: [32, 0, -24], yaw: 180 } }, player: { at: [32, 0.02, -27], yaw: 0 } });
+        const civ = p.npc('Civilian 1');
+        const r = reactionTrail(civ);
+        const hits: number[] = [];
+        civ.addEventListener('reaction:Hit', (info: any) => hits.push(info?.impulse ?? 0));
+        await p.run(1);
+        // The SAPS-12 aimed: its nine pellets inside 2.6 degrees, all on the chest at this range.
+        shoot(p, [civ.worldPosition[0], civ.worldPosition[1] + 1.25, civ.worldPosition[2]], 'Shotgun Grip', 2.6);
+        await p.run(3, () => { r.note(); });
+        expect(hits.length, `hits: ${hits}`).toBe(1);
+        // Past the reaction set's stagger (60) and the NPC's knock-down shock (56): a pistol round is 14.
+        expect(hits[0]).toBeGreaterThan(60);
+        expect(r.trail.join('>')).toMatch(/falling/);
+        expect(finite(civ.worldPosition)).toBe(true);
+    });
+
     it('run over by the car, a civilian is thrown, gets up and runs from it', async () => {
         // In front of the parked car's bonnet (the car faces +X), the car sent at it at 8 m/s with nobody in it.
         const p = await play({ npcs: { 'Civilian 1': { at: [20.6, 0, 1.5], yaw: -90 } }, player: { at: AWAY } });

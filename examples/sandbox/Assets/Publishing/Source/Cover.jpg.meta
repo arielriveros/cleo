@@ -1,0 +1,35 @@
+{
+  "cleo": 1,
+  "guid": "cover-12888014.jpg",
+  "kind": "image",
+  "created": 1795763357504,
+  "record": {
+    "id": "cover-12888014.jpg",
+    "name": "Cover.jpg",
+    "mime": "image/jpeg",
+    "width": 0,
+    "height": 0,
+    "byteSize": 0,
+    "origin": "import",
+    "created": 1795763357605
+  },
+  "importer": {
+    "mime": "image/jpeg",
+    "config": {
+      "flipY": false,
+      "usage": "color",
+      "wrapping": "clamp",
+      "wrapU": "clamp",
+      "wrapV": "clamp",
+      "wrapW": "clamp",
+      "mipMap": true,
+      "mipMapFilter": "linear",
+      "minFilter": "linear",
+      "magFilter": "linear",
+      "anisotropy": 1,
+      "precision": "low",
+      "format": "rgba8unorm",
+      "target": "texture2D"
+    }
+  }
+}

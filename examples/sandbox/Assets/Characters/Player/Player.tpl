@@ -12680,6 +12680,13 @@
                 "ragdollProfile": {
                   "version": 1,
                   "totalMass": 70,
+                  "selfCollision": true,
+                  "linearDamping": 0.02,
+                  "angularDamping": 0.2,
+                  "solverIterations": 20,
+                  "friction": 0.8,
+                  "restitution": 0.05,
+                  "footFriction": 2,
                   "parts": [
                     {
                       "name": "Pelvis",
@@ -12707,8 +12714,8 @@
                       "massFraction": 0.139,
                       "joint": {
                         "type": "cone",
-                        "swing": 15,
-                        "twist": 16,
+                        "swing": 25,
+                        "twist": 20,
                         "hingeMin": 0,
                         "hingeMax": 0,
                         "tilt": [0, 0]
@@ -12725,8 +12732,8 @@
                       "massFraction": 0.216,
                       "joint": {
                         "type": "cone",
-                        "swing": 19,
-                        "twist": 17,
+                        "swing": 20,
+                        "twist": 20,
                         "hingeMin": 0,
                         "hingeMax": 0
                       }
@@ -12740,8 +12747,8 @@
                       "massFraction": 0.081,
                       "joint": {
                         "type": "cone",
-                        "swing": 26,
-                        "twist": 26,
+                        "swing": 35,
+                        "twist": 40,
                         "hingeMin": 0,
                         "hingeMax": 0
                       }
@@ -12804,11 +12811,11 @@
                       "massFraction": 0.1,
                       "joint": {
                         "type": "cone",
-                        "swing": 58,
-                        "twist": 35,
+                        "swing": 65,
+                        "twist": 45,
                         "hingeMin": 0,
                         "hingeMax": 0,
-                        "tilt": [32, 0]
+                        "tilt": [25, 0]
                       }
                     },
                     {
@@ -12901,11 +12908,11 @@
                       "massFraction": 0.1,
                       "joint": {
                         "type": "cone",
-                        "swing": 58,
-                        "twist": 35,
+                        "swing": 65,
+                        "twist": 45,
                         "hingeMin": 0,
                         "hingeMax": 0,
-                        "tilt": [32, 0]
+                        "tilt": [25, 0]
                       }
                     },
                     {
@@ -12940,14 +12947,7 @@
                         "hingeMax": 0
                       }
                     }
-                  ],
-                  "selfCollision": true,
-                  "linearDamping": 0.02,
-                  "angularDamping": 0.2,
-                  "solverIterations": 20,
-                  "friction": 0.8,
-                  "restitution": 0.05,
-                  "footFriction": 2
+                  ]
                 },
                 "reactionSets": {
                   "version": 1,
@@ -13041,6 +13041,9 @@
                             "impulseOneFoot": 0.8,
                             "impulseAirborne": 0.5,
                             "duration": 1.4,
+                            "holdControl": 0.35,
+                            "holdRelease": 0.3,
+                            "reactTurn": 0.5,
                             "painLean": 0.25,
                             "shockSpin": 0.3,
                             "gutFold": 0.45,
@@ -13064,6 +13067,7 @@
                             "maxSteps": 4,
                             "tire": 0.7,
                             "assist": 1,
+                            "yawDamp": 0.25,
                             "firstStep": 0.12,
                             "crossMax": 0.08,
                             "stanceStiffness": 1.2,
@@ -13203,7 +13207,7 @@
                             "blendTime": 0.25
                           },
                           "clips": {
-                            "faceUp": "Stand Up"
+                            "faceUp": "Getting Up"
                           }
                         }
                       }
@@ -26089,7 +26093,7 @@
                   "roundsPerMinute": 76,
                   "pellets": 9,
                   "range": 60,
-                  "impulse": 27,
+                  "impulse": 90,
                   "damage": 12,
                   "magazine": 6,
                   "reserveRounds": 36,
@@ -26584,6 +26588,766 @@
                   "lineHeight": 1.2
                 },
                 "id": "d9b005ff452fe9ae9d47f5d559dfe7fc"
+              },
+              {
+                "name": "Weapon Wheel",
+                "type": "uiPanel",
+                "position": [0, 0, 0],
+                "rotation": [0, 0, 0],
+                "scale": [1, 1, 1],
+                "children": [
+                  {
+                    "name": "Wheel Ring",
+                    "type": "uiPanel",
+                    "position": [0, 0, 0],
+                    "rotation": [0, 0, 0],
+                    "scale": [1, 1, 1],
+                    "children": [],
+                    "variables": {},
+                    "spawnOnStart": true,
+                    "visible": false,
+                    "ui": {
+                      "anchorMin": [0, 0],
+                      "anchorMax": [1, 1],
+                      "offsetMin": [0, 0],
+                      "offsetMax": [0, 0],
+                      "pivot": [0, 0],
+                      "rotationDeg": 0,
+                      "scale2d": [1, 1],
+                      "opacity": 1,
+                      "tint": [0.02, 0.025, 0.03, 0.55],
+                      "zOrder": 0,
+                      "interactive": false,
+                      "clip": false,
+                      "sizing": "fixed",
+                      "padding": [0, 0, 0, 0],
+                      "borderRadius": 290,
+                      "borderWidth": 2,
+                      "borderColor": [1, 1, 1, 0.1]
+                    },
+                    "id": "de29baa3833d87e646dbce754669d670"
+                  },
+                  {
+                    "name": "Wheel Hub",
+                    "type": "uiPanel",
+                    "position": [0, 0, 0],
+                    "rotation": [0, 0, 0],
+                    "scale": [1, 1, 1],
+                    "children": [
+                      {
+                        "name": "Wheel Name",
+                        "type": "uiText",
+                        "position": [0, 0, 0],
+                        "rotation": [0, 0, 0],
+                        "scale": [1, 1, 1],
+                        "children": [],
+                        "variables": {},
+                        "spawnOnStart": true,
+                        "visible": false,
+                        "ui": {
+                          "anchorMin": [0, 0.5],
+                          "anchorMax": [1, 0.5],
+                          "offsetMin": [8, -30],
+                          "offsetMax": [-8, 4],
+                          "pivot": [0, 0],
+                          "rotationDeg": 0,
+                          "scale2d": [1, 1],
+                          "opacity": 1,
+                          "tint": [1, 1, 1, 1],
+                          "zOrder": 0,
+                          "interactive": false,
+                          "clip": false,
+                          "sizing": "fixed",
+                          "padding": [0, 0, 0, 0],
+                          "borderRadius": 0,
+                          "borderWidth": 0,
+                          "borderColor": [0, 0, 0, 1],
+                          "text": "AK-47",
+                          "fontSize": 26,
+                          "fontFamily": "",
+                          "fontWeight": 700,
+                          "align": "center",
+                          "vAlign": "middle",
+                          "wrap": true,
+                          "lineHeight": 1.2
+                        },
+                        "id": "49545ff355314fc2cbb4df69746e0e58"
+                      },
+                      {
+                        "name": "Wheel Ammo",
+                        "type": "uiText",
+                        "position": [0, 0, 0],
+                        "rotation": [0, 0, 0],
+                        "scale": [1, 1, 1],
+                        "children": [],
+                        "variables": {},
+                        "spawnOnStart": true,
+                        "visible": false,
+                        "ui": {
+                          "anchorMin": [0, 0.5],
+                          "anchorMax": [1, 0.5],
+                          "offsetMin": [8, 8],
+                          "offsetMax": [-8, 32],
+                          "pivot": [0, 0],
+                          "rotationDeg": 0,
+                          "scale2d": [1, 1],
+                          "opacity": 1,
+                          "tint": [1, 1, 1, 0.7],
+                          "zOrder": 0,
+                          "interactive": false,
+                          "clip": false,
+                          "sizing": "fixed",
+                          "padding": [0, 0, 0, 0],
+                          "borderRadius": 0,
+                          "borderWidth": 0,
+                          "borderColor": [0, 0, 0, 1],
+                          "text": "30 / 90",
+                          "fontSize": 17,
+                          "fontFamily": "",
+                          "fontWeight": 500,
+                          "align": "center",
+                          "vAlign": "middle",
+                          "wrap": true,
+                          "lineHeight": 1.2
+                        },
+                        "id": "e5aae45e1cc739ab238e6c44c37b70f1"
+                      }
+                    ],
+                    "variables": {},
+                    "spawnOnStart": true,
+                    "visible": false,
+                    "ui": {
+                      "anchorMin": [0.5, 0.5],
+                      "anchorMax": [0.5, 0.5],
+                      "offsetMin": [-84, -84],
+                      "offsetMax": [84, 84],
+                      "pivot": [0, 0],
+                      "rotationDeg": 0,
+                      "scale2d": [1, 1],
+                      "opacity": 1,
+                      "tint": [0, 0, 0, 0.62],
+                      "zOrder": 1,
+                      "interactive": false,
+                      "clip": false,
+                      "sizing": "fixed",
+                      "padding": [0, 0, 0, 0],
+                      "borderRadius": 84,
+                      "borderWidth": 2,
+                      "borderColor": [1, 1, 1, 0.18]
+                    },
+                    "id": "8cc51d6450a7207bb0a0982a016c9ce1"
+                  },
+                  {
+                    "name": "Wheel Pointer",
+                    "type": "uiPanel",
+                    "position": [0, 0, 0],
+                    "rotation": [0, 0, 0],
+                    "scale": [1, 1, 1],
+                    "children": [],
+                    "variables": {},
+                    "spawnOnStart": true,
+                    "visible": false,
+                    "ui": {
+                      "anchorMin": [0.5, 0.5],
+                      "anchorMax": [0.5, 0.5],
+                      "offsetMin": [-9, -107],
+                      "offsetMax": [9, -89],
+                      "pivot": [0, 0],
+                      "rotationDeg": 0,
+                      "scale2d": [1, 1],
+                      "opacity": 1,
+                      "tint": [1, 0.82, 0.45, 1],
+                      "zOrder": 2,
+                      "interactive": false,
+                      "clip": false,
+                      "sizing": "fixed",
+                      "padding": [0, 0, 0, 0],
+                      "borderRadius": 9,
+                      "borderWidth": 0,
+                      "borderColor": [0, 0, 0, 1]
+                    },
+                    "id": "7cd5b342f92ba315e8d4c6c85c6ddd5b"
+                  },
+                  {
+                    "name": "Slot Unarmed",
+                    "type": "uiPanel",
+                    "position": [0, 0, 0],
+                    "rotation": [0, 0, 0],
+                    "scale": [1, 1, 1],
+                    "children": [
+                      {
+                        "name": "Label",
+                        "type": "uiText",
+                        "position": [0, 0, 0],
+                        "rotation": [0, 0, 0],
+                        "scale": [1, 1, 1],
+                        "children": [],
+                        "variables": {},
+                        "spawnOnStart": true,
+                        "visible": false,
+                        "ui": {
+                          "anchorMin": [0, 0.5],
+                          "anchorMax": [1, 0.5],
+                          "offsetMin": [6, -30],
+                          "offsetMax": [-6, 2],
+                          "pivot": [0, 0],
+                          "rotationDeg": 0,
+                          "scale2d": [1, 1],
+                          "opacity": 1,
+                          "tint": [0.86, 0.88, 0.9, 1],
+                          "zOrder": 0,
+                          "interactive": false,
+                          "clip": false,
+                          "sizing": "fixed",
+                          "padding": [0, 0, 0, 0],
+                          "borderRadius": 0,
+                          "borderWidth": 0,
+                          "borderColor": [0, 0, 0, 1],
+                          "text": "Unarmed",
+                          "fontSize": 24,
+                          "fontFamily": "",
+                          "fontWeight": 700,
+                          "align": "center",
+                          "vAlign": "middle",
+                          "wrap": true,
+                          "lineHeight": 1.2
+                        },
+                        "id": "6aad1a236bf09106cebf4265b2ba3e08"
+                      },
+                      {
+                        "name": "Ammo",
+                        "type": "uiText",
+                        "position": [0, 0, 0],
+                        "rotation": [0, 0, 0],
+                        "scale": [1, 1, 1],
+                        "children": [],
+                        "variables": {},
+                        "spawnOnStart": true,
+                        "visible": false,
+                        "ui": {
+                          "anchorMin": [0, 0.5],
+                          "anchorMax": [1, 0.5],
+                          "offsetMin": [6, 8],
+                          "offsetMax": [-6, 30],
+                          "pivot": [0, 0],
+                          "rotationDeg": 0,
+                          "scale2d": [1, 1],
+                          "opacity": 1,
+                          "tint": [0.86, 0.88, 0.9, 0.75],
+                          "zOrder": 0,
+                          "interactive": false,
+                          "clip": false,
+                          "sizing": "fixed",
+                          "padding": [0, 0, 0, 0],
+                          "borderRadius": 0,
+                          "borderWidth": 0,
+                          "borderColor": [0, 0, 0, 1],
+                          "text": "Holster",
+                          "fontSize": 16,
+                          "fontFamily": "",
+                          "fontWeight": 500,
+                          "align": "center",
+                          "vAlign": "middle",
+                          "wrap": true,
+                          "lineHeight": 1.2
+                        },
+                        "id": "669a657924ba9956553b0dd71d53c394"
+                      }
+                    ],
+                    "variables": {},
+                    "spawnOnStart": true,
+                    "visible": false,
+                    "ui": {
+                      "anchorMin": [0.5, 0.5],
+                      "anchorMax": [0.5, 0.5],
+                      "offsetMin": [-78, -254],
+                      "offsetMax": [78, -130],
+                      "pivot": [0.5, 0.5],
+                      "rotationDeg": 0,
+                      "scale2d": [1, 1],
+                      "opacity": 1,
+                      "tint": [0.04, 0.05, 0.06, 0.62],
+                      "zOrder": 1,
+                      "interactive": false,
+                      "clip": false,
+                      "sizing": "fixed",
+                      "padding": [0, 0, 0, 0],
+                      "borderRadius": 16,
+                      "borderWidth": 2,
+                      "borderColor": [1, 1, 1, 0.14]
+                    },
+                    "id": "441f97268de913a7a36e75404cd33d09"
+                  },
+                  {
+                    "name": "Slot Pistol",
+                    "type": "uiPanel",
+                    "position": [0, 0, 0],
+                    "rotation": [0, 0, 0],
+                    "scale": [1, 1, 1],
+                    "children": [
+                      {
+                        "name": "Label",
+                        "type": "uiText",
+                        "position": [0, 0, 0],
+                        "rotation": [0, 0, 0],
+                        "scale": [1, 1, 1],
+                        "children": [],
+                        "variables": {},
+                        "spawnOnStart": true,
+                        "visible": false,
+                        "ui": {
+                          "anchorMin": [0, 0.5],
+                          "anchorMax": [1, 0.5],
+                          "offsetMin": [6, 8],
+                          "offsetMax": [-6, 30],
+                          "pivot": [0, 0],
+                          "rotationDeg": 0,
+                          "scale2d": [1, 1],
+                          "opacity": 1,
+                          "tint": [0.86, 0.88, 0.9, 1],
+                          "zOrder": 0,
+                          "interactive": false,
+                          "clip": false,
+                          "sizing": "fixed",
+                          "padding": [0, 0, 0, 0],
+                          "borderRadius": 0,
+                          "borderWidth": 0,
+                          "borderColor": [0, 0, 0, 1],
+                          "text": "Pistol",
+                          "fontSize": 19,
+                          "fontFamily": "",
+                          "fontWeight": 700,
+                          "align": "center",
+                          "vAlign": "middle",
+                          "wrap": true,
+                          "lineHeight": 1.2
+                        },
+                        "id": "f764c5e2e1aa4e69c533e78083253717"
+                      },
+                      {
+                        "name": "Ammo",
+                        "type": "uiText",
+                        "position": [0, 0, 0],
+                        "rotation": [0, 0, 0],
+                        "scale": [1, 1, 1],
+                        "children": [],
+                        "variables": {},
+                        "spawnOnStart": true,
+                        "visible": false,
+                        "ui": {
+                          "anchorMin": [0, 0.5],
+                          "anchorMax": [1, 0.5],
+                          "offsetMin": [6, 31],
+                          "offsetMax": [-6, 52],
+                          "pivot": [0, 0],
+                          "rotationDeg": 0,
+                          "scale2d": [1, 1],
+                          "opacity": 1,
+                          "tint": [0.86, 0.88, 0.9, 0.75],
+                          "zOrder": 0,
+                          "interactive": false,
+                          "clip": false,
+                          "sizing": "fixed",
+                          "padding": [0, 0, 0, 0],
+                          "borderRadius": 0,
+                          "borderWidth": 0,
+                          "borderColor": [0, 0, 0, 1],
+                          "text": "12 / 48",
+                          "fontSize": 15,
+                          "fontFamily": "",
+                          "fontWeight": 500,
+                          "align": "center",
+                          "vAlign": "middle",
+                          "wrap": true,
+                          "lineHeight": 1.2
+                        },
+                        "id": "2ca3db0ab5493df3eb5a9eacf4587bb5"
+                      },
+                      {
+                        "name": "Icon",
+                        "type": "uiImage",
+                        "position": [0, 0, 0],
+                        "rotation": [0, 0, 0],
+                        "scale": [1, 1, 1],
+                        "children": [],
+                        "variables": {},
+                        "spawnOnStart": true,
+                        "visible": false,
+                        "ui": {
+                          "anchorMin": [0, 0.5],
+                          "anchorMax": [1, 0.5],
+                          "offsetMin": [14, -54],
+                          "offsetMax": [-14, 4],
+                          "pivot": [0, 0],
+                          "rotationDeg": 0,
+                          "scale2d": [1, 1],
+                          "opacity": 1,
+                          "tint": [0.86, 0.88, 0.9, 0.92],
+                          "zOrder": 0,
+                          "interactive": false,
+                          "clip": false,
+                          "sizing": "fixed",
+                          "padding": [0, 0, 0, 0],
+                          "borderRadius": 0,
+                          "borderWidth": 0,
+                          "borderColor": [0, 0, 0, 1],
+                          "textureId": "Icon Pistol.png",
+                          "fit": "contain",
+                          "uvRect": [0, 0, 1, 1]
+                        },
+                        "id": "ee2ae625442337ec2c24db9714e10bbe"
+                      }
+                    ],
+                    "variables": {},
+                    "spawnOnStart": true,
+                    "visible": false,
+                    "ui": {
+                      "anchorMin": [0.5, 0.5],
+                      "anchorMax": [0.5, 0.5],
+                      "offsetMin": [114, -62],
+                      "offsetMax": [270, 62],
+                      "pivot": [0.5, 0.5],
+                      "rotationDeg": 0,
+                      "scale2d": [1, 1],
+                      "opacity": 1,
+                      "tint": [0.04, 0.05, 0.06, 0.62],
+                      "zOrder": 1,
+                      "interactive": false,
+                      "clip": false,
+                      "sizing": "fixed",
+                      "padding": [0, 0, 0, 0],
+                      "borderRadius": 16,
+                      "borderWidth": 2,
+                      "borderColor": [1, 1, 1, 0.14]
+                    },
+                    "id": "c70a39e30a35d3b4997d26d1d0a7d0da"
+                  },
+                  {
+                    "name": "Slot Rifle",
+                    "type": "uiPanel",
+                    "position": [0, 0, 0],
+                    "rotation": [0, 0, 0],
+                    "scale": [1, 1, 1],
+                    "children": [
+                      {
+                        "name": "Label",
+                        "type": "uiText",
+                        "position": [0, 0, 0],
+                        "rotation": [0, 0, 0],
+                        "scale": [1, 1, 1],
+                        "children": [],
+                        "variables": {},
+                        "spawnOnStart": true,
+                        "visible": false,
+                        "ui": {
+                          "anchorMin": [0, 0.5],
+                          "anchorMax": [1, 0.5],
+                          "offsetMin": [6, 8],
+                          "offsetMax": [-6, 30],
+                          "pivot": [0, 0],
+                          "rotationDeg": 0,
+                          "scale2d": [1, 1],
+                          "opacity": 1,
+                          "tint": [0.06, 0.05, 0.04, 1],
+                          "zOrder": 0,
+                          "interactive": false,
+                          "clip": false,
+                          "sizing": "fixed",
+                          "padding": [0, 0, 0, 0],
+                          "borderRadius": 0,
+                          "borderWidth": 0,
+                          "borderColor": [0, 0, 0, 1],
+                          "text": "AK-47",
+                          "fontSize": 19,
+                          "fontFamily": "",
+                          "fontWeight": 700,
+                          "align": "center",
+                          "vAlign": "middle",
+                          "wrap": true,
+                          "lineHeight": 1.2
+                        },
+                        "id": "343e1f5748d56502ea1fe2798333531c"
+                      },
+                      {
+                        "name": "Ammo",
+                        "type": "uiText",
+                        "position": [0, 0, 0],
+                        "rotation": [0, 0, 0],
+                        "scale": [1, 1, 1],
+                        "children": [],
+                        "variables": {},
+                        "spawnOnStart": true,
+                        "visible": false,
+                        "ui": {
+                          "anchorMin": [0, 0.5],
+                          "anchorMax": [1, 0.5],
+                          "offsetMin": [6, 31],
+                          "offsetMax": [-6, 52],
+                          "pivot": [0, 0],
+                          "rotationDeg": 0,
+                          "scale2d": [1, 1],
+                          "opacity": 1,
+                          "tint": [0.06, 0.05, 0.04, 0.75],
+                          "zOrder": 0,
+                          "interactive": false,
+                          "clip": false,
+                          "sizing": "fixed",
+                          "padding": [0, 0, 0, 0],
+                          "borderRadius": 0,
+                          "borderWidth": 0,
+                          "borderColor": [0, 0, 0, 1],
+                          "text": "30 / 90",
+                          "fontSize": 15,
+                          "fontFamily": "",
+                          "fontWeight": 500,
+                          "align": "center",
+                          "vAlign": "middle",
+                          "wrap": true,
+                          "lineHeight": 1.2
+                        },
+                        "id": "aee538f5e44bfeaad3d99023bbcc9cb0"
+                      },
+                      {
+                        "name": "Icon",
+                        "type": "uiImage",
+                        "position": [0, 0, 0],
+                        "rotation": [0, 0, 0],
+                        "scale": [1, 1, 1],
+                        "children": [],
+                        "variables": {},
+                        "spawnOnStart": true,
+                        "visible": false,
+                        "ui": {
+                          "anchorMin": [0, 0.5],
+                          "anchorMax": [1, 0.5],
+                          "offsetMin": [10, -54],
+                          "offsetMax": [-10, 4],
+                          "pivot": [0, 0],
+                          "rotationDeg": 0,
+                          "scale2d": [1, 1],
+                          "opacity": 1,
+                          "tint": [0.86, 0.88, 0.9, 0.92],
+                          "zOrder": 0,
+                          "interactive": false,
+                          "clip": false,
+                          "sizing": "fixed",
+                          "padding": [0, 0, 0, 0],
+                          "borderRadius": 0,
+                          "borderWidth": 0,
+                          "borderColor": [0, 0, 0, 1],
+                          "textureId": "Icon Rifle.png",
+                          "fit": "contain",
+                          "uvRect": [0, 0, 1, 1]
+                        },
+                        "id": "cf6dc8febf1e2bc528681d1c78d3fea3"
+                      }
+                    ],
+                    "variables": {},
+                    "spawnOnStart": true,
+                    "visible": false,
+                    "ui": {
+                      "anchorMin": [0.5, 0.5],
+                      "anchorMax": [0.5, 0.5],
+                      "offsetMin": [-78, 130],
+                      "offsetMax": [78, 254],
+                      "pivot": [0.5, 0.5],
+                      "rotationDeg": 0,
+                      "scale2d": [1, 1],
+                      "opacity": 1,
+                      "tint": [0.96, 0.66, 0.2, 0.9],
+                      "zOrder": 1,
+                      "interactive": false,
+                      "clip": false,
+                      "sizing": "fixed",
+                      "padding": [0, 0, 0, 0],
+                      "borderRadius": 16,
+                      "borderWidth": 2,
+                      "borderColor": [1, 0.86, 0.55, 1]
+                    },
+                    "id": "85269a9adbb8aec37d241404d91cf8bd"
+                  },
+                  {
+                    "name": "Slot Shotgun",
+                    "type": "uiPanel",
+                    "position": [0, 0, 0],
+                    "rotation": [0, 0, 0],
+                    "scale": [1, 1, 1],
+                    "children": [
+                      {
+                        "name": "Label",
+                        "type": "uiText",
+                        "position": [0, 0, 0],
+                        "rotation": [0, 0, 0],
+                        "scale": [1, 1, 1],
+                        "children": [],
+                        "variables": {},
+                        "spawnOnStart": true,
+                        "visible": false,
+                        "ui": {
+                          "anchorMin": [0, 0.5],
+                          "anchorMax": [1, 0.5],
+                          "offsetMin": [6, 8],
+                          "offsetMax": [-6, 30],
+                          "pivot": [0, 0],
+                          "rotationDeg": 0,
+                          "scale2d": [1, 1],
+                          "opacity": 1,
+                          "tint": [0.86, 0.88, 0.9, 1],
+                          "zOrder": 0,
+                          "interactive": false,
+                          "clip": false,
+                          "sizing": "fixed",
+                          "padding": [0, 0, 0, 0],
+                          "borderRadius": 0,
+                          "borderWidth": 0,
+                          "borderColor": [0, 0, 0, 1],
+                          "text": "SAPS-12",
+                          "fontSize": 19,
+                          "fontFamily": "",
+                          "fontWeight": 700,
+                          "align": "center",
+                          "vAlign": "middle",
+                          "wrap": true,
+                          "lineHeight": 1.2
+                        },
+                        "id": "39127dcbbf8ff436c172bdb512caf890"
+                      },
+                      {
+                        "name": "Ammo",
+                        "type": "uiText",
+                        "position": [0, 0, 0],
+                        "rotation": [0, 0, 0],
+                        "scale": [1, 1, 1],
+                        "children": [],
+                        "variables": {},
+                        "spawnOnStart": true,
+                        "visible": false,
+                        "ui": {
+                          "anchorMin": [0, 0.5],
+                          "anchorMax": [1, 0.5],
+                          "offsetMin": [6, 31],
+                          "offsetMax": [-6, 52],
+                          "pivot": [0, 0],
+                          "rotationDeg": 0,
+                          "scale2d": [1, 1],
+                          "opacity": 1,
+                          "tint": [0.86, 0.88, 0.9, 0.75],
+                          "zOrder": 0,
+                          "interactive": false,
+                          "clip": false,
+                          "sizing": "fixed",
+                          "padding": [0, 0, 0, 0],
+                          "borderRadius": 0,
+                          "borderWidth": 0,
+                          "borderColor": [0, 0, 0, 1],
+                          "text": "8 / 32",
+                          "fontSize": 15,
+                          "fontFamily": "",
+                          "fontWeight": 500,
+                          "align": "center",
+                          "vAlign": "middle",
+                          "wrap": true,
+                          "lineHeight": 1.2
+                        },
+                        "id": "2c81f7417dd467666ddf5607ba3f2ddc"
+                      },
+                      {
+                        "name": "Icon",
+                        "type": "uiImage",
+                        "position": [0, 0, 0],
+                        "rotation": [0, 0, 0],
+                        "scale": [1, 1, 1],
+                        "children": [],
+                        "variables": {},
+                        "spawnOnStart": true,
+                        "visible": false,
+                        "ui": {
+                          "anchorMin": [0, 0.5],
+                          "anchorMax": [1, 0.5],
+                          "offsetMin": [10, -54],
+                          "offsetMax": [-10, 4],
+                          "pivot": [0, 0],
+                          "rotationDeg": 0,
+                          "scale2d": [1, 1],
+                          "opacity": 1,
+                          "tint": [0.86, 0.88, 0.9, 0.92],
+                          "zOrder": 0,
+                          "interactive": false,
+                          "clip": false,
+                          "sizing": "fixed",
+                          "padding": [0, 0, 0, 0],
+                          "borderRadius": 0,
+                          "borderWidth": 0,
+                          "borderColor": [0, 0, 0, 1],
+                          "textureId": "Icon Shotgun.png",
+                          "fit": "contain",
+                          "uvRect": [0, 0, 1, 1]
+                        },
+                        "id": "6d877bc2c0529f9915d761c8e397bb07"
+                      }
+                    ],
+                    "variables": {},
+                    "spawnOnStart": true,
+                    "visible": false,
+                    "ui": {
+                      "anchorMin": [0.5, 0.5],
+                      "anchorMax": [0.5, 0.5],
+                      "offsetMin": [-270, -62],
+                      "offsetMax": [-114, 62],
+                      "pivot": [0.5, 0.5],
+                      "rotationDeg": 0,
+                      "scale2d": [1, 1],
+                      "opacity": 1,
+                      "tint": [0.04, 0.05, 0.06, 0.62],
+                      "zOrder": 1,
+                      "interactive": false,
+                      "clip": false,
+                      "sizing": "fixed",
+                      "padding": [0, 0, 0, 0],
+                      "borderRadius": 16,
+                      "borderWidth": 2,
+                      "borderColor": [1, 1, 1, 0.14]
+                    },
+                    "id": "dca2acbe2871301726007490d5284ee1"
+                  }
+                ],
+                "variables": {
+                  "__scriptId": {
+                    "type": "string",
+                    "value": "da5f1305233d19fc4070287e0ed88112",
+                    "access": "public"
+                  }
+                },
+                "spawnOnStart": true,
+                "visible": false,
+                "ui": {
+                  "anchorMin": [0.5, 0.5],
+                  "anchorMax": [0.5, 0.5],
+                  "offsetMin": [-290, -290],
+                  "offsetMax": [290, 290],
+                  "pivot": [0.5, 0.5],
+                  "rotationDeg": 0,
+                  "scale2d": [1, 1],
+                  "opacity": 1,
+                  "tint": [0, 0, 0, 0],
+                  "zOrder": 10,
+                  "interactive": false,
+                  "clip": false,
+                  "sizing": "fixed",
+                  "padding": [0, 0, 0, 0],
+                  "borderRadius": 0,
+                  "borderWidth": 0,
+                  "borderColor": [0, 0, 0, 1]
+                },
+                "scriptVars": {
+                  "slowMotion": 0.3,
+                  "fadeSeconds": 0.12,
+                  "mouseRange": 140,
+                  "deadZone": 0.35,
+                  "stickRange": 8,
+                  "pointerRadius": 98
+                },
+                "id": "6e48b76f00950540793dc591fabc1762"
               }
             ],
             "variables": {},
@@ -26713,16 +27477,68 @@
         "crouchSpeed": 0.36,
         "scriptVars": {
           "walkScale": 0.381,
+          "walkDeflection": 0.6,
           "backScale": 0.724,
           "backDiagonalScale": 0.485,
           "walkBackDiagonalScale": 0.858,
+          "directionEase": 0.15,
+          "runTurnSpeed": 3.5,
           "sprintTakeoff": 4.98,
+          "runTurnAngle": 135,
+          "runTurnRelease": 30,
+          "runTurnSeconds": 1.2,
+          "jumpTurnSpeed": 1,
+          "leanAcceleration": 4,
+          "leanSpeed": 4,
+          "leanForwardAcceleration": 8,
+          "leanForwardSpeed": 8,
+          "lookAroundAngle": 20,
+          "turnDelay": 1,
+          "farTurnShare": 0.35,
+          "lookSpeed": 5,
+          "lookPitchRest": 12,
           "walkFootSpeed": 1.919,
           "runFootSpeed": 3.775,
+          "runFootWeight": 0.3,
+          "stairsLayer": "Stair Ramp",
           "stairUpWalkSpeed": 0.549,
           "stairUpRunSpeed": 1.25,
           "stairDownWalkSpeed": 0.804,
-          "stairDownRunSpeed": 1.875
+          "stairDownRunSpeed": 1.875,
+          "stairGrade": 0.25,
+          "stairGrace": 0.15,
+          "stairBrake": 1.5,
+          "enterTrigger": "EnterCar",
+          "exitTrigger": "ExitCar",
+          "equipSeconds": 0.3,
+          "aimSeconds": 0.15,
+          "aimTurnThreshold": 45,
+          "fireAimHold": 0.6,
+          "fireAimReady": 0.7,
+          "alignSeconds": 0.35,
+          "alignMaxSeconds": 0.6,
+          "settleSeconds": 0.3,
+          "recoilRecovery": 0.7,
+          "recoilRecoverySpeed": 6,
+          "wheelHoldSeconds": 0.2,
+          "eyeStand": 1.62,
+          "eyeCrouch": 1.1,
+          "crouchSmoothing": 0.09,
+          "hipFov": 78,
+          "sprintFovBoost": 5,
+          "adsSeconds": 0.14,
+          "adsSensitivity": 0.55,
+          "viewmodelFov": 58,
+          "viewmodelReach": 0.95,
+          "aimClipRaise": 0.028,
+          "dofAperture": 2,
+          "dofMaxBlur": 14,
+          "dofNearCutoff": 1.2,
+          "dofFarFocus": 60,
+          "aimDofAperture": 1.2,
+          "aimDofMaxBlur": 32,
+          "aimDofRange": 1,
+          "sprintAngle": 50
         }
       }
     ],
@@ -26803,140 +27619,1188 @@
               "__scriptId": {
                 "value": "a3f1e498984fb88f51b1b4df74f690be"
               }
+            },
+            "scriptVars": {
+              "recoilRecovery": 0.7,
+              "recoilRecoverySpeed": 6,
+              "wheelHoldSeconds": 0.2,
+              "eyeStand": 1.62,
+              "eyeCrouch": 1.1,
+              "crouchSmoothing": 0.09,
+              "hipFov": 78,
+              "sprintFovBoost": 5,
+              "adsSeconds": 0.14,
+              "adsSensitivity": 0.55,
+              "viewmodelFov": 58,
+              "viewmodelReach": 0.95,
+              "aimClipRaise": 0.028,
+              "dofAperture": 2,
+              "dofMaxBlur": 14,
+              "dofNearCutoff": 1.2,
+              "dofFarFocus": 60,
+              "aimDofAperture": 1.2,
+              "aimDofMaxBlur": 32,
+              "aimDofRange": 1,
+              "sprintAngle": 50
             }
-          },
-          "unset": [
-            [
-              "scriptVars",
-              "walkDeflection"
-            ],
-            [
-              "scriptVars",
-              "directionEase"
-            ],
-            [
-              "scriptVars",
-              "runTurnSpeed"
-            ],
-            [
-              "scriptVars",
-              "runTurnAngle"
-            ],
-            [
-              "scriptVars",
-              "runTurnRelease"
-            ],
-            [
-              "scriptVars",
-              "runTurnSeconds"
-            ],
-            [
-              "scriptVars",
-              "jumpTurnSpeed"
-            ],
-            [
-              "scriptVars",
-              "leanAcceleration"
-            ],
-            [
-              "scriptVars",
-              "leanSpeed"
-            ],
-            [
-              "scriptVars",
-              "leanForwardAcceleration"
-            ],
-            [
-              "scriptVars",
-              "leanForwardSpeed"
-            ],
-            [
-              "scriptVars",
-              "lookAroundAngle"
-            ],
-            [
-              "scriptVars",
-              "turnDelay"
-            ],
-            [
-              "scriptVars",
-              "farTurnShare"
-            ],
-            [
-              "scriptVars",
-              "lookSpeed"
-            ],
-            [
-              "scriptVars",
-              "lookPitchRest"
-            ],
-            [
-              "scriptVars",
-              "runFootWeight"
-            ],
-            [
-              "scriptVars",
-              "stairsLayer"
-            ],
-            [
-              "scriptVars",
-              "stairGrade"
-            ],
-            [
-              "scriptVars",
-              "stairGrace"
-            ],
-            [
-              "scriptVars",
-              "stairBrake"
-            ],
-            [
-              "scriptVars",
-              "enterTrigger"
-            ],
-            [
-              "scriptVars",
-              "exitTrigger"
-            ],
-            [
-              "scriptVars",
-              "equipSeconds"
-            ],
-            [
-              "scriptVars",
-              "aimSeconds"
-            ],
-            [
-              "scriptVars",
-              "aimTurnThreshold"
-            ],
-            [
-              "scriptVars",
-              "fireAimHold"
-            ],
-            [
-              "scriptVars",
-              "fireAimReady"
-            ],
-            [
-              "scriptVars",
-              "alignSeconds"
-            ],
-            [
-              "scriptVars",
-              "alignMaxSeconds"
-            ],
-            [
-              "scriptVars",
-              "settleSeconds"
-            ]
-          ]
+          }
         },
         "Character/Mannequin": {
           "merge": {
+            "model": {
+              "material": {
+                "textures": {}
+              },
+              "skin": {
+                "joints": [
+                  {
+                    "nodeIndex": 3,
+                    "inverseBindMatrix": {
+                      "$f32": {
+                        "n": [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 2.288818308215923e-7, -0.9975399971008301, -0.030078819021582603, 1]
+                      },
+                      "t": 1
+                    },
+                    "parentIndex": 2
+                  },
+                  {
+                    "nodeIndex": 96,
+                    "inverseBindMatrix": {
+                      "$f32": {
+                        "n": [-0.9961641430854797, -0.0875040665268898, 5.48066036998307e-9, 0, 0.08735758811235428, -0.9944965839385986, -0.0578366294503212, 0, 0.005060945637524128, -0.057614777237176895, 0.9983260631561279, 0, -0.16300982236862183, 0.9325547814369202, 0.032046444714069366, 1]
+                      },
+                      "t": 1
+                    },
+                    "parentIndex": 3
+                  },
+                  {
+                    "nodeIndex": 88,
+                    "inverseBindMatrix": {
+                      "$f32": {
+                        "n": [-0.9961665868759155, 0.08747566491365433, -1.2582368480451578e-9, 0, -0.08730059862136841, -0.9941728711128235, -0.06323544681072235, 0, -0.005531564354896545, -0.06299304217100143, 0.9979985952377319, 0, 0.1629783660173416, 0.9325090050697327, 0.034993015229701996, 1]
+                      },
+                      "t": 1
+                    },
+                    "parentIndex": 3
+                  },
+                  {
+                    "nodeIndex": 10,
+                    "inverseBindMatrix": {
+                      "$f32": {
+                        "n": [1, 0, 0, 0, 0, 1, -1.6250740486611903e-7, 0, 0, 1.6250740486611903e-7, 1, 0, 2.288818308215923e-7, -1.5506056547164917, 0.009212072938680649, 1]
+                      },
+                      "t": 1
+                    },
+                    "parentIndex": 9
+                  },
+                  {
+                    "nodeIndex": 9,
+                    "inverseBindMatrix": {
+                      "$f32": {
+                        "n": [1, 0, 0, 0, 0, 1, -1.6250740486611903e-7, 0, 0, 1.6250740486611903e-7, 1, 0, 2.288818308215923e-7, -1.4834036827087402, 0.028933638706803322, 1]
+                      },
+                      "t": 1
+                    },
+                    "parentIndex": 7
+                  },
+                  {
+                    "nodeIndex": 14,
+                    "inverseBindMatrix": {
+                      "$f32": {
+                        "n": [-0.06695612519979477, 0.9955610632896423, -0.06614361703395844, 0, -0.11259116232395172, -0.07340794056653976, -0.9909260869026184, 0, -0.991382896900177, -0.05890139564871788, 0.11700650304555893, 0, 0.14420543611049652, -0.08264914900064468, 1.4349595308303833, 1]
+                      },
+                      "t": 1
+                    },
+                    "parentIndex": 12
+                  },
+                  {
+                    "nodeIndex": 12,
+                    "inverseBindMatrix": {
+                      "$f32": {
+                        "n": [-0.03760373964905739, 0.9645582437515259, -0.26117682456970215, 0, -0.12068062275648117, -0.2638322114944458, -0.9569894671440125, 0, -0.9919789433479309, -0.00446737464517355, 0.12632453441619873, 0, 0.15028810501098633, 0.3275336027145386, 1.4230785369873047, 1]
+                      },
+                      "t": 1
+                    },
+                    "parentIndex": 7
+                  },
+                  {
+                    "nodeIndex": 7,
+                    "inverseBindMatrix": {
+                      "$f32": {
+                        "n": [1, 0, 0, 0, 0, 0.9927045106887817, 0.1205722987651825, 0, 0, -0.1205722987651825, 0.9927045106887817, 0, 2.288818308215923e-7, -1.3292397260665894, -0.15013505518436432, 1]
+                      },
+                      "t": 1
+                    },
+                    "parentIndex": 6
+                  },
+                  {
+                    "nodeIndex": 6,
+                    "inverseBindMatrix": {
+                      "$f32": {
+                        "n": [1, 0, 0, 0, 0, 0.9927045106887817, 0.1205722987651825, 0, 0, -0.1205722987651825, 0.9927045106887817, 0, 2.288818308215923e-7, -1.1987239122390747, -0.15013505518436432, 1]
+                      },
+                      "t": 1
+                    },
+                    "parentIndex": 5
+                  },
+                  {
+                    "nodeIndex": 90,
+                    "inverseBindMatrix": {
+                      "$f32": {
+                        "n": [-0.9968231320381165, 0.07964679598808289, 0.0004236786626279354, 0, -0.07948851585388184, -0.9944776296615601, -0.06852645426988602, 0, -0.005036572925746441, -0.068342424929142, 0.9976492524147034, 0, 0.15900954604148865, 0.505682110786438, 0.037683483213186264, 1]
+                      },
+                      "t": 1
+                    },
+                    "parentIndex": 88
+                  },
+                  {
+                    "nodeIndex": 92,
+                    "inverseBindMatrix": {
+                      "$f32": {
+                        "n": [-0.9962353706359863, 0.07003770768642426, -0.051088377833366394, 0, -0.08176682144403458, -0.5633587837219238, 0.8221564888954163, 0, 0.02880087122321129, 0.8232386112213135, 0.5669645667076111, 0, 0.16019609570503235, 0.07054053246974945, -0.05578552186489105, 1]
+                      },
+                      "t": 1
+                    },
+                    "parentIndex": 90
+                  },
+                  {
+                    "nodeIndex": 94,
+                    "inverseBindMatrix": {
+                      "$f32": {
+                        "n": [-0.9953091740608215, 0.09532471746206284, 0.01651405356824398, 0, 0.015749024227261543, -0.008772313594818115, 0.9998374581336975, 0, 0.09545408934354782, 0.9954075813293457, 0.007229955866932869, 0, 0.1525004804134369, -0.11717735230922699, -0.01096990704536438, 1]
+                      },
+                      "t": 1
+                    },
+                    "parentIndex": 92
+                  },
+                  {
+                    "nodeIndex": 5,
+                    "inverseBindMatrix": {
+                      "$f32": {
+                        "n": [1, 0, 0, 0, 0, 0.9927045106887817, 0.1205722987651825, 0, 0, -0.1205722987651825, 0.9927045106887817, 0, 2.288818308215923e-7, -1.0845226049423218, -0.1501350700855255, 1]
+                      },
+                      "t": 1
+                    },
+                    "parentIndex": 3
+                  },
+                  {
+                    "nodeIndex": 16,
+                    "inverseBindMatrix": {
+                      "$f32": {
+                        "n": [0.04573306441307068, 0.9984345436096191, 0.032202284783124924, 0, -0.12015063315629959, 0.037499718368053436, -0.9920472502708435, 0, -0.9917017221450806, 0.041500262916088104, 0.12167748808860779, 0, 0.10514279454946518, -0.49177178740501404, 1.3933511972427368, 1]
+                      },
+                      "t": 1
+                    },
+                    "parentIndex": 14
+                  },
+                  {
+                    "nodeIndex": 18,
+                    "inverseBindMatrix": {
+                      "$f32": {
+                        "n": [0.09256889671087265, 0.9939160346984863, -0.05968119576573372, 0, 0.10790310055017471, -0.06959905475378036, -0.9917221665382385, 0, -0.9898423552513123, 0.08536282181739807, -0.11368931829929352, 0, -0.25072595477104187, -0.5689136981964111, 1.4466376304626465, 1]
+                      },
+                      "t": 1
+                    },
+                    "parentIndex": 16
+                  },
+                  {
+                    "nodeIndex": 20,
+                    "inverseBindMatrix": {
+                      "$f32": {
+                        "n": [0.5786067843437195, 0.7757682800292969, -0.25178903341293335, 0, 0.058439262211322784, -0.3473532795906067, -0.9359116554260254, 0, -0.8135102987289429, 0.5268105268478394, -0.24631629884243011, 0, -0.4971921443939209, -0.06101783365011215, 1.4922795295715332, 1]
+                      },
+                      "t": 1
+                    },
+                    "parentIndex": 18
+                  },
+                  {
+                    "nodeIndex": 34,
+                    "inverseBindMatrix": {
+                      "$f32": {
+                        "n": [0.08964017033576965, 0.9632485508918762, -0.25321346521377563, 0, 0.10810759663581848, -0.26214513182640076, -0.9589539766311646, 0, -0.9900895953178406, 0.058586545288562775, -0.12763327360153198, 0, -0.23849144577980042, -0.42989346385002136, 1.561062216758728, 1]
+                      },
+                      "t": 1
+                    },
+                    "parentIndex": 32
+                  },
+                  {
+                    "nodeIndex": 36,
+                    "inverseBindMatrix": {
+                      "$f32": {
+                        "n": [0.08964011818170547, 0.9757494330406189, -0.19969399273395538, 0, 0.10810770094394684, -0.20884892344474792, -0.9719541668891907, 0, -0.9900895357131958, 0.06553763151168823, -0.1242072805762291, 0, -0.23839178681373596, -0.5469100475311279, 1.5332283973693848, 1]
+                      },
+                      "t": 1
+                    },
+                    "parentIndex": 34
+                  },
+                  {
+                    "nodeIndex": 32,
+                    "inverseBindMatrix": {
+                      "$f32": {
+                        "n": [0.08964009582996368, 0.9845430254936218, -0.15046477317810059, 0, 0.10810776799917221, -0.15979860723018646, -0.9812119603157043, 0, -0.9900895357131958, 0.07168949395418167, -0.12076106667518616, 0, -0.23839221894741058, -0.5574253797531128, 1.5071690082550049, 1]
+                      },
+                      "t": 1
+                    },
+                    "parentIndex": 18
+                  },
+                  {
+                    "nodeIndex": 30,
+                    "inverseBindMatrix": {
+                      "$f32": {
+                        "n": [0.20809276401996613, 0.942385733127594, -0.2619286775588989, 0, 0.09902966767549515, -0.28671392798423767, -0.9528842568397522, 0, -0.9730830192565918, 0.17234963178634644, -0.1529872715473175, 0, -0.2947969436645508, -0.4040025770664215, 1.5578300952911377, 1]
+                      },
+                      "t": 1
+                    },
+                    "parentIndex": 28
+                  },
+                  {
+                    "nodeIndex": 28,
+                    "inverseBindMatrix": {
+                      "$f32": {
+                        "n": [0.2080928087234497, 0.9543502330780029, -0.21427340805530548, 0, 0.09902966767549515, -0.23850013315677643, -0.9660801291465759, 0, -0.9730830192565918, 0.1798149049282074, -0.1441391557455063, 0, -0.29486513137817383, -0.45091354846954346, 1.5355761051177979, 1]
+                      },
+                      "t": 1
+                    },
+                    "parentIndex": 26
+                  },
+                  {
+                    "nodeIndex": 26,
+                    "inverseBindMatrix": {
+                      "$f32": {
+                        "n": [0.20809274911880493, 0.9733272194862366, -0.09660018235445023, 0, 0.09902969002723694, -0.11922027915716171, -0.987916886806488, 0, -0.9730830192565918, 0.19601207971572876, -0.12119719386100769, 0, -0.29463398456573486, -0.601361095905304, 1.469327688217163, 1]
+                      },
+                      "t": 1
+                    },
+                    "parentIndex": 18
+                  },
+                  {
+                    "nodeIndex": 44,
+                    "inverseBindMatrix": {
+                      "$f32": {
+                        "n": [-0.012868658639490604, 0.96864914894104, -0.24809929728507996, 0, 0.11464732885360718, -0.2450542151927948, -0.9627068638801575, 0, -0.9933229088783264, -0.040832649916410446, -0.10789953917264938, 0, -0.20983605086803436, -0.418317973613739, 1.555478572845459, 1]
+                      },
+                      "t": 1
+                    },
+                    "parentIndex": 18
+                  },
+                  {
+                    "nodeIndex": 38,
+                    "inverseBindMatrix": {
+                      "$f32": {
+                        "n": [0.04532726854085922, 0.9525927305221558, -0.3008531630039215, 0, 0.11108246445655823, -0.3041013181209564, -0.9461411833763123, 0, -0.9927769899368286, 0.009466532617807388, -0.11960048973560333, 0, -0.2301846146583557, -0.33125895261764526, 1.5776698589324951, 1]
+                      },
+                      "t": 1
+                    },
+                    "parentIndex": 18
+                  },
+                  {
+                    "nodeIndex": 40,
+                    "inverseBindMatrix": {
+                      "$f32": {
+                        "n": [0.04532724618911743, 0.9724598526954651, -0.22862055897712708, 0, 0.11108250916004181, -0.23234298825263977, -0.966269850730896, 0, -0.9927769303321838, 0.01840260438621044, -0.1185547485947609, 0, -0.2301187962293625, -0.4757409393787384, 1.5463663339614868, 1]
+                      },
+                      "t": 1
+                    },
+                    "parentIndex": 38
+                  },
+                  {
+                    "nodeIndex": 46,
+                    "inverseBindMatrix": {
+                      "$f32": {
+                        "n": [-0.01286868192255497, 0.9458913803100586, -0.3242281675338745, 0, 0.11464733630418777, -0.3207208514213562, -0.9402096271514893, 0, -0.9933229088783264, -0.04927115887403488, -0.10431665927171707, 0, -0.2099202424287796, -0.32074955105781555, 1.5859538316726685, 1]
+                      },
+                      "t": 1
+                    },
+                    "parentIndex": 44
+                  },
+                  {
+                    "nodeIndex": 48,
+                    "inverseBindMatrix": {
+                      "$f32": {
+                        "n": [-0.01286868192255497, 0.9368136525154114, -0.34959203004837036, 0, 0.11464738100767136, -0.34593290090560913, -0.9312283992767334, 0, -0.9933229088783264, -0.05206352099776268, -0.10295148938894272, 0, -0.20989124476909637, -0.29984042048454285, 1.5946099758148193, 1]
+                      },
+                      "t": 1
+                    },
+                    "parentIndex": 46
+                  },
+                  {
+                    "nodeIndex": 42,
+                    "inverseBindMatrix": {
+                      "$f32": {
+                        "n": [0.04532727971673012, 0.9734317064285278, -0.22444608807563782, 0, 0.1110825315117836, -0.22819501161575317, -0.9672577977180481, 0, -0.9927769303321838, 0.01891108602285385, -0.11847467720508575, 0, -0.23015300929546356, -0.5085740685462952, 1.5441985130310059, 1]
+                      },
+                      "t": 1
+                    },
+                    "parentIndex": 40
+                  },
+                  {
+                    "nodeIndex": 22,
+                    "inverseBindMatrix": {
+                      "$f32": {
+                        "n": [0.5786067843437195, 0.7223635315895081, -0.37868866324424744, 0, 0.05843935161828995, -0.4998280107975006, -0.8641508221626282, 0, -0.8135102987289429, 0.47787317633628845, -0.33141830563545227, 0, -0.4931381642818451, 0.15153096616268158, 1.4879919290542603, 1]
+                      },
+                      "t": 1
+                    },
+                    "parentIndex": 20
+                  },
+                  {
+                    "nodeIndex": 24,
+                    "inverseBindMatrix": {
+                      "$f32": {
+                        "n": [0.5786067247390747, 0.7226561307907104, -0.3781300485134125, 0, 0.058439310640096664, -0.4991597533226013, -0.8645371794700623, 0, -0.8135103583335876, 0.47812938690185547, -0.33104872703552246, 0, -0.49276503920555115, 0.11438143253326416, 1.4880808591842651, 1]
+                      },
+                      "t": 1
+                    },
+                    "parentIndex": 22
+                  },
+                  {
+                    "nodeIndex": 50,
+                    "inverseBindMatrix": {
+                      "$f32": {
+                        "n": [-0.028401000425219536, -0.9645582437515259, 0.26233717799186707, 0, 0.12063483893871307, -0.2638322412967682, -0.9569951891899109, 0, 0.9922905564308167, 0.004467384424060583, 0.1238524317741394, 0, -0.15022337436676025, 0.3277917206287384, 1.4230140447616577, 1]
+                      },
+                      "t": 1
+                    },
+                    "parentIndex": 7
+                  },
+                  {
+                    "nodeIndex": 52,
+                    "inverseBindMatrix": {
+                      "$f32": {
+                        "n": [-0.07308696955442429, -0.9951608180999756, 0.06567414849996567, 0, 0.10827392339706421, -0.07337841391563416, -0.9914092421531677, 0, 0.9914307594299316, -0.06534835696220398, 0.11311303824186325, 0, -0.14089497923851013, -0.08269535005092621, 1.4352506399154663, 1]
+                      },
+                      "t": 1
+                    },
+                    "parentIndex": 50
+                  },
+                  {
+                    "nodeIndex": 98,
+                    "inverseBindMatrix": {
+                      "$f32": {
+                        "n": [-0.9968234300613403, -0.0796356126666069, -0.0010163889965042472, 0, 0.07950878143310547, -0.9943356513977051, -0.07053210586309433, 0, 0.004606236238032579, -0.07038887590169907, 0.9975090026855469, 0, -0.15902215242385864, 0.5056158900260925, 0.03850226104259491, 1]
+                      },
+                      "t": 1
+                    },
+                    "parentIndex": 96
+                  },
+                  {
+                    "nodeIndex": 102,
+                    "inverseBindMatrix": {
+                      "$f32": {
+                        "n": [-0.9952427744865417, -0.095725879073143, -0.01811925135552883, 0, -0.01735241338610649, -0.008837222121655941, 0.9998103380203247, 0, -0.09586784988641739, 0.995368480682373, 0.007134134415537119, 0, -0.15241411328315735, -0.11746663600206375, -0.011220461688935757, 1]
+                      },
+                      "t": 1
+                    },
+                    "parentIndex": 100
+                  },
+                  {
+                    "nodeIndex": 100,
+                    "inverseBindMatrix": {
+                      "$f32": {
+                        "n": [-0.9962383508682251, -0.06970298290252686, 0.05148393660783768, 0, 0.0818103700876236, -0.5606730580329895, 0.8239858746528625, 0, -0.02856861799955368, 0.8250983357429504, 0.5642665028572083, 0, -0.1602146178483963, 0.07097595930099487, -0.05558602139353752, 1]
+                      },
+                      "t": 1
+                    },
+                    "parentIndex": 98
+                  },
+                  {
+                    "nodeIndex": 54,
+                    "inverseBindMatrix": {
+                      "$f32": {
+                        "n": [0.043091051280498505, -0.9985361099243164, -0.032691217958927155, 0, 0.11606985330581665, 0.03750359266996384, -0.9925327301025391, 0, 0.9923058748245239, 0.03897479176521301, 0.11751604080200195, 0, -0.10060188174247742, -0.4919392764568329, 1.3936245441436768, 1]
+                      },
+                      "t": 1
+                    },
+                    "parentIndex": 52
+                  },
+                  {
+                    "nodeIndex": 56,
+                    "inverseBindMatrix": {
+                      "$f32": {
+                        "n": [0.10245370119810104, -0.9928409457206726, 0.06140075996518135, 0, -0.10187269002199173, -0.07187343388795853, -0.992197573184967, 0, 0.9895075559616089, 0.09539923071861267, -0.10850705206394196, 0, 0.2493087500333786, -0.5645532011985779, 1.4486019611358643, 1]
+                      },
+                      "t": 1
+                    },
+                    "parentIndex": 54
+                  },
+                  {
+                    "nodeIndex": 70,
+                    "inverseBindMatrix": {
+                      "$f32": {
+                        "n": [0.0996362492442131, -0.9889426231384277, 0.10984127968549728, 0, -0.10207623988389969, -0.11996707320213318, -0.9875162839889526, 0, 0.9897742867469788, 0.0871802419424057, -0.11290062963962555, 0, 0.23813626170158386, -0.6153031587600708, 1.4826514720916748, 1]
+                      },
+                      "t": 1
+                    },
+                    "parentIndex": 56
+                  },
+                  {
+                    "nodeIndex": 58,
+                    "inverseBindMatrix": {
+                      "$f32": {
+                        "n": [0.574625551700592, -0.7780592441558838, 0.25382915139198303, 0, -0.05374917387962341, -0.34535446763038635, -0.9369317889213562, 0, 0.8166494965553284, 0.5247418284416199, -0.2402695268392563, 0, 0.4880692660808563, -0.06628068536520004, 1.4951988458633423, 1]
+                      },
+                      "t": 1
+                    },
+                    "parentIndex": 56
+                  },
+                  {
+                    "nodeIndex": 74,
+                    "inverseBindMatrix": {
+                      "$f32": {
+                        "n": [0.09963621199131012, -0.9754123091697693, 0.1965794563293457, 0, -0.10207618772983551, -0.20654013752937317, -0.9730990529060364, 0, 0.9897742867469788, 0.07688985019922256, -0.120145283639431, 0, 0.23816102743148804, -0.5490955114364624, 1.5324232578277588, 1]
+                      },
+                      "t": 1
+                    },
+                    "parentIndex": 72
+                  },
+                  {
+                    "nodeIndex": 72,
+                    "inverseBindMatrix": {
+                      "$f32": {
+                        "n": [0.09963621944189072, -0.9632536768913269, 0.2494295835494995, 0, -0.1020762249827385, -0.25924941897392273, -0.9604010581970215, 0, 0.9897742867469788, 0.0702299252152443, -0.1241559386253357, 0, 0.23829777538776398, -0.432531476020813, 1.5600628852844238, 1]
+                      },
+                      "t": 1
+                    },
+                    "parentIndex": 70
+                  },
+                  {
+                    "nodeIndex": 66,
+                    "inverseBindMatrix": {
+                      "$f32": {
+                        "n": [0.1633140593767166, -0.9593527913093567, 0.23015381395816803, 0, -0.09726003557443619, -0.24780531227588654, -0.9639154672622681, 0, 0.9817682504653931, 0.13503612577915192, -0.1337767392396927, 0, 0.2551884055137634, -0.4449680745601654, 1.5456993579864502, 1]
+                      },
+                      "t": 1
+                    },
+                    "parentIndex": 64
+                  },
+                  {
+                    "nodeIndex": 68,
+                    "inverseBindMatrix": {
+                      "$f32": {
+                        "n": [0.16331404447555542, -0.9600846171379089, 0.2270815074443817, 0, -0.09726005047559738, -0.2447182834148407, -0.9647037386894226, 0, 0.9817682504653931, 0.1354636698961258, -0.13334375619888306, 0, 0.2551223039627075, -0.4784744679927826, 1.5441755056381226, 1]
+                      },
+                      "t": 1
+                    },
+                    "parentIndex": 66
+                  },
+                  {
+                    "nodeIndex": 64,
+                    "inverseBindMatrix": {
+                      "$f32": {
+                        "n": [0.16331416368484497, -0.9752842783927917, 0.14882582426071167, 0, -0.0972600132226944, -0.16603216528892517, -0.9813123345375061, 0, 0.9817683100700378, 0.14578740298748016, -0.12197157740592957, 0, 0.2550697922706604, -0.5419506430625916, 1.5029009580612183, 1]
+                      },
+                      "t": 1
+                    },
+                    "parentIndex": 56
+                  },
+                  {
+                    "nodeIndex": 76,
+                    "inverseBindMatrix": {
+                      "$f32": {
+                        "n": [0.012951324693858624, -0.9793657660484314, 0.20168030261993408, 0, -0.10791101306676865, -0.20188820362091064, -0.9734456539154053, 0, 0.9940761923789978, -0.009156120009720325, -0.10829906910657883, 0, 0.19874060153961182, -0.4962559938430786, 1.535548448562622, 1]
+                      },
+                      "t": 1
+                    },
+                    "parentIndex": 56
+                  },
+                  {
+                    "nodeIndex": 78,
+                    "inverseBindMatrix": {
+                      "$f32": {
+                        "n": [0.012951334938406944, -0.9577407240867615, 0.28734129667282104, 0, -0.10791103541851044, -0.2870258390903473, -0.9518253207206726, 0, 0.9940761923789978, -0.018679872155189514, -0.10706817358732224, 0, 0.1987776905298233, -0.38688239455223083, 1.5758494138717651, 1]
+                      },
+                      "t": 1
+                    },
+                    "parentIndex": 76
+                  },
+                  {
+                    "nodeIndex": 80,
+                    "inverseBindMatrix": {
+                      "$f32": {
+                        "n": [0.012951288372278214, -0.9811510443687439, 0.19280774891376495, 0, -0.10791103541851044, -0.19306917488574982, -0.9752330183982849, 0, 0.994076132774353, -0.008175606839358807, -0.10837746411561966, 0, 0.1986997276544571, -0.565098226070404, 1.5281237363815308, 1]
+                      },
+                      "t": 1
+                    },
+                    "parentIndex": 78
+                  },
+                  {
+                    "nodeIndex": 82,
+                    "inverseBindMatrix": {
+                      "$f32": {
+                        "n": [-0.013400954194366932, -0.9730244874954224, 0.23031233251094818, 0, -0.10952188074588776, -0.22751878201961517, -0.9675950407981873, 0, 0.9938939809799194, -0.03819096088409424, -0.10351847112178802, 0, 0.20213572680950165, -0.44772282242774963, 1.5487403869628906, 1]
+                      },
+                      "t": 1
+                    },
+                    "parentIndex": 56
+                  },
+                  {
+                    "nodeIndex": 84,
+                    "inverseBindMatrix": {
+                      "$f32": {
+                        "n": [-0.013401039876043797, -0.9381114840507507, 0.3460739552974701, 0, -0.10952191054821014, -0.34264546632766724, -0.9330589175224304, 0, 0.9938939809799194, -0.05040667578577995, -0.09815191477537155, 0, 0.2022162824869156, -0.2837257385253906, 1.5946451425552368, 1]
+                      },
+                      "t": 1
+                    },
+                    "parentIndex": 82
+                  },
+                  {
+                    "nodeIndex": 86,
+                    "inverseBindMatrix": {
+                      "$f32": {
+                        "n": [-0.013401065953075886, -0.9511658549308777, 0.3083893358707428, 0, -0.10952184349298477, -0.3051651418209076, -0.9459805488586426, 0, 0.9938940405845642, -0.046452488750219345, -0.10008393973112106, 0, 0.20216038823127747, -0.36856335401535034, 1.5812056064605713, 1]
+                      },
+                      "t": 1
+                    },
+                    "parentIndex": 84
+                  },
+                  {
+                    "nodeIndex": 60,
+                    "inverseBindMatrix": {
+                      "$f32": {
+                        "n": [0.5746254920959473, -0.7221808433532715, 0.3850458860397339, 0, -0.053749214857816696, -0.502761721611023, -0.862752377986908, 0, 0.8166495561599731, 0.4750635623931885, -0.3277163505554199, 0, 0.48378515243530273, 0.15416263043880463, 1.4910764694213867, 1]
+                      },
+                      "t": 1
+                    },
+                    "parentIndex": 58
+                  },
+                  {
+                    "nodeIndex": 62,
+                    "inverseBindMatrix": {
+                      "$f32": {
+                        "n": [0.574625551700592, -0.7573316693305969, 0.3102485239505768, 0, -0.053749118000268936, -0.4131871163845062, -0.9090585112571716, 0, 0.8166495561599731, 0.5056926608085632, -0.2781337797641754, 0, 0.48342016339302063, -0.03212708607316017, 1.495461106300354, 1]
+                      },
+                      "t": 1
+                    },
+                    "parentIndex": 60
+                  },
+                  {
+                    "nodeIndex": 2,
+                    "inverseBindMatrix": {
+                      "$f32": {
+                        "n": [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1]
+                      },
+                      "t": 1
+                    }
+                  }
+                ],
+                "ragdollProfile": {
+                  "parts": [
+                    {
+                      "name": "Pelvis",
+                      "bone": "mixamorig1:Hips",
+                      "tipBone": "mixamorig1:Spine1",
+                      "shape": "capsule",
+                      "radius": 0.12118379633865561,
+                      "length": 0.21208817103673833,
+                      "depth": 0.17773623463002824,
+                      "massFraction": 0.142,
+                      "joint": {
+                        "type": "cone",
+                        "swing": 0,
+                        "twist": 0,
+                        "hingeMin": 0,
+                        "hingeMax": 0
+                      }
+                    },
+                    {
+                      "name": "Spine",
+                      "bone": "mixamorig1:Spine1",
+                      "tipBone": "mixamorig1:Spine2",
+                      "shape": "capsule",
+                      "radius": 0.09694703707092449,
+                      "massFraction": 0.139,
+                      "joint": {
+                        "type": "cone",
+                        "swing": 25,
+                        "twist": 20,
+                        "hingeMin": 0,
+                        "hingeMax": 0,
+                        "tilt": [0, 0]
+                      }
+                    },
+                    {
+                      "name": "Chest",
+                      "bone": "mixamorig1:Spine2",
+                      "tipBone": "mixamorig1:Neck",
+                      "shape": "capsule",
+                      "radius": 0.10837495896857169,
+                      "length": 0.19103699504396557,
+                      "depth": 0.2055387152852222,
+                      "massFraction": 0.216,
+                      "joint": {
+                        "type": "cone",
+                        "swing": 20,
+                        "twist": 20,
+                        "hingeMin": 0,
+                        "hingeMax": 0
+                      }
+                    },
+                    {
+                      "name": "Head",
+                      "bone": "mixamorig1:Neck",
+                      "shape": "capsule",
+                      "radius": 0.08755862272848422,
+                      "length": 0.2451532767239011,
+                      "massFraction": 0.081,
+                      "joint": {
+                        "type": "cone",
+                        "swing": 35,
+                        "twist": 40,
+                        "hingeMin": 0,
+                        "hingeMax": 0
+                      }
+                    },
+                    {
+                      "name": "Upper Arm L",
+                      "bone": "mixamorig1:LeftArm",
+                      "tipBone": "mixamorig1:LeftForeArm",
+                      "shape": "capsule",
+                      "radius": 0.04345334082932909,
+                      "massFraction": 0.028,
+                      "joint": {
+                        "type": "cone",
+                        "swing": 80,
+                        "twist": 50,
+                        "hingeMin": 0,
+                        "hingeMax": 0,
+                        "tilt": [20, 40.79024517146466]
+                      }
+                    },
+                    {
+                      "name": "Forearm L",
+                      "bone": "mixamorig1:LeftForeArm",
+                      "tipBone": "mixamorig1:LeftHand",
+                      "shape": "capsule",
+                      "radius": 0.032765732796483746,
+                      "massFraction": 0.016,
+                      "joint": {
+                        "type": "hinge",
+                        "swing": 0,
+                        "twist": 0,
+                        "hingeMin": 0,
+                        "hingeMax": 140,
+                        "bendDir": [0.004664249252527952, 0, 0.9999891519546509]
+                      }
+                    },
+                    {
+                      "name": "Hand L",
+                      "bone": "mixamorig1:LeftHand",
+                      "tipBone": "mixamorig1:LeftHandMiddle1",
+                      "shape": "capsule",
+                      "radius": 0.04461829582974682,
+                      "length": 0.19830353702109701,
+                      "depth": 0.043378898723364964,
+                      "massFraction": 0.006,
+                      "joint": {
+                        "type": "cone",
+                        "swing": 55,
+                        "twist": 90,
+                        "hingeMin": 0,
+                        "hingeMax": 0
+                      }
+                    },
+                    {
+                      "name": "Thigh L",
+                      "bone": "mixamorig1:LeftUpLeg",
+                      "tipBone": "mixamorig1:LeftLeg",
+                      "shape": "capsule",
+                      "radius": 0.07274271843425541,
+                      "massFraction": 0.1,
+                      "joint": {
+                        "type": "cone",
+                        "swing": 65,
+                        "twist": 45,
+                        "hingeMin": 0,
+                        "hingeMax": 0,
+                        "tilt": [25, 0]
+                      }
+                    },
+                    {
+                      "name": "Shin L",
+                      "bone": "mixamorig1:LeftLeg",
+                      "tipBone": "mixamorig1:LeftFoot",
+                      "shape": "capsule",
+                      "radius": 0.050608503908616195,
+                      "massFraction": 0.0465,
+                      "joint": {
+                        "type": "hinge",
+                        "swing": 0,
+                        "twist": 0,
+                        "hingeMin": 0,
+                        "hingeMax": 140,
+                        "bendDir": [-0.004664249252527952, 0, -0.9999891519546509]
+                      }
+                    },
+                    {
+                      "name": "Foot L",
+                      "bone": "mixamorig1:LeftFoot",
+                      "tipBone": "mixamorig1:LeftToeBase",
+                      "shape": "capsule",
+                      "radius": 0.035601022484969956,
+                      "length": 0.21846081979413384,
+                      "massFraction": 0.0145,
+                      "joint": {
+                        "type": "cone",
+                        "swing": 30,
+                        "twist": 90,
+                        "hingeMin": 0,
+                        "hingeMax": 0
+                      }
+                    },
+                    {
+                      "name": "Upper Arm R",
+                      "bone": "mixamorig1:RightArm",
+                      "tipBone": "mixamorig1:RightForeArm",
+                      "shape": "capsule",
+                      "radius": 0.0434708132890802,
+                      "massFraction": 0.028,
+                      "joint": {
+                        "type": "cone",
+                        "swing": 80,
+                        "twist": 50,
+                        "hingeMin": 0,
+                        "hingeMax": 0,
+                        "tilt": [20, 40.791940642721976]
+                      }
+                    },
+                    {
+                      "name": "Forearm R",
+                      "bone": "mixamorig1:RightForeArm",
+                      "tipBone": "mixamorig1:RightHand",
+                      "shape": "capsule",
+                      "radius": 0.032762393213374104,
+                      "massFraction": 0.016,
+                      "joint": {
+                        "type": "hinge",
+                        "swing": 0,
+                        "twist": 0,
+                        "hingeMin": 0,
+                        "hingeMax": 140,
+                        "bendDir": [0.004664249252527952, 0, 0.9999891519546509]
+                      }
+                    },
+                    {
+                      "name": "Hand R",
+                      "bone": "mixamorig1:RightHand",
+                      "tipBone": "mixamorig1:RightHandMiddle1",
+                      "shape": "capsule",
+                      "radius": 0.043967862483903226,
+                      "length": 0.19541272215068103,
+                      "depth": 0.04274653297046147,
+                      "massFraction": 0.006,
+                      "joint": {
+                        "type": "cone",
+                        "swing": 55,
+                        "twist": 90,
+                        "hingeMin": 0,
+                        "hingeMax": 0
+                      }
+                    },
+                    {
+                      "name": "Thigh R",
+                      "bone": "mixamorig1:RightUpLeg",
+                      "tipBone": "mixamorig1:RightLeg",
+                      "shape": "capsule",
+                      "radius": 0.07271904294532228,
+                      "massFraction": 0.1,
+                      "joint": {
+                        "type": "cone",
+                        "swing": 65,
+                        "twist": 45,
+                        "hingeMin": 0,
+                        "hingeMax": 0,
+                        "tilt": [25, 0]
+                      }
+                    },
+                    {
+                      "name": "Shin R",
+                      "bone": "mixamorig1:RightLeg",
+                      "tipBone": "mixamorig1:RightFoot",
+                      "shape": "capsule",
+                      "radius": 0.050615618862983505,
+                      "massFraction": 0.0465,
+                      "joint": {
+                        "type": "hinge",
+                        "swing": 0,
+                        "twist": 0,
+                        "hingeMin": 0,
+                        "hingeMax": 140,
+                        "bendDir": [-0.004664249252527952, 0, -0.9999891519546509]
+                      }
+                    },
+                    {
+                      "name": "Foot R",
+                      "bone": "mixamorig1:RightFoot",
+                      "tipBone": "mixamorig1:RightToeBase",
+                      "shape": "capsule",
+                      "radius": 0.035773057048072654,
+                      "length": 0.21951648643135493,
+                      "massFraction": 0.0145,
+                      "joint": {
+                        "type": "cone",
+                        "swing": 30,
+                        "twist": 90,
+                        "hingeMin": 0,
+                        "hingeMax": 0
+                      }
+                    }
+                  ]
+                },
+                "reactionSets": {
+                  "sets": [
+                    {
+                      "id": "default",
+                      "name": "Default",
+                      "strength": 1.95,
+                      "muscles": {
+                        "neck": {
+                          "frequency": 2.23,
+                          "damping": 1,
+                          "maxTorque": 40,
+                          "gravityCompensation": 1
+                        },
+                        "spine": {
+                          "frequency": 1.75,
+                          "damping": 1,
+                          "maxTorque": 250,
+                          "gravityCompensation": 1
+                        },
+                        "arms": {
+                          "frequency": 1.59,
+                          "damping": 1,
+                          "maxTorque": 80,
+                          "gravityCompensation": 0.8
+                        },
+                        "hands": {
+                          "frequency": 1.43,
+                          "damping": 1,
+                          "maxTorque": 12,
+                          "gravityCompensation": 0.5
+                        },
+                        "legs": {
+                          "frequency": 2.07,
+                          "damping": 1,
+                          "maxTorque": 250,
+                          "gravityCompensation": 1
+                        },
+                        "feet": {
+                          "frequency": 1.91,
+                          "damping": 1,
+                          "maxTorque": 120,
+                          "gravityCompensation": 1
+                        }
+                      },
+                      "pins": {
+                        "frequency": 5,
+                        "damping": 1,
+                        "maxForce": 3000,
+                        "maxTorque": 300,
+                        "regain": 1,
+                        "legs": 1
+                      },
+                      "thresholds": {
+                        "minHitImpulse": 2,
+                        "staggerImpulse": 60,
+                        "stumbleImpulse": 30,
+                        "stumbleSpeed": 0.9,
+                        "fallImpulse": 150,
+                        "fallUprightness": 0.55,
+                        "highFallHeight": 1.5,
+                        "tumbleAngularSpeed": 3,
+                        "downSpeed": 0.6,
+                        "settleSpeed": 0.25,
+                        "settleTime": 0.6,
+                        "maxReactionSeconds": 15
+                      },
+                      "behaviours": {
+                        "hitReact": {
+                          "enabled": true,
+                          "params": {
+                            "weakness": 0.5,
+                            "weaknessTime": 0.4,
+                            "weaknessFloor": 0.1,
+                            "trackStiffness": 6,
+                            "trackStrength": 3,
+                            "followSpin": 0.6,
+                            "maxKick": 6,
+                            "snap": 0.4,
+                            "reachDelay": 0.18,
+                            "holdTime": 1.2,
+                            "maxReach": 0.65,
+                            "reachStiffness": 3,
+                            "reachPull": 0.5,
+                            "lookDelay": 0.1,
+                            "lookTime": 1,
+                            "tone": 0.35,
+                            "toneTime": 0.3,
+                            "impulseOneFoot": 0.8,
+                            "impulseAirborne": 0.5,
+                            "duration": 1.4,
+                            "holdControl": 0.35,
+                            "holdRelease": 0.3,
+                            "reactTurn": 0.5,
+                            "painLean": 0.25,
+                            "shockSpin": 0.3,
+                            "gutFold": 0.45,
+                            "backArch": 0.35,
+                            "armTwist": 0.3,
+                            "kneeGive": 0.5,
+                            "legStagger": 0.6
+                          }
+                        },
+                        "stepBalance": {
+                          "enabled": true,
+                          "params": {
+                            "knockTime": 0.35,
+                            "leanInto": 0.15,
+                            "prediction": 0.2,
+                            "stepTime": 0.25,
+                            "stepHeight": 0.1,
+                            "stepLength": 0.4,
+                            "widthMin": 0.12,
+                            "widthMax": 0.4,
+                            "maxSteps": 4,
+                            "tire": 0.7,
+                            "assist": 1,
+                            "yawDamp": 0.25,
+                            "firstStep": 0.12,
+                            "crossMax": 0.08,
+                            "stanceStiffness": 1.2,
+                            "maxShove": 3,
+                            "giveUpTilt": 0.6,
+                            "giveUpTime": 0.15,
+                            "recoverTime": 0.4
+                          }
+                        },
+                        "armsOut": {
+                          "enabled": true,
+                          "params": {
+                            "spin": 1.2,
+                            "shove": 1.2,
+                            "abduct": 0.9,
+                            "elbow": 0.4,
+                            "stiffness": 4,
+                            "windmill": 3,
+                            "hold": 1.1
+                          }
+                        },
+                        "catchFall": {
+                          "enabled": true,
+                          "params": {
+                            "predictionTime": 0.5,
+                            "handDelay": 0.15,
+                            "armStiffness": 2.4,
+                            "absorbTime": 0.2,
+                            "absorb": 0.3,
+                            "armForward": 0.4,
+                            "kneeBend": 0.5
+                          }
+                        },
+                        "protectHead": {
+                          "enabled": true,
+                          "params": {
+                            "chinTuck": 0.4,
+                            "neckStiffness": 3,
+                            "armStiffness": 2.2,
+                            "handSpread": 0.13,
+                            "fadeTime": 0.15
+                          }
+                        },
+                        "landing": {
+                          "enabled": true,
+                          "params": {
+                            "leadTime": 0.3,
+                            "uprightness": 0.85,
+                            "kneeBend": 1,
+                            "hipBend": 0.6,
+                            "absorbTime": 0.25,
+                            "maxSpeed": 12
+                          }
+                        },
+                        "airborne": {
+                          "enabled": true,
+                          "params": {
+                            "minTime": 0.35,
+                            "armSpeed": 7.9,
+                            "armAmplitude": 1.2,
+                            "legSpeed": 7.9,
+                            "legAmplitude": 0.6,
+                            "stiffness": 1.75
+                          }
+                        },
+                        "tumble": {
+                          "enabled": true,
+                          "params": {
+                            "stiffness": 1.75,
+                            "damping": 1.4,
+                            "curl": 0.9,
+                            "rollTorque": 0.6,
+                            "slowDownSpeed": 1.2
+                          }
+                        },
+                        "vehicleBail": {
+                          "enabled": true,
+                          "params": {
+                            "inherit": 1,
+                            "ejectSpeed": 2,
+                            "ejectUp": 1,
+                            "clearTime": 0.35,
+                            "kneeTuck": 1.25,
+                            "hipTuck": 1,
+                            "curl": 0.25,
+                            "chinTuck": 0.5,
+                            "armsIn": 0.8,
+                            "stiffness": 3,
+                            "catchTime": 0.3,
+                            "catchSpeed": 7,
+                            "rollSpeed": 2.5
+                          }
+                        },
+                        "struck": {
+                          "enabled": true,
+                          "params": {
+                            "kneeBend": 1.1,
+                            "hipBend": 0.8,
+                            "stiffness": 3,
+                            "duration": 0.7,
+                            "legShare": 1,
+                            "trunkShare": 0.45,
+                            "lift": 0.3
+                          }
+                        },
+                        "writhe": {
+                          "enabled": true,
+                          "params": {
+                            "stiffness": 1.2,
+                            "damping": 0.5,
+                            "period": 1.6,
+                            "amplitude": 0.35,
+                            "duration": 4
+                          }
+                        },
+                        "relax": {
+                          "enabled": true,
+                          "params": {
+                            "strength": 0.05,
+                            "friction": 2
+                          }
+                        },
+                        "rollOver": {
+                          "enabled": true,
+                          "params": {
+                            "twist": 0.35,
+                            "speed": 2.5,
+                            "giveUp": 4
+                          }
+                        },
+                        "getUp": {
+                          "enabled": true,
+                          "params": {
+                            "delay": 0.6,
+                            "strength": 1.5,
+                            "regainTime": 0.8,
+                            "blendTime": 0.25
+                          },
+                          "clips": {
+                            "faceUp": "Getting Up"
+                          }
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            },
             "ragdoll": {
               "reactions": {
                 "holdsControl": false
+              }
+            }
+          }
+        },
+        "Character/Weapons/Pistol Grip/Pistol/Pistol": {
+          "merge": {
+            "model": {
+              "material": {
+                "textures": {}
+              }
+            }
+          }
+        },
+        "Character/Weapons/Rifle Grip/Rifle/Rifle": {
+          "merge": {
+            "model": {
+              "material": {
+                "textures": {}
+              },
+              "materials": [
+                {
+                  "type": "pbr",
+                  "baseColor": [1, 1, 1],
+                  "metallic": 1,
+                  "roughness": 1,
+                  "reflectance": 0.5,
+                  "opacity": 1,
+                  "alphaCutoff": 0,
+                  "emissiveFactor": [0, 0, 0],
+                  "emissiveIntensity": 1,
+                  "displacementScale": 0.05,
+                  "depthSpace": "uv",
+                  "invertHeight": false,
+                  "clipSilhouette": false,
+                  "textures": {
+                    "baseColorTexture": "7f52f31ae3774a6671320d18acd590d9",
+                    "metallicMap": "a13d482458670e23d0c854270416585d",
+                    "roughnessMap": "a13d482458670e23d0c854270416585d",
+                    "normalMap": "b41058e0fc2b48723b5e52e553e3936a",
+                    "occlusionMap": "a13d482458670e23d0c854270416585d"
+                  },
+                  "config": {
+                    "side": "double",
+                    "wireframe": false,
+                    "transparent": false,
+                    "castShadow": true,
+                    "probeable": true
+                  }
+                },
+                {
+                  "type": "pbr",
+                  "baseColor": [1, 1, 1],
+                  "metallic": 1,
+                  "roughness": 1,
+                  "reflectance": 0.5,
+                  "opacity": 1,
+                  "alphaCutoff": 0,
+                  "emissiveFactor": [0, 0, 0],
+                  "emissiveIntensity": 1,
+                  "displacementScale": 0.05,
+                  "depthSpace": "uv",
+                  "invertHeight": false,
+                  "clipSilhouette": false,
+                  "textures": {
+                    "baseColorTexture": "f69b348b6d4c8ff9981859501aed1dc3",
+                    "metallicMap": "2db0ca4fe50d0f548d9d3dd84e0501c0",
+                    "roughnessMap": "2db0ca4fe50d0f548d9d3dd84e0501c0",
+                    "normalMap": "284890b17935dacd530505c30bbda932",
+                    "occlusionMap": "2db0ca4fe50d0f548d9d3dd84e0501c0"
+                  },
+                  "config": {
+                    "side": "double",
+                    "wireframe": false,
+                    "transparent": false,
+                    "castShadow": true,
+                    "probeable": true
+                  }
+                }
+              ]
+            }
+          }
+        },
+        "Character/Weapons/Shotgun Grip/Shotgun/Shotgun": {
+          "merge": {
+            "model": {
+              "material": {
+                "textures": {}
               }
             }
           }
@@ -38500,6 +40364,745 @@
                   "vAlign": "top",
                   "wrap": false,
                   "lineHeight": 1.2
+                }
+              },
+              {
+                "name": "Weapon Wheel",
+                "type": "uiPanel",
+                "position": [0, 0, 0],
+                "rotation": [0, 0, 0],
+                "scale": [1, 1, 1],
+                "children": [
+                  {
+                    "name": "Wheel Ring",
+                    "type": "uiPanel",
+                    "position": [0, 0, 0],
+                    "rotation": [0, 0, 0],
+                    "scale": [1, 1, 1],
+                    "children": [],
+                    "variables": {},
+                    "spawnOnStart": true,
+                    "visible": false,
+                    "ui": {
+                      "anchorMin": [0, 0],
+                      "anchorMax": [1, 1],
+                      "offsetMin": [0, 0],
+                      "offsetMax": [0, 0],
+                      "pivot": [0, 0],
+                      "rotationDeg": 0,
+                      "scale2d": [1, 1],
+                      "opacity": 1,
+                      "tint": [0.02, 0.025, 0.03, 0.55],
+                      "zOrder": 0,
+                      "interactive": false,
+                      "clip": false,
+                      "sizing": "fixed",
+                      "padding": [0, 0, 0, 0],
+                      "borderRadius": 290,
+                      "borderWidth": 2,
+                      "borderColor": [1, 1, 1, 0.1]
+                    }
+                  },
+                  {
+                    "name": "Wheel Hub",
+                    "type": "uiPanel",
+                    "position": [0, 0, 0],
+                    "rotation": [0, 0, 0],
+                    "scale": [1, 1, 1],
+                    "children": [
+                      {
+                        "name": "Wheel Name",
+                        "type": "uiText",
+                        "position": [0, 0, 0],
+                        "rotation": [0, 0, 0],
+                        "scale": [1, 1, 1],
+                        "children": [],
+                        "variables": {},
+                        "spawnOnStart": true,
+                        "visible": false,
+                        "ui": {
+                          "anchorMin": [0, 0.5],
+                          "anchorMax": [1, 0.5],
+                          "offsetMin": [8, -30],
+                          "offsetMax": [-8, 4],
+                          "pivot": [0, 0],
+                          "rotationDeg": 0,
+                          "scale2d": [1, 1],
+                          "opacity": 1,
+                          "tint": [1, 1, 1, 1],
+                          "zOrder": 0,
+                          "interactive": false,
+                          "clip": false,
+                          "sizing": "fixed",
+                          "padding": [0, 0, 0, 0],
+                          "borderRadius": 0,
+                          "borderWidth": 0,
+                          "borderColor": [0, 0, 0, 1],
+                          "text": "AK-47",
+                          "fontSize": 26,
+                          "fontFamily": "",
+                          "fontWeight": 700,
+                          "align": "center",
+                          "vAlign": "middle",
+                          "wrap": true,
+                          "lineHeight": 1.2
+                        }
+                      },
+                      {
+                        "name": "Wheel Ammo",
+                        "type": "uiText",
+                        "position": [0, 0, 0],
+                        "rotation": [0, 0, 0],
+                        "scale": [1, 1, 1],
+                        "children": [],
+                        "variables": {},
+                        "spawnOnStart": true,
+                        "visible": false,
+                        "ui": {
+                          "anchorMin": [0, 0.5],
+                          "anchorMax": [1, 0.5],
+                          "offsetMin": [8, 8],
+                          "offsetMax": [-8, 32],
+                          "pivot": [0, 0],
+                          "rotationDeg": 0,
+                          "scale2d": [1, 1],
+                          "opacity": 1,
+                          "tint": [1, 1, 1, 0.7],
+                          "zOrder": 0,
+                          "interactive": false,
+                          "clip": false,
+                          "sizing": "fixed",
+                          "padding": [0, 0, 0, 0],
+                          "borderRadius": 0,
+                          "borderWidth": 0,
+                          "borderColor": [0, 0, 0, 1],
+                          "text": "30 / 90",
+                          "fontSize": 17,
+                          "fontFamily": "",
+                          "fontWeight": 500,
+                          "align": "center",
+                          "vAlign": "middle",
+                          "wrap": true,
+                          "lineHeight": 1.2
+                        }
+                      }
+                    ],
+                    "variables": {},
+                    "spawnOnStart": true,
+                    "visible": false,
+                    "ui": {
+                      "anchorMin": [0.5, 0.5],
+                      "anchorMax": [0.5, 0.5],
+                      "offsetMin": [-84, -84],
+                      "offsetMax": [84, 84],
+                      "pivot": [0, 0],
+                      "rotationDeg": 0,
+                      "scale2d": [1, 1],
+                      "opacity": 1,
+                      "tint": [0, 0, 0, 0.62],
+                      "zOrder": 1,
+                      "interactive": false,
+                      "clip": false,
+                      "sizing": "fixed",
+                      "padding": [0, 0, 0, 0],
+                      "borderRadius": 84,
+                      "borderWidth": 2,
+                      "borderColor": [1, 1, 1, 0.18]
+                    }
+                  },
+                  {
+                    "name": "Wheel Pointer",
+                    "type": "uiPanel",
+                    "position": [0, 0, 0],
+                    "rotation": [0, 0, 0],
+                    "scale": [1, 1, 1],
+                    "children": [],
+                    "variables": {},
+                    "spawnOnStart": true,
+                    "visible": false,
+                    "ui": {
+                      "anchorMin": [0.5, 0.5],
+                      "anchorMax": [0.5, 0.5],
+                      "offsetMin": [-9, -107],
+                      "offsetMax": [9, -89],
+                      "pivot": [0, 0],
+                      "rotationDeg": 0,
+                      "scale2d": [1, 1],
+                      "opacity": 1,
+                      "tint": [1, 0.82, 0.45, 1],
+                      "zOrder": 2,
+                      "interactive": false,
+                      "clip": false,
+                      "sizing": "fixed",
+                      "padding": [0, 0, 0, 0],
+                      "borderRadius": 9,
+                      "borderWidth": 0,
+                      "borderColor": [0, 0, 0, 1]
+                    }
+                  },
+                  {
+                    "name": "Slot Unarmed",
+                    "type": "uiPanel",
+                    "position": [0, 0, 0],
+                    "rotation": [0, 0, 0],
+                    "scale": [1, 1, 1],
+                    "children": [
+                      {
+                        "name": "Label",
+                        "type": "uiText",
+                        "position": [0, 0, 0],
+                        "rotation": [0, 0, 0],
+                        "scale": [1, 1, 1],
+                        "children": [],
+                        "variables": {},
+                        "spawnOnStart": true,
+                        "visible": false,
+                        "ui": {
+                          "anchorMin": [0, 0.5],
+                          "anchorMax": [1, 0.5],
+                          "offsetMin": [6, -30],
+                          "offsetMax": [-6, 2],
+                          "pivot": [0, 0],
+                          "rotationDeg": 0,
+                          "scale2d": [1, 1],
+                          "opacity": 1,
+                          "tint": [0.86, 0.88, 0.9, 1],
+                          "zOrder": 0,
+                          "interactive": false,
+                          "clip": false,
+                          "sizing": "fixed",
+                          "padding": [0, 0, 0, 0],
+                          "borderRadius": 0,
+                          "borderWidth": 0,
+                          "borderColor": [0, 0, 0, 1],
+                          "text": "Unarmed",
+                          "fontSize": 24,
+                          "fontFamily": "",
+                          "fontWeight": 700,
+                          "align": "center",
+                          "vAlign": "middle",
+                          "wrap": true,
+                          "lineHeight": 1.2
+                        }
+                      },
+                      {
+                        "name": "Ammo",
+                        "type": "uiText",
+                        "position": [0, 0, 0],
+                        "rotation": [0, 0, 0],
+                        "scale": [1, 1, 1],
+                        "children": [],
+                        "variables": {},
+                        "spawnOnStart": true,
+                        "visible": false,
+                        "ui": {
+                          "anchorMin": [0, 0.5],
+                          "anchorMax": [1, 0.5],
+                          "offsetMin": [6, 8],
+                          "offsetMax": [-6, 30],
+                          "pivot": [0, 0],
+                          "rotationDeg": 0,
+                          "scale2d": [1, 1],
+                          "opacity": 1,
+                          "tint": [0.86, 0.88, 0.9, 0.75],
+                          "zOrder": 0,
+                          "interactive": false,
+                          "clip": false,
+                          "sizing": "fixed",
+                          "padding": [0, 0, 0, 0],
+                          "borderRadius": 0,
+                          "borderWidth": 0,
+                          "borderColor": [0, 0, 0, 1],
+                          "text": "Holster",
+                          "fontSize": 16,
+                          "fontFamily": "",
+                          "fontWeight": 500,
+                          "align": "center",
+                          "vAlign": "middle",
+                          "wrap": true,
+                          "lineHeight": 1.2
+                        }
+                      }
+                    ],
+                    "variables": {},
+                    "spawnOnStart": true,
+                    "visible": false,
+                    "ui": {
+                      "anchorMin": [0.5, 0.5],
+                      "anchorMax": [0.5, 0.5],
+                      "offsetMin": [-78, -254],
+                      "offsetMax": [78, -130],
+                      "pivot": [0.5, 0.5],
+                      "rotationDeg": 0,
+                      "scale2d": [1, 1],
+                      "opacity": 1,
+                      "tint": [0.04, 0.05, 0.06, 0.62],
+                      "zOrder": 1,
+                      "interactive": false,
+                      "clip": false,
+                      "sizing": "fixed",
+                      "padding": [0, 0, 0, 0],
+                      "borderRadius": 16,
+                      "borderWidth": 2,
+                      "borderColor": [1, 1, 1, 0.14]
+                    }
+                  },
+                  {
+                    "name": "Slot Pistol",
+                    "type": "uiPanel",
+                    "position": [0, 0, 0],
+                    "rotation": [0, 0, 0],
+                    "scale": [1, 1, 1],
+                    "children": [
+                      {
+                        "name": "Label",
+                        "type": "uiText",
+                        "position": [0, 0, 0],
+                        "rotation": [0, 0, 0],
+                        "scale": [1, 1, 1],
+                        "children": [],
+                        "variables": {},
+                        "spawnOnStart": true,
+                        "visible": false,
+                        "ui": {
+                          "anchorMin": [0, 0.5],
+                          "anchorMax": [1, 0.5],
+                          "offsetMin": [6, 8],
+                          "offsetMax": [-6, 30],
+                          "pivot": [0, 0],
+                          "rotationDeg": 0,
+                          "scale2d": [1, 1],
+                          "opacity": 1,
+                          "tint": [0.86, 0.88, 0.9, 1],
+                          "zOrder": 0,
+                          "interactive": false,
+                          "clip": false,
+                          "sizing": "fixed",
+                          "padding": [0, 0, 0, 0],
+                          "borderRadius": 0,
+                          "borderWidth": 0,
+                          "borderColor": [0, 0, 0, 1],
+                          "text": "Pistol",
+                          "fontSize": 19,
+                          "fontFamily": "",
+                          "fontWeight": 700,
+                          "align": "center",
+                          "vAlign": "middle",
+                          "wrap": true,
+                          "lineHeight": 1.2
+                        }
+                      },
+                      {
+                        "name": "Ammo",
+                        "type": "uiText",
+                        "position": [0, 0, 0],
+                        "rotation": [0, 0, 0],
+                        "scale": [1, 1, 1],
+                        "children": [],
+                        "variables": {},
+                        "spawnOnStart": true,
+                        "visible": false,
+                        "ui": {
+                          "anchorMin": [0, 0.5],
+                          "anchorMax": [1, 0.5],
+                          "offsetMin": [6, 31],
+                          "offsetMax": [-6, 52],
+                          "pivot": [0, 0],
+                          "rotationDeg": 0,
+                          "scale2d": [1, 1],
+                          "opacity": 1,
+                          "tint": [0.86, 0.88, 0.9, 0.75],
+                          "zOrder": 0,
+                          "interactive": false,
+                          "clip": false,
+                          "sizing": "fixed",
+                          "padding": [0, 0, 0, 0],
+                          "borderRadius": 0,
+                          "borderWidth": 0,
+                          "borderColor": [0, 0, 0, 1],
+                          "text": "12 / 48",
+                          "fontSize": 15,
+                          "fontFamily": "",
+                          "fontWeight": 500,
+                          "align": "center",
+                          "vAlign": "middle",
+                          "wrap": true,
+                          "lineHeight": 1.2
+                        }
+                      },
+                      {
+                        "name": "Icon",
+                        "type": "uiImage",
+                        "position": [0, 0, 0],
+                        "rotation": [0, 0, 0],
+                        "scale": [1, 1, 1],
+                        "children": [],
+                        "variables": {},
+                        "spawnOnStart": true,
+                        "visible": false,
+                        "ui": {
+                          "anchorMin": [0, 0.5],
+                          "anchorMax": [1, 0.5],
+                          "offsetMin": [14, -54],
+                          "offsetMax": [-14, 4],
+                          "pivot": [0, 0],
+                          "rotationDeg": 0,
+                          "scale2d": [1, 1],
+                          "opacity": 1,
+                          "tint": [0.86, 0.88, 0.9, 0.92],
+                          "zOrder": 0,
+                          "interactive": false,
+                          "clip": false,
+                          "sizing": "fixed",
+                          "padding": [0, 0, 0, 0],
+                          "borderRadius": 0,
+                          "borderWidth": 0,
+                          "borderColor": [0, 0, 0, 1],
+                          "textureId": "Icon Pistol.png",
+                          "fit": "contain",
+                          "uvRect": [0, 0, 1, 1]
+                        }
+                      }
+                    ],
+                    "variables": {},
+                    "spawnOnStart": true,
+                    "visible": false,
+                    "ui": {
+                      "anchorMin": [0.5, 0.5],
+                      "anchorMax": [0.5, 0.5],
+                      "offsetMin": [114, -62],
+                      "offsetMax": [270, 62],
+                      "pivot": [0.5, 0.5],
+                      "rotationDeg": 0,
+                      "scale2d": [1, 1],
+                      "opacity": 1,
+                      "tint": [0.04, 0.05, 0.06, 0.62],
+                      "zOrder": 1,
+                      "interactive": false,
+                      "clip": false,
+                      "sizing": "fixed",
+                      "padding": [0, 0, 0, 0],
+                      "borderRadius": 16,
+                      "borderWidth": 2,
+                      "borderColor": [1, 1, 1, 0.14]
+                    }
+                  },
+                  {
+                    "name": "Slot Rifle",
+                    "type": "uiPanel",
+                    "position": [0, 0, 0],
+                    "rotation": [0, 0, 0],
+                    "scale": [1, 1, 1],
+                    "children": [
+                      {
+                        "name": "Label",
+                        "type": "uiText",
+                        "position": [0, 0, 0],
+                        "rotation": [0, 0, 0],
+                        "scale": [1, 1, 1],
+                        "children": [],
+                        "variables": {},
+                        "spawnOnStart": true,
+                        "visible": false,
+                        "ui": {
+                          "anchorMin": [0, 0.5],
+                          "anchorMax": [1, 0.5],
+                          "offsetMin": [6, 8],
+                          "offsetMax": [-6, 30],
+                          "pivot": [0, 0],
+                          "rotationDeg": 0,
+                          "scale2d": [1, 1],
+                          "opacity": 1,
+                          "tint": [0.06, 0.05, 0.04, 1],
+                          "zOrder": 0,
+                          "interactive": false,
+                          "clip": false,
+                          "sizing": "fixed",
+                          "padding": [0, 0, 0, 0],
+                          "borderRadius": 0,
+                          "borderWidth": 0,
+                          "borderColor": [0, 0, 0, 1],
+                          "text": "AK-47",
+                          "fontSize": 19,
+                          "fontFamily": "",
+                          "fontWeight": 700,
+                          "align": "center",
+                          "vAlign": "middle",
+                          "wrap": true,
+                          "lineHeight": 1.2
+                        }
+                      },
+                      {
+                        "name": "Ammo",
+                        "type": "uiText",
+                        "position": [0, 0, 0],
+                        "rotation": [0, 0, 0],
+                        "scale": [1, 1, 1],
+                        "children": [],
+                        "variables": {},
+                        "spawnOnStart": true,
+                        "visible": false,
+                        "ui": {
+                          "anchorMin": [0, 0.5],
+                          "anchorMax": [1, 0.5],
+                          "offsetMin": [6, 31],
+                          "offsetMax": [-6, 52],
+                          "pivot": [0, 0],
+                          "rotationDeg": 0,
+                          "scale2d": [1, 1],
+                          "opacity": 1,
+                          "tint": [0.06, 0.05, 0.04, 0.75],
+                          "zOrder": 0,
+                          "interactive": false,
+                          "clip": false,
+                          "sizing": "fixed",
+                          "padding": [0, 0, 0, 0],
+                          "borderRadius": 0,
+                          "borderWidth": 0,
+                          "borderColor": [0, 0, 0, 1],
+                          "text": "30 / 90",
+                          "fontSize": 15,
+                          "fontFamily": "",
+                          "fontWeight": 500,
+                          "align": "center",
+                          "vAlign": "middle",
+                          "wrap": true,
+                          "lineHeight": 1.2
+                        }
+                      },
+                      {
+                        "name": "Icon",
+                        "type": "uiImage",
+                        "position": [0, 0, 0],
+                        "rotation": [0, 0, 0],
+                        "scale": [1, 1, 1],
+                        "children": [],
+                        "variables": {},
+                        "spawnOnStart": true,
+                        "visible": false,
+                        "ui": {
+                          "anchorMin": [0, 0.5],
+                          "anchorMax": [1, 0.5],
+                          "offsetMin": [10, -54],
+                          "offsetMax": [-10, 4],
+                          "pivot": [0, 0],
+                          "rotationDeg": 0,
+                          "scale2d": [1, 1],
+                          "opacity": 1,
+                          "tint": [0.86, 0.88, 0.9, 0.92],
+                          "zOrder": 0,
+                          "interactive": false,
+                          "clip": false,
+                          "sizing": "fixed",
+                          "padding": [0, 0, 0, 0],
+                          "borderRadius": 0,
+                          "borderWidth": 0,
+                          "borderColor": [0, 0, 0, 1],
+                          "textureId": "Icon Rifle.png",
+                          "fit": "contain",
+                          "uvRect": [0, 0, 1, 1]
+                        }
+                      }
+                    ],
+                    "variables": {},
+                    "spawnOnStart": true,
+                    "visible": false,
+                    "ui": {
+                      "anchorMin": [0.5, 0.5],
+                      "anchorMax": [0.5, 0.5],
+                      "offsetMin": [-78, 130],
+                      "offsetMax": [78, 254],
+                      "pivot": [0.5, 0.5],
+                      "rotationDeg": 0,
+                      "scale2d": [1, 1],
+                      "opacity": 1,
+                      "tint": [0.96, 0.66, 0.2, 0.9],
+                      "zOrder": 1,
+                      "interactive": false,
+                      "clip": false,
+                      "sizing": "fixed",
+                      "padding": [0, 0, 0, 0],
+                      "borderRadius": 16,
+                      "borderWidth": 2,
+                      "borderColor": [1, 0.86, 0.55, 1]
+                    }
+                  },
+                  {
+                    "name": "Slot Shotgun",
+                    "type": "uiPanel",
+                    "position": [0, 0, 0],
+                    "rotation": [0, 0, 0],
+                    "scale": [1, 1, 1],
+                    "children": [
+                      {
+                        "name": "Label",
+                        "type": "uiText",
+                        "position": [0, 0, 0],
+                        "rotation": [0, 0, 0],
+                        "scale": [1, 1, 1],
+                        "children": [],
+                        "variables": {},
+                        "spawnOnStart": true,
+                        "visible": false,
+                        "ui": {
+                          "anchorMin": [0, 0.5],
+                          "anchorMax": [1, 0.5],
+                          "offsetMin": [6, 8],
+                          "offsetMax": [-6, 30],
+                          "pivot": [0, 0],
+                          "rotationDeg": 0,
+                          "scale2d": [1, 1],
+                          "opacity": 1,
+                          "tint": [0.86, 0.88, 0.9, 1],
+                          "zOrder": 0,
+                          "interactive": false,
+                          "clip": false,
+                          "sizing": "fixed",
+                          "padding": [0, 0, 0, 0],
+                          "borderRadius": 0,
+                          "borderWidth": 0,
+                          "borderColor": [0, 0, 0, 1],
+                          "text": "SAPS-12",
+                          "fontSize": 19,
+                          "fontFamily": "",
+                          "fontWeight": 700,
+                          "align": "center",
+                          "vAlign": "middle",
+                          "wrap": true,
+                          "lineHeight": 1.2
+                        }
+                      },
+                      {
+                        "name": "Ammo",
+                        "type": "uiText",
+                        "position": [0, 0, 0],
+                        "rotation": [0, 0, 0],
+                        "scale": [1, 1, 1],
+                        "children": [],
+                        "variables": {},
+                        "spawnOnStart": true,
+                        "visible": false,
+                        "ui": {
+                          "anchorMin": [0, 0.5],
+                          "anchorMax": [1, 0.5],
+                          "offsetMin": [6, 31],
+                          "offsetMax": [-6, 52],
+                          "pivot": [0, 0],
+                          "rotationDeg": 0,
+                          "scale2d": [1, 1],
+                          "opacity": 1,
+                          "tint": [0.86, 0.88, 0.9, 0.75],
+                          "zOrder": 0,
+                          "interactive": false,
+                          "clip": false,
+                          "sizing": "fixed",
+                          "padding": [0, 0, 0, 0],
+                          "borderRadius": 0,
+                          "borderWidth": 0,
+                          "borderColor": [0, 0, 0, 1],
+                          "text": "8 / 32",
+                          "fontSize": 15,
+                          "fontFamily": "",
+                          "fontWeight": 500,
+                          "align": "center",
+                          "vAlign": "middle",
+                          "wrap": true,
+                          "lineHeight": 1.2
+                        }
+                      },
+                      {
+                        "name": "Icon",
+                        "type": "uiImage",
+                        "position": [0, 0, 0],
+                        "rotation": [0, 0, 0],
+                        "scale": [1, 1, 1],
+                        "children": [],
+                        "variables": {},
+                        "spawnOnStart": true,
+                        "visible": false,
+                        "ui": {
+                          "anchorMin": [0, 0.5],
+                          "anchorMax": [1, 0.5],
+                          "offsetMin": [10, -54],
+                          "offsetMax": [-10, 4],
+                          "pivot": [0, 0],
+                          "rotationDeg": 0,
+                          "scale2d": [1, 1],
+                          "opacity": 1,
+                          "tint": [0.86, 0.88, 0.9, 0.92],
+                          "zOrder": 0,
+                          "interactive": false,
+                          "clip": false,
+                          "sizing": "fixed",
+                          "padding": [0, 0, 0, 0],
+                          "borderRadius": 0,
+                          "borderWidth": 0,
+                          "borderColor": [0, 0, 0, 1],
+                          "textureId": "Icon Shotgun.png",
+                          "fit": "contain",
+                          "uvRect": [0, 0, 1, 1]
+                        }
+                      }
+                    ],
+                    "variables": {},
+                    "spawnOnStart": true,
+                    "visible": false,
+                    "ui": {
+                      "anchorMin": [0.5, 0.5],
+                      "anchorMax": [0.5, 0.5],
+                      "offsetMin": [-270, -62],
+                      "offsetMax": [-114, 62],
+                      "pivot": [0.5, 0.5],
+                      "rotationDeg": 0,
+                      "scale2d": [1, 1],
+                      "opacity": 1,
+                      "tint": [0.04, 0.05, 0.06, 0.62],
+                      "zOrder": 1,
+                      "interactive": false,
+                      "clip": false,
+                      "sizing": "fixed",
+                      "padding": [0, 0, 0, 0],
+                      "borderRadius": 16,
+                      "borderWidth": 2,
+                      "borderColor": [1, 1, 1, 0.14]
+                    }
+                  }
+                ],
+                "variables": {
+                  "__scriptId": {
+                    "type": "string",
+                    "value": "da5f1305233d19fc4070287e0ed88112",
+                    "access": "public"
+                  }
+                },
+                "spawnOnStart": true,
+                "visible": false,
+                "ui": {
+                  "anchorMin": [0.5, 0.5],
+                  "anchorMax": [0.5, 0.5],
+                  "offsetMin": [-290, -290],
+                  "offsetMax": [290, 290],
+                  "pivot": [0.5, 0.5],
+                  "rotationDeg": 0,
+                  "scale2d": [1, 1],
+                  "opacity": 1,
+                  "tint": [0, 0, 0, 0],
+                  "zOrder": 10,
+                  "interactive": false,
+                  "clip": false,
+                  "sizing": "fixed",
+                  "padding": [0, 0, 0, 0],
+                  "borderRadius": 0,
+                  "borderWidth": 0,
+                  "borderColor": [0, 0, 0, 1]
+                },
+                "scriptVars": {
+                  "slowMotion": 0.3,
+                  "fadeSeconds": 0.12,
+                  "mouseRange": 140,
+                  "deadZone": 0.35,
+                  "stickRange": 8,
+                  "pointerRadius": 98
                 }
               }
             ],

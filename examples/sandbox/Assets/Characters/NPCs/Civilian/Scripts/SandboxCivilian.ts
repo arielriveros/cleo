@@ -7,7 +7,7 @@ import type { ThreatKind } from '@/Characters/NPCs/Scripts/SandboxNpc'
  * A Sandbox civilian (the blue NPC): it goes about the whole map, stops to look at things, looks at the player and
  * moves on, and runs from danger. Attach to the **Character** node of the Civilian template (SandboxNpc's senses,
  * the player's body and animations underneath). Its AI Controller thinks with the **Civilian Brain**
- * (Characters/NPCs/AI), whose states are:
+ * (Characters/NPCs/Civilian), whose states are:
  *
  *   wait      stands a while (3 to 8 s) at a Look Point (or wherever it got to), its head sweeping round what is there
  *   roam      walks the nav mesh to somewhere else, 10 to 40 m off, often another Look Point

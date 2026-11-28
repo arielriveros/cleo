@@ -108,14 +108,17 @@ export async function play(setup: Setup, options: { aiDetail?: { perceiveEvery: 
 }
 export type Played = Awaited<ReturnType<typeof play>>;
 
-/** Shoot the player's rifle from its eyes at `target` (the gun's own raycast, its push, its weapon:Shot). */
-export function shoot(p: Played, target: ArrayLike<number>) {
-    const gun = p.player.children.find((c: any) => c.name === 'Weapons').children.find((c: any) => c.name === 'Rifle Grip');
+/**
+ * Shoot one of the player's guns (its rifle, unless `grip` names another holder) from its eyes at `target`, `spread`
+ * degrees round it at most (the gun's own raycasts, its push, its weapon:Shot).
+ */
+export function shoot(p: Played, target: ArrayLike<number>, grip = 'Rifle Grip', spread = 0) {
+    const gun = p.player.children.find((c: any) => c.name === 'Weapons').children.find((c: any) => c.name === grip);
     const me = p.player.worldPosition;
     const eye = [me[0], me[1] + 1.55, me[2]];
     const d = [target[0] - eye[0], target[1] - eye[1], target[2] - eye[2]];
     const n = Math.hypot(d[0], d[1], d[2]);
-    return gun.fire(eye, [d[0] / n, d[1] / n, d[2] / n], 0, p.player.ownBodies());
+    return gun.fire(eye, [d[0] / n, d[1] / n, d[2] / n], spread, p.player.ownBodies());
 }
 
 /** The reactions' states a character went through, in order. */

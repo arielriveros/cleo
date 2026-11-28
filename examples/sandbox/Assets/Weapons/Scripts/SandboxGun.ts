@@ -38,7 +38,10 @@ export interface SandboxShotView {
  * walked on, not seen).
  *
  * A HIT on a dynamic body pushes it: the shot's `impulse` (shared by its pellets) along the shot at the point it hit
- * (so a crate hit high tips, a ball spins), no more than `maxPushSpeed` of speed at once. A hit on a hard surface
+ * (so a crate hit high tips, a ball spins), no more than `maxPushSpeed` of speed at once. The pellets that strike one
+ * character land on it as ONE hit, as buckshot does: their shares summed, where the one nearest the middle of the
+ * pattern struck, so its reactions take a blast at close range as the heavy hit it is (a stumble, a stagger, a fall)
+ * and not as a scatter of flinches. A hit on a hard surface
  * (anything but a character) leaves sparks and dust (`impactTemplate`) and a hole (`holeTemplate`), the hole moving
  * with what it is on; a character throws nothing (its body's reaction is the hit); the shot draws a tracer
  * (`tracerTemplate`). In third person the gun flashes at its muzzle (`flashTemplate`) and plays its shot (`shotSound`,
@@ -76,7 +79,8 @@ export default class SandboxGunNode extends Node {
     /**
      * The push a shot gives a dynamic body, newton-seconds (shared by its pellets): far more than a real bullet's (a
      * rifle's carries about 4), so a shot crate shoves. No body is sped up by more than `maxPushSpeed` by one hit, so a
-     * ball is not shot away.
+     * ball is not shot away. A character takes it as one hit of what its pellets carry: it staggers from 60 and an
+     * NPC is knocked down past its `knockdownShock` (56), so the shotgun's (90) fells one at close range.
      */
     @attribute('Firing', { min: 0, max: 500, step: 0.5 })
     public impulse: number = 14
@@ -292,6 +296,8 @@ export default class SandboxGunNode extends Node {
         const options = { ignore: shooter ?? null, layerMask: this._layerMask(physics) }
         const pellets = Math.max(1, Math.round(this.pellets))
         const push = this.impulse / pellets
+        /** The pellets on each character (by its reactions), to land as one blow: summed, on the most central pellet's hit. */
+        const blows = new Map<unknown, { hit: any, way: number[], impulse: number, centre: number }>()
         for (let k = 0; k < pellets; k++) {
             const dir = MathUtils.randomInCone(this._dir, look, spread) as number[]
             // What the crosshair looks at...
@@ -315,8 +321,23 @@ export default class SandboxGunNode extends Node {
             hits.push(record)
             if (k === 0) this.lastHit = record
             if (!hit) continue
-            this._push(hit, way, push)
+            const reactions = pellets > 1 ? physics.reactionsFor?.(hit.body) ?? null : null
+            if (reactions) {
+                const centre = dir[0] * look[0] + dir[1] * look[1] + dir[2] * look[2]
+                const blow = blows.get(reactions)
+                const struck = { ...hit, point: [hit.point[0], hit.point[1], hit.point[2]] }
+                if (!blow) blows.set(reactions, { hit: struck, way: [way[0], way[1], way[2]], impulse: push, centre })
+                else {
+                    blow.impulse += push
+                    for (let i = 0; i < 3; i++) blow.way[i] += way[i]
+                    if (centre > blow.centre) { blow.hit = struck; blow.centre = centre }
+                }
+            } else this._push(hit, way, push)
             this._impact(hit)
+        }
+        for (const blow of blows.values()) {
+            const w = blow.way, length = Math.hypot(w[0], w[1], w[2]) || 1
+            this._push(blow.hit, [w[0] / length, w[1] / length, w[2] / length], blow.impulse)
         }
         return hits
     }

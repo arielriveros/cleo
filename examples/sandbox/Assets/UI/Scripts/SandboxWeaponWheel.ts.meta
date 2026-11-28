@@ -1,0 +1,189 @@
+{
+  "cleo": 1,
+  "guid": "da5f1305233d19fc4070287e0ed88112",
+  "kind": "script",
+  "created": 1795879824573,
+  "record": {
+    "id": "da5f1305233d19fc4070287e0ed88112",
+    "name": "SandboxWeaponWheel",
+    "baseType": "uiPanel",
+    "source": {
+      "$file": 1
+    },
+    "kind": "class",
+    "variables": [
+      {
+        "name": "slowMotion",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 0.3,
+        "hidden": false,
+        "attribute": {
+          "group": "Wheel",
+          "min": 0.05,
+          "max": 1,
+          "step": 0.05,
+          "tooltip": "The game's speed while the wheel is open (1: it does not slow)."
+        }
+      },
+      {
+        "name": "fadeSeconds",
+        "type": {
+          "kind": "number"
+        },
+        "access": "private",
+        "default": 0.12,
+        "hidden": false,
+        "attribute": {
+          "group": "Wheel",
+          "min": 0.01,
+          "max": 1,
+          "step": 0.01,
+          "tooltip": "Seconds it takes to fade in, and out (real time)."
+        }
+      },
+      {
+        "name": "mouseRange",
+        "type": {
+          "kind": "number"
+        },
+        "access": "private",
+        "default": 140,
+        "hidden": false,
+        "attribute": {
+          "group": "Wheel",
+          "min": 20,
+          "max": 600,
+          "step": 10,
+          "tooltip": "Pixels of mouse movement from the middle to the rim."
+        }
+      },
+      {
+        "name": "deadZone",
+        "type": {
+          "kind": "number"
+        },
+        "access": "private",
+        "default": 0.35,
+        "hidden": false,
+        "attribute": {
+          "group": "Wheel",
+          "min": 0.05,
+          "max": 0.9,
+          "step": 0.05,
+          "tooltip": "How far out the pointer must be (a share of the rim) to light a slot."
+        }
+      },
+      {
+        "name": "stickRange",
+        "type": {
+          "kind": "number"
+        },
+        "access": "private",
+        "default": 8,
+        "hidden": false,
+        "attribute": {
+          "group": "Wheel",
+          "min": 1,
+          "max": 20,
+          "step": 0.5,
+          "tooltip": "The Look action's stick scale (its binding's `scale` processor): a stick pushed all the way reads this."
+        }
+      },
+      {
+        "name": "pointerRadius",
+        "type": {
+          "kind": "number"
+        },
+        "access": "private",
+        "default": 98,
+        "hidden": false,
+        "attribute": {
+          "group": "Wheel",
+          "min": 0,
+          "max": 400,
+          "step": 5,
+          "tooltip": "Where the pointer dot rides round the hub, units from the middle."
+        }
+      },
+      {
+        "name": "isOpen",
+        "type": {
+          "kind": "boolean"
+        },
+        "access": "public",
+        "default": false,
+        "hidden": true
+      },
+      {
+        "name": "highlighted",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 0,
+        "hidden": true
+      },
+      {
+        "name": "_wheelCursor",
+        "type": {
+          "kind": "vector",
+          "size": 2
+        },
+        "access": "private",
+        "default": [0, 0],
+        "hidden": true
+      },
+      {
+        "name": "_wheelShown",
+        "type": {
+          "kind": "number"
+        },
+        "access": "private",
+        "default": 0,
+        "hidden": true
+      },
+      {
+        "name": "_wheelLight",
+        "type": {
+          "kind": "vector",
+          "size": 4
+        },
+        "access": "private",
+        "default": [0, 0, 0, 0],
+        "hidden": true
+      },
+      {
+        "name": "_wheelInfo",
+        "type": {
+          "kind": "vector",
+          "size": 3
+        },
+        "access": "private",
+        "default": [],
+        "hidden": true
+      },
+      {
+        "name": "_wheelEquipped",
+        "type": {
+          "kind": "number"
+        },
+        "access": "private",
+        "default": 0,
+        "hidden": true
+      },
+      {
+        "name": "_wheelSlowed",
+        "type": {
+          "kind": "boolean"
+        },
+        "access": "private",
+        "default": false,
+        "hidden": true
+      }
+    ],
+    "reflect": 3
+  }
+}

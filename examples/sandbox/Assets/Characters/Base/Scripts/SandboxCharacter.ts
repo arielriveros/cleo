@@ -46,8 +46,8 @@ import { animTrigger, attribute, eventListener, observable } from 'cleo/decorato
  *     goes along it (`stairs`, +1 up, -1 down, from the climb under its travel), the flight's pace (one tread a
  *     step, slowing down BEFORE the first riser, seen ahead), facing where it goes on the flight, and `stairRate`,
  *     how much faster the stair clips play while the body still slows onto it;
- *   - the WEAPONS: Equip (or the mouse wheel) cycles none, the pistol, the rifle, the shotgun: the one in the hands
- *     goes down and is put away, the next is shown and comes up (its layer's weight, `pistolWeight` / `rifleWeight` /
+ *   - the WEAPONS: none, the pistol, the rifle, the shotgun, the one to take out its `pickWeapon` (the player's weapon
+ *     wheel, an NPC's brain): the one in the hands goes down and is put away, the next is shown and comes up (its layer's weight, `pistolWeight` / `rifleWeight` /
  *     `shotgunWeight`), and the body takes its STANCE as it does (`stance`: 0 unarmed, 1 the pistol pack's moves, 2
  *     the rifle pack's, which the shotgun shares); Aim held aims it (`aiming`, the aim layers' weights, where the
  *     aim goes off the body in `aimYaw` / `aimPitch`), facing the aim and strafing, turning in place sooner; not
@@ -304,7 +304,7 @@ export default class SandboxCharacterNode extends CharacterNode {
     /** StairRate: how much faster the stair clips play while the body is still faster than their pace. */
     public stairRate: number = 1
     /**
-     * The weapon in the hands: 0 none, 1 the pistol, 2 the rifle, 3 the shotgun (the one shown; Equip picks the next).
+     * The weapon in the hands: 0 none, 1 the pistol, 2 the rifle, 3 the shotgun (the one shown; `pickWeapon` picks the next).
      * Setting it tells `weapon:Equipped` (the weapon and the one before), which shows the model in the hand.
      */
     @observable('weapon:Equipped')
@@ -381,7 +381,7 @@ export default class SandboxCharacterNode extends CharacterNode {
     protected _carTime: number = 0
     protected _enterSeconds: number = 0
 
-    /** The weapon the hands go to next (Equip): 0 none, 1 the pistol, 2 the rifle, 3 the shotgun. */
+    /** The weapon the hands go to next (`pickWeapon`'s): 0 none, 1 the pistol, 2 the rifle, 3 the shotgun. */
     protected _weaponWanted: number = 0
     /** The aim's weight, before the weapon's own scales it. */
     protected _aim: number = 0
@@ -729,8 +729,8 @@ export default class SandboxCharacterNode extends CharacterNode {
     }
 
     /**
-     * The weapons, every frame, in either view. Equip (or the mouse wheel) picks the next weapon (none, the pistol,
-     * the rifle, the shotgun, round again): the one in the hands goes down and away, the next comes up (its layer's
+     * The weapons, every frame, in either view. `pickWeapon` picks the next weapon (none, the pistol, the rifle, the
+     * shotgun): the one in the hands goes down and away, the next comes up (its layer's
      * weight in third person over `equipSeconds`; its viewmodel's Equip clip in first person) and fires once it is up.
      * Reload, or a pull on an empty magazine, reloads it (the Reload pose held in third person, the viewmodel's
      * reload clips in first person), filling the magazine from the reserve near the end. Aim held with one up aims it

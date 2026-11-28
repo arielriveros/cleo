@@ -237,7 +237,7 @@ A shadow-only node is drawn into the shadow maps and nowhere else: no camera see
 a capture, but it casts its shadow for the sun and for spot and point lights as before. It is still visible
 (`visible` stays true), so it keeps animating and casting. A first-person player sets it on its own body while
 the camera is at its eyes: the body is gone from the view it would fill, and its shadow stays on the ground.
-Reference: `examples/sandbox/Assets/Characters/Mannequin/Scripts/SandboxCamera.ts`.
+Reference: `examples/sandbox/Assets/Characters/Player/Scripts/SandboxCamera.ts`.
 
 ## Draw distance
 

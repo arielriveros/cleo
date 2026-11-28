@@ -1,16 +1,16 @@
 {
-  "id": "b2ad954ba96d58d83daaf35d67895759",
-  "name": "Civilian",
+  "id": "83897d967bcb6fdd8909fc97ce183124",
+  "name": "Sandbox Character",
   "nodeJson": {
-    "id": "78d1a3e19c317262cddd3a0bc0faec1c",
-    "name": "Civilian",
+    "id": "02c05441ea2d68630ac6c25aba8ab20d",
+    "name": "Sandbox Character",
     "type": "collider",
     "position": [0, 0, 0],
     "rotation": [0, 0, 0],
     "scale": [1, 1, 1],
     "children": [
       {
-        "id": "809549948e1bb9b51296056aee94e363",
+        "id": "a54fd87ccd8c332db7fe7a659d00bf95",
         "name": "Character",
         "type": "character",
         "position": [0, 0, 0],
@@ -18,7 +18,7 @@
         "scale": [1, 1, 1],
         "children": [
           {
-            "id": "1174424f27b6629acd061b7569932e40",
+            "id": "30bf41af603ca5c1654b3cfa1408456b",
             "name": "Mannequin",
             "type": "model",
             "position": [0, 0, 0],
@@ -33,12 +33,12 @@
               },
               "__materialId": {
                 "type": "string",
-                "value": "31ebef24c54d10fdc2da9cad742b971d",
+                "value": "7d5d0f4c630015f4730b0581f4bf9e31",
                 "access": "public"
               },
               "__materialIds": {
                 "type": "string",
-                "value": "[\"31ebef24c54d10fdc2da9cad742b971d\"]",
+                "value": "[\"7d5d0f4c630015f4730b0581f4bf9e31\"]",
                 "access": "public"
               }
             },
@@ -76,7 +76,7 @@
               },
               "material": {
                 "type": "pbr",
-                "baseColor": [0.15, 0.35, 1],
+                "baseColor": [1, 1, 1],
                 "metallic": 1,
                 "roughness": 1,
                 "opacity": 1,
@@ -1490,6 +1490,13 @@
                 "ragdollProfile": {
                   "version": 1,
                   "totalMass": 70,
+                  "selfCollision": true,
+                  "linearDamping": 0.02,
+                  "angularDamping": 0.2,
+                  "solverIterations": 20,
+                  "friction": 0.8,
+                  "restitution": 0.05,
+                  "footFriction": 2,
                   "parts": [
                     {
                       "name": "Pelvis",
@@ -1517,8 +1524,8 @@
                       "massFraction": 0.139,
                       "joint": {
                         "type": "cone",
-                        "swing": 15,
-                        "twist": 16,
+                        "swing": 25,
+                        "twist": 20,
                         "hingeMin": 0,
                         "hingeMax": 0,
                         "tilt": [0, 0]
@@ -1535,8 +1542,8 @@
                       "massFraction": 0.216,
                       "joint": {
                         "type": "cone",
-                        "swing": 19,
-                        "twist": 17,
+                        "swing": 20,
+                        "twist": 20,
                         "hingeMin": 0,
                         "hingeMax": 0
                       }
@@ -1550,8 +1557,8 @@
                       "massFraction": 0.081,
                       "joint": {
                         "type": "cone",
-                        "swing": 26,
-                        "twist": 26,
+                        "swing": 35,
+                        "twist": 40,
                         "hingeMin": 0,
                         "hingeMax": 0
                       }
@@ -1614,11 +1621,11 @@
                       "massFraction": 0.1,
                       "joint": {
                         "type": "cone",
-                        "swing": 58,
-                        "twist": 35,
+                        "swing": 65,
+                        "twist": 45,
                         "hingeMin": 0,
                         "hingeMax": 0,
-                        "tilt": [32, 0]
+                        "tilt": [25, 0]
                       }
                     },
                     {
@@ -1711,11 +1718,11 @@
                       "massFraction": 0.1,
                       "joint": {
                         "type": "cone",
-                        "swing": 58,
-                        "twist": 35,
+                        "swing": 65,
+                        "twist": 45,
                         "hingeMin": 0,
                         "hingeMax": 0,
-                        "tilt": [32, 0]
+                        "tilt": [25, 0]
                       }
                     },
                     {
@@ -1750,14 +1757,7 @@
                         "hingeMax": 0
                       }
                     }
-                  ],
-                  "selfCollision": true,
-                  "linearDamping": 0.02,
-                  "angularDamping": 0.2,
-                  "solverIterations": 20,
-                  "friction": 0.8,
-                  "restitution": 0.05,
-                  "footFriction": 2
+                  ]
                 },
                 "reactionSets": {
                   "version": 1,
@@ -1851,6 +1851,9 @@
                             "impulseOneFoot": 0.8,
                             "impulseAirborne": 0.5,
                             "duration": 1.4,
+                            "holdControl": 0.35,
+                            "holdRelease": 0.3,
+                            "reactTurn": 0.5,
                             "painLean": 0.25,
                             "shockSpin": 0.3,
                             "gutFold": 0.45,
@@ -1874,6 +1877,7 @@
                             "maxSteps": 4,
                             "tire": 0.7,
                             "assist": 1,
+                            "yawDamp": 0.25,
                             "firstStep": 0.12,
                             "crossMax": 0.08,
                             "stanceStiffness": 1.2,
@@ -2013,7 +2017,7 @@
                             "blendTime": 0.25
                           },
                           "clips": {
-                            "faceUp": "Stand Up"
+                            "faceUp": "Getting Up"
                           }
                         }
                       }
@@ -14352,550 +14356,668 @@
             "ragdoll": null
           },
           {
-            "name": "AI Controller",
-            "type": "controller",
+            "id": "ae71b7b7fcf4f381d23fcaf5e4a1ba3d",
+            "name": "Weapons",
+            "type": "node",
             "position": [0, 0, 0],
             "rotation": [0, 0, 0],
             "scale": [1, 1, 1],
-            "children": [],
-            "variables": {},
-            "spawnOnStart": true,
-            "possessedId": "809549948e1bb9b51296056aee94e363",
-            "aimSourceId": null,
-            "navMeshId": null,
-            "controlSource": "ai",
-            "moveAction": "Move",
-            "lookAction": "Look",
-            "jumpAction": "Jump",
-            "sprintAction": "Sprint",
-            "crouchAction": "",
-            "aimSource": "possessed",
-            "driveAimTarget": true,
-            "goal": "idle",
-            "targetKey": "target",
-            "goalPoint": [0, 0, 0],
-            "steering": {
-              "maxSpeed": 3,
-              "arriveRadius": 0.4,
-              "slowRadius": 2.5,
-              "standoff": 2,
-              "wanderRadius": 1.2,
-              "wanderDistance": 2.5,
-              "wanderJitter": 90,
-              "separationRadius": 1.5,
-              "avoidDistance": 1,
-              "avoidStrength": 1.5
-            },
-            "routeName": "",
-            "flockRadius": 6,
-            "separationWeight": 1.5,
-            "alignmentWeight": 1,
-            "cohesionWeight": 0.8,
-            "perception": {
-              "fieldOfView": 150,
-              "range": 16,
-              "memorySpan": 5,
-              "reactionTime": 0.9
-            },
-            "eyeHeight": 1.6,
-            "autoAcquire": false,
-            "repath": {
-              "interval": 2,
-              "targetDrift": 1
-            },
-            "waypointRadius": 0.6,
-            "whiskerCount": 3,
-            "whiskerSpread": 60,
-            "behavior": {
-              "parameters": [
-                {
-                  "name": "Knocked",
-                  "type": "boolean",
-                  "default": false,
-                  "source": {
-                    "kind": "builtin",
-                    "name": "isKnocked"
-                  }
-                },
-                {
-                  "name": "At Goal",
-                  "type": "boolean",
-                  "default": false,
-                  "source": {
-                    "kind": "builtin",
-                    "name": "atGoal"
-                  }
-                },
-                {
-                  "name": "Stuck",
-                  "type": "boolean",
-                  "default": false,
-                  "source": {
-                    "kind": "builtin",
-                    "name": "isStuck"
-                  }
-                },
-                {
-                  "name": "Restless",
-                  "type": "boolean",
-                  "default": false,
-                  "source": {
-                    "kind": "builtin",
-                    "name": "restless"
-                  }
-                },
-                {
-                  "name": "In Sight",
-                  "type": "boolean",
-                  "default": false,
-                  "source": {
-                    "kind": "sense",
-                    "name": "targetInSight"
-                  }
-                },
-                {
-                  "name": "Has Target",
-                  "type": "boolean",
-                  "default": false,
-                  "source": {
-                    "kind": "sense",
-                    "name": "hasTarget"
-                  }
-                },
-                {
-                  "name": "Distance",
-                  "type": "number",
-                  "default": 0,
-                  "source": {
-                    "kind": "sense",
-                    "name": "planarDistanceToTarget"
-                  }
-                },
-                {
-                  "name": "Since Shot",
-                  "type": "number",
-                  "default": 999,
-                  "source": {
-                    "kind": "builtin",
-                    "name": "sinceShot"
-                  }
-                },
-                {
-                  "name": "Since Danger",
-                  "type": "number",
-                  "default": 999,
-                  "source": {
-                    "kind": "builtin",
-                    "name": "sinceDanger"
-                  }
-                },
-                {
-                  "name": "Since Watched",
-                  "type": "number",
-                  "default": 999,
-                  "source": {
-                    "kind": "builtin",
-                    "name": "sinceWatched"
-                  }
-                },
-                {
-                  "name": "Threat Distance",
-                  "type": "number",
-                  "default": 999,
-                  "source": {
-                    "kind": "builtin",
-                    "name": "threatDistance"
-                  }
-                },
-                {
-                  "name": "Knock",
-                  "type": "trigger",
-                  "default": false,
-                  "source": {
-                    "kind": "reaction",
-                    "name": "knockCount"
-                  }
-                },
-                {
-                  "name": "Hurt For",
-                  "type": "number",
-                  "default": 0,
-                  "source": {
-                    "kind": "layerTime",
-                    "layer": "Health"
-                  }
-                }
-              ],
-              "states": [
-                {
-                  "name": "wait",
-                  "goal": "idle",
-                  "isEntry": true,
-                  "x": 40,
-                  "y": 160
-                },
-                {
-                  "name": "roam",
-                  "goal": "path",
-                  "targetKey": "point",
-                  "x": 260,
-                  "y": 160
-                },
-                {
-                  "name": "watch",
-                  "goal": "idle",
-                  "x": 260,
-                  "y": 20
-                },
-                {
-                  "name": "alert",
-                  "goal": "idle",
-                  "x": 480,
-                  "y": 20
-                },
-                {
-                  "name": "flee",
-                  "goal": "path",
-                  "targetKey": "point",
-                  "x": 700,
-                  "y": 160
-                },
-                {
-                  "name": "cower",
-                  "goal": "idle",
-                  "x": 700,
-                  "y": 20
-                },
-                {
-                  "name": "knocked",
-                  "goal": "idle",
-                  "x": 480,
-                  "y": 300
-                }
-              ],
-              "transitions": [
-                {
-                  "from": "*",
-                  "to": "knocked",
-                  "condition": {
-                    "op": "and",
+            "children": [
+              {
+                "id": "73c9baae199e5fd880bcf4b74f4d68bd",
+                "name": "Pistol Grip",
+                "type": "node",
+                "position": [-0.8134288787841797, 1.4045332670211792, -0.0243177879601717],
+                "rotation": [78.78829956054688, 3.88651704788208, -75.28366088867188],
+                "scale": [1, 1, 1],
+                "children": [
+                  {
+                    "id": "d845f1dcb6bca2289ca45ced43f42a07",
+                    "name": "Pistol",
+                    "type": "node",
+                    "position": [0, 0, 0],
+                    "rotation": [0, 0, 0],
+                    "scale": [1, 1, 1],
                     "children": [
                       {
-                        "param": "Knocked",
-                        "op": "true"
-                      }
-                    ]
-                  }
-                },
-                {
-                  "from": "knocked",
-                  "to": "flee",
-                  "condition": {
-                    "op": "and",
-                    "children": [
-                      {
-                        "param": "Knocked",
-                        "op": "false"
-                      }
-                    ]
-                  }
-                },
-                {
-                  "from": "*",
-                  "to": "flee",
-                  "condition": {
-                    "op": "and",
-                    "children": [
-                      {
-                        "param": "Since Danger",
-                        "op": "lt",
-                        "value": 1
-                      },
-                      {
-                        "param": "Knocked",
-                        "op": "false"
-                      }
-                    ]
-                  }
-                },
-                {
-                  "from": "wait",
-                  "to": "alert",
-                  "condition": {
-                    "op": "and",
-                    "children": [
-                      {
-                        "param": "Since Shot",
-                        "op": "lt",
-                        "value": 1
-                      }
-                    ]
-                  }
-                },
-                {
-                  "from": "roam",
-                  "to": "alert",
-                  "condition": {
-                    "op": "and",
-                    "children": [
-                      {
-                        "param": "Since Shot",
-                        "op": "lt",
-                        "value": 1
-                      }
-                    ]
-                  }
-                },
-                {
-                  "from": "watch",
-                  "to": "alert",
-                  "condition": {
-                    "op": "and",
-                    "children": [
-                      {
-                        "param": "Since Shot",
-                        "op": "lt",
-                        "value": 1
-                      }
-                    ]
-                  }
-                },
-                {
-                  "from": "alert",
-                  "to": "flee",
-                  "condition": {
-                    "op": "and",
-                    "children": [
-                      {
-                        "param": "Restless",
-                        "op": "true"
-                      },
-                      {
-                        "param": "Threat Distance",
-                        "op": "lt",
-                        "value": 22
-                      }
-                    ]
-                  }
-                },
-                {
-                  "from": "alert",
-                  "to": "roam",
-                  "condition": {
-                    "op": "and",
-                    "children": [
-                      {
-                        "param": "Restless",
-                        "op": "true"
-                      }
-                    ]
-                  }
-                },
-                {
-                  "from": "wait",
-                  "to": "watch",
-                  "condition": {
-                    "op": "and",
-                    "children": [
-                      {
-                        "param": "In Sight",
-                        "op": "true"
-                      },
-                      {
-                        "param": "Distance",
-                        "op": "lt",
-                        "value": 6
-                      },
-                      {
-                        "param": "Since Watched",
-                        "op": "gt",
-                        "value": 20
-                      }
-                    ]
-                  }
-                },
-                {
-                  "from": "roam",
-                  "to": "watch",
-                  "condition": {
-                    "op": "and",
-                    "children": [
-                      {
-                        "param": "In Sight",
-                        "op": "true"
-                      },
-                      {
-                        "param": "Distance",
-                        "op": "lt",
-                        "value": 6
-                      },
-                      {
-                        "param": "Since Watched",
-                        "op": "gt",
-                        "value": 20
-                      }
-                    ]
-                  }
-                },
-                {
-                  "from": "watch",
-                  "to": "roam",
-                  "condition": {
-                    "op": "or",
-                    "children": [
-                      {
-                        "param": "Restless",
-                        "op": "true"
-                      },
-                      {
-                        "param": "Distance",
-                        "op": "gt",
-                        "value": 9.6
-                      },
-                      {
-                        "param": "Has Target",
-                        "op": "false"
-                      }
-                    ]
-                  }
-                },
-                {
-                  "from": "wait",
-                  "to": "roam",
-                  "condition": {
-                    "op": "and",
-                    "children": [
-                      {
-                        "param": "Restless",
-                        "op": "true"
-                      }
-                    ]
-                  }
-                },
-                {
-                  "from": "roam",
-                  "to": "wait",
-                  "condition": {
-                    "op": "or",
-                    "children": [
-                      {
-                        "param": "At Goal",
-                        "op": "true"
-                      },
-                      {
-                        "param": "Stuck",
-                        "op": "true"
-                      }
-                    ]
-                  }
-                },
-                {
-                  "from": "flee",
-                  "to": "cower",
-                  "condition": {
-                    "op": "and",
-                    "children": [
-                      {
-                        "op": "or",
-                        "children": [
-                          {
-                            "param": "At Goal",
-                            "op": "true"
+                        "id": "998afdd4e61afe3380f942ddf5df58d4",
+                        "name": "Pistol",
+                        "type": "model",
+                        "position": [0, 0, 0],
+                        "rotation": [0, 0, 0],
+                        "scale": [1, 1, 1],
+                        "children": [],
+                        "variables": {
+                          "__materialId": {
+                            "type": "string",
+                            "value": "3c9ebb84b31ae857e661c45292798cc4",
+                            "access": "public"
                           },
-                          {
-                            "param": "Stuck",
-                            "op": "true"
+                          "__materialIds": {
+                            "type": "string",
+                            "value": "[\"3c9ebb84b31ae857e661c45292798cc4\"]",
+                            "access": "public"
                           }
-                        ]
-                      },
-                      {
-                        "param": "Since Danger",
-                        "op": "gt",
-                        "value": 7
+                        },
+                        "spawnOnStart": true,
+                        "model": {
+                          "geometry": {
+                            "$geo": {
+                              "positions": {
+                                "h": "3e56e1915ab2a476859f9209b1d579431dd774000b33cd0f5749cfb88ed5348f",
+                                "l": 53484
+                              },
+                              "normals": {
+                                "h": "4677e683948f8ddfb3d589c4ec7bd1cedb9ed06f7741ed1d5340bda7017b5864",
+                                "l": 53484
+                              },
+                              "tangents": {
+                                "h": "73eef81a2823328628e3c783eee6d30524b787466050eb486f7eb1680f56eb21",
+                                "l": 53484
+                              },
+                              "bitangents": {
+                                "h": "f5e2f0ea138cd97f04ef4a3a367d7c8830acae806f5cf0c63d9c37e0593fd9f0",
+                                "l": 53484
+                              },
+                              "texCoords": {
+                                "h": "0a515a8a3f2364448699e01e5800705901e5b85874ed2a4b6a02406de8e7cedd",
+                                "l": 35656
+                              },
+                              "indices": {
+                                "h": "be2f0737631e2b6585ab7795a2cd66c14d507be5feee1894f7ecdc42d89e5f5f",
+                                "l": 26472,
+                                "bits": 16
+                              },
+                              "typed": true
+                            }
+                          },
+                          "material": {
+                            "type": "pbr",
+                            "baseColor": [1, 1, 1],
+                            "metallic": 1,
+                            "roughness": 1,
+                            "reflectance": 0.5,
+                            "opacity": 1,
+                            "alphaCutoff": 0,
+                            "emissiveFactor": [0, 0, 0],
+                            "emissiveIntensity": 1,
+                            "displacementScale": 0.05,
+                            "depthSpace": "uv",
+                            "invertHeight": false,
+                            "clipSilhouette": false,
+                            "textures": {
+                              "baseColorTexture": "880ad90c3a8471539dc565c21a347e21",
+                              "metallicMap": "aa64235601ef8da0e0e3dae6ffe374ac",
+                              "roughnessMap": "aa64235601ef8da0e0e3dae6ffe374ac",
+                              "normalMap": "5073b8b9c1e71bc77274e26734456daf",
+                              "occlusionMap": "aa64235601ef8da0e0e3dae6ffe374ac"
+                            },
+                            "config": {
+                              "side": "double",
+                              "wireframe": false,
+                              "transparent": false,
+                              "castShadow": true,
+                              "probeable": true
+                            }
+                          }
+                        },
+                        "animationMappings": null,
+                        "stateMachine": null,
+                        "ragdoll": null
                       }
-                    ]
+                    ],
+                    "variables": {
+                      "__modelId": {
+                        "type": "string",
+                        "value": "cff74fd3ba284bef822bc97fe751259f",
+                        "access": "public"
+                      }
+                    },
+                    "spawnOnStart": true
+                  },
+                  {
+                    "id": "1a18483a44013a2ae0d0b63ed18b5ffe",
+                    "name": "Muzzle",
+                    "type": "node",
+                    "position": [0, 0.09929999709129333, 0.23499999940395355],
+                    "rotation": [0, 0, 0],
+                    "scale": [1, 1, 1],
+                    "children": [],
+                    "variables": {},
+                    "spawnOnStart": true
+                  }
+                ],
+                "variables": {
+                  "__scriptId": {
+                    "type": "string",
+                    "value": "d4c337d97faa6a10486009d4e8120dc2",
+                    "access": "public"
                   }
                 },
-                {
-                  "from": "cower",
-                  "to": "roam",
-                  "condition": {
-                    "op": "and",
+                "spawnOnStart": true,
+                "socketAttachment": {
+                  "target": "parent",
+                  "socket": "Pistol Grip"
+                },
+                "scriptVars": {
+                  "displayName": "Pistol",
+                  "auto": false,
+                  "roundsPerMinute": 380,
+                  "pellets": 1,
+                  "range": 140,
+                  "impulse": 14,
+                  "damage": 26,
+                  "magazine": 12,
+                  "reserveRounds": 84,
+                  "hipSpread": 1.6,
+                  "aimSpread": 0.25,
+                  "recoilPitch": 1.5,
+                  "recoilYaw": 0.45,
+                  "shake": 0.04,
+                  "kick": 7,
+                  "reloadSeconds": 2.2,
+                  "equipSeconds": 1.2,
+                  "aimFov": 62,
+                  "aimMove": 0.7,
+                  "aimClips": true,
+                  "aimOffset": [0, 0.012, 0],
+                  "shotSound": "ShotPistol",
+                  "fireTrigger": "PistolFire"
+                }
+              },
+              {
+                "id": "8e330d7faf38d7cf74ad6f91020ac77a",
+                "name": "Rifle Grip",
+                "type": "node",
+                "position": [-0.8134288787841797, 1.4045332670211792, -0.0243177879601717],
+                "rotation": [98.8868408203125, 14.39594554901123, -77.4494400024414],
+                "scale": [1, 1, 1],
+                "children": [
+                  {
+                    "id": "a337cf6260c7943f1d75e78dbef0bd09",
+                    "name": "Rifle",
+                    "type": "node",
+                    "position": [0.013829999603331089, -0.007340000011026859, -0.03099999949336052],
+                    "rotation": [0, 0, 0],
+                    "scale": [1, 1, 1],
                     "children": [
                       {
-                        "param": "Restless",
-                        "op": "true"
+                        "id": "f96297a23da479a30b9ca7657c19de41",
+                        "name": "Rifle",
+                        "type": "model",
+                        "position": [0, 0, 0],
+                        "rotation": [0, 0, 0],
+                        "scale": [1, 1, 1],
+                        "children": [],
+                        "variables": {
+                          "__materialId": {
+                            "type": "string",
+                            "value": "f195dfa3599454f37bc2ff758680cba0",
+                            "access": "public"
+                          },
+                          "__materialIds": {
+                            "type": "string",
+                            "value": "[\"f195dfa3599454f37bc2ff758680cba0\",\"f66b43db39788756b85c02801e3ee7f4\"]",
+                            "access": "public"
+                          }
+                        },
+                        "spawnOnStart": true,
+                        "model": {
+                          "geometry": {
+                            "$geo": {
+                              "positions": {
+                                "h": "0d06570272961547b5f1a6ff5937ba5f10dba2803185de2db256555e3595ede9",
+                                "l": 275616
+                              },
+                              "normals": {
+                                "h": "abb5dbbc67bb87d919dece0ae4211be8b862a64219e035761c47a4d4c118ae8a",
+                                "l": 275616
+                              },
+                              "tangents": {
+                                "h": "f71a772206c3ec3ad3a012f661aa2cf7ab7324560fa8a413fb7988bdb78e4046",
+                                "l": 275616
+                              },
+                              "bitangents": {
+                                "h": "d70cb6378548700eed58bd5a8c484f8a7f25389b9b32b187481fd95355420ea1",
+                                "l": 275616
+                              },
+                              "texCoords": {
+                                "h": "2ddcc51bd099697210b8cc41c3637fe1d326fc85834e37f88a136e4376c0aeb8",
+                                "l": 183744
+                              },
+                              "indices": {
+                                "h": "d9f301184cdbca8b18be5fb9a2755d183054ccc7b00c208139d201a2c10cc692",
+                                "l": 148278,
+                                "bits": 16
+                              },
+                              "typed": true
+                            }
+                          },
+                          "material": {
+                            "type": "pbr",
+                            "baseColor": [1, 1, 1],
+                            "metallic": 1,
+                            "roughness": 1,
+                            "reflectance": 0.5,
+                            "opacity": 1,
+                            "alphaCutoff": 0,
+                            "emissiveFactor": [0, 0, 0],
+                            "emissiveIntensity": 1,
+                            "displacementScale": 0.05,
+                            "depthSpace": "uv",
+                            "invertHeight": false,
+                            "clipSilhouette": false,
+                            "textures": {
+                              "baseColorTexture": "7f52f31ae3774a6671320d18acd590d9",
+                              "metallicMap": "a13d482458670e23d0c854270416585d",
+                              "roughnessMap": "a13d482458670e23d0c854270416585d",
+                              "normalMap": "b41058e0fc2b48723b5e52e553e3936a",
+                              "occlusionMap": "a13d482458670e23d0c854270416585d"
+                            },
+                            "config": {
+                              "side": "double",
+                              "wireframe": false,
+                              "transparent": false,
+                              "castShadow": true,
+                              "probeable": true
+                            }
+                          },
+                          "materials": [
+                            {
+                              "type": "pbr",
+                              "baseColor": [1, 1, 1],
+                              "metallic": 1,
+                              "roughness": 1,
+                              "reflectance": 0.5,
+                              "opacity": 1,
+                              "alphaCutoff": 0,
+                              "emissiveFactor": [0, 0, 0],
+                              "emissiveIntensity": 1,
+                              "displacementScale": 0.05,
+                              "depthSpace": "uv",
+                              "invertHeight": false,
+                              "clipSilhouette": false,
+                              "textures": {
+                                "baseColorTexture": "7f52f31ae3774a6671320d18acd590d9",
+                                "metallicMap": "a13d482458670e23d0c854270416585d",
+                                "roughnessMap": "a13d482458670e23d0c854270416585d",
+                                "normalMap": "b41058e0fc2b48723b5e52e553e3936a",
+                                "occlusionMap": "a13d482458670e23d0c854270416585d"
+                              },
+                              "config": {
+                                "side": "double",
+                                "wireframe": false,
+                                "transparent": false,
+                                "castShadow": true,
+                                "probeable": true
+                              }
+                            },
+                            {
+                              "type": "pbr",
+                              "baseColor": [1, 1, 1],
+                              "metallic": 1,
+                              "roughness": 1,
+                              "reflectance": 0.5,
+                              "opacity": 1,
+                              "alphaCutoff": 0,
+                              "emissiveFactor": [0, 0, 0],
+                              "emissiveIntensity": 1,
+                              "displacementScale": 0.05,
+                              "depthSpace": "uv",
+                              "invertHeight": false,
+                              "clipSilhouette": false,
+                              "textures": {
+                                "baseColorTexture": "f69b348b6d4c8ff9981859501aed1dc3",
+                                "metallicMap": "2db0ca4fe50d0f548d9d3dd84e0501c0",
+                                "roughnessMap": "2db0ca4fe50d0f548d9d3dd84e0501c0",
+                                "normalMap": "284890b17935dacd530505c30bbda932",
+                                "occlusionMap": "2db0ca4fe50d0f548d9d3dd84e0501c0"
+                              },
+                              "config": {
+                                "side": "double",
+                                "wireframe": false,
+                                "transparent": false,
+                                "castShadow": true,
+                                "probeable": true
+                              }
+                            }
+                          ],
+                          "submeshes": [
+                            {
+                              "start": 0,
+                              "count": 21678
+                            },
+                            {
+                              "start": 21678,
+                              "count": 52461
+                            }
+                          ]
+                        },
+                        "animationMappings": null,
+                        "stateMachine": null,
+                        "ragdoll": null
                       }
-                    ]
+                    ],
+                    "variables": {
+                      "__modelId": {
+                        "type": "string",
+                        "value": "ca06ff713b185345b51a97b6acc92ff9",
+                        "access": "public"
+                      }
+                    },
+                    "spawnOnStart": true
+                  },
+                  {
+                    "id": "b9e1ab64e5af9f9081aeef04ecbaccc9",
+                    "name": "Muzzle",
+                    "type": "node",
+                    "position": [0.013829999603331089, 0.08686000108718872, 0.5827000141143799],
+                    "rotation": [0, 0, 0],
+                    "scale": [1, 1, 1],
+                    "children": [],
+                    "variables": {},
+                    "spawnOnStart": true
                   }
+                ],
+                "variables": {
+                  "__scriptId": {
+                    "type": "string",
+                    "value": "d4c337d97faa6a10486009d4e8120dc2",
+                    "access": "public"
+                  }
+                },
+                "spawnOnStart": true,
+                "socketAttachment": {
+                  "target": "parent",
+                  "socket": "Rifle Grip"
+                },
+                "scriptVars": {
+                  "displayName": "AK-47",
+                  "auto": true,
+                  "roundsPerMinute": 450,
+                  "pellets": 1,
+                  "range": 220,
+                  "impulse": 18,
+                  "damage": 31,
+                  "magazine": 30,
+                  "reserveRounds": 150,
+                  "hipSpread": 2.6,
+                  "aimSpread": 0.4,
+                  "recoilPitch": 1.1,
+                  "recoilYaw": 0.5,
+                  "shake": 0.04,
+                  "kick": 4,
+                  "reloadSeconds": 4.4,
+                  "equipSeconds": 1.6,
+                  "aimFov": 52,
+                  "aimMove": 0.6,
+                  "aimClips": true,
+                  "aimOffset": [0, 0.032, 0],
+                  "shotSound": "ShotRifle",
+                  "fireTrigger": "RifleFire"
                 }
-              ],
-              "layers": [
-                {
-                  "name": "Health",
-                  "states": [
-                    {
-                      "name": "Fine",
-                      "goal": "idle",
-                      "isEntry": true,
-                      "x": 40,
-                      "y": 40
-                    },
-                    {
-                      "name": "Hurt",
-                      "goal": "idle",
-                      "x": 300,
-                      "y": 40,
-                      "outputs": [
-                        {
-                          "field": "hurt",
-                          "value": true
-                        }
-                      ]
-                    }
-                  ],
-                  "transitions": [
-                    {
-                      "from": "*",
-                      "to": "Hurt",
-                      "condition": {
-                        "op": "and",
-                        "children": [
-                          {
-                            "param": "Knock",
-                            "op": "trigger"
+              },
+              {
+                "id": "81d9c40e85c6e1a26dfbf1034b57d9f6",
+                "name": "Shotgun Grip",
+                "type": "node",
+                "position": [-0.8134288787841797, 1.4045332670211792, -0.0243177879601717],
+                "rotation": [98.8868408203125, 14.39594554901123, -77.4494400024414],
+                "scale": [1, 1, 1],
+                "children": [
+                  {
+                    "id": "b75b0d2d474196bda3e8f0cea29c8171",
+                    "name": "Shotgun",
+                    "type": "node",
+                    "position": [0, 0, 0],
+                    "rotation": [0, 0, 0],
+                    "scale": [1, 1, 1],
+                    "children": [
+                      {
+                        "id": "bb0df29c8d91bf6fa589b7bcb183eeed",
+                        "name": "Shotgun",
+                        "type": "model",
+                        "position": [0, 0, 0],
+                        "rotation": [0, 0, 0],
+                        "scale": [1, 1, 1],
+                        "children": [],
+                        "variables": {
+                          "__materialId": {
+                            "type": "string",
+                            "value": "db0bf88dfbeaf384c94ad77505f69138",
+                            "access": "public"
+                          },
+                          "__materialIds": {
+                            "type": "string",
+                            "value": "[\"db0bf88dfbeaf384c94ad77505f69138\"]",
+                            "access": "public"
                           }
-                        ]
-                      },
-                      "restart": true
-                    },
-                    {
-                      "from": "Hurt",
-                      "to": "Fine",
-                      "condition": {
-                        "op": "and",
-                        "children": [
-                          {
-                            "param": "Hurt For",
-                            "op": "gt",
-                            "value": 12
+                        },
+                        "spawnOnStart": true,
+                        "model": {
+                          "geometry": {
+                            "$geo": {
+                              "positions": {
+                                "h": "e8ad80e6bcc3c01671ac357d556d35beba927693c1fb96c067461282b3d2a421",
+                                "l": 359844
+                              },
+                              "normals": {
+                                "h": "b4f21ff3070046a61e6e054421446fe5c3a892fd5d59240d8b6d0ead204910e0",
+                                "l": 359844
+                              },
+                              "tangents": {
+                                "h": "347722f571fbb5cd412707296bc1642c003e3bd5d4ed395e6b3c791b8b75fd3c",
+                                "l": 359844
+                              },
+                              "bitangents": {
+                                "h": "2eb9a8a0831555bfef4aecf4b5c8fcdabaa47deec0fccbae3831a77c6da116e4",
+                                "l": 359844
+                              },
+                              "texCoords": {
+                                "h": "951c8d3f734c786fe01f02c9f12f79b3daaaa2c3e8c5f4a90c6db32bda54ba96",
+                                "l": 239896
+                              },
+                              "indices": {
+                                "h": "82245346878ab649f456b3eee1d9a7501aead4ccf22f1e69fd92b1231ed65c5b",
+                                "l": 194784,
+                                "bits": 16
+                              },
+                              "typed": true
+                            }
+                          },
+                          "material": {
+                            "type": "pbr",
+                            "baseColor": [1, 1, 1],
+                            "metallic": 1,
+                            "roughness": 1,
+                            "reflectance": 0.5,
+                            "opacity": 1,
+                            "alphaCutoff": 0,
+                            "emissiveFactor": [0, 0, 0],
+                            "emissiveIntensity": 1,
+                            "displacementScale": 0.05,
+                            "depthSpace": "uv",
+                            "invertHeight": false,
+                            "clipSilhouette": false,
+                            "textures": {
+                              "baseColorTexture": "b4a0c77634c13ece38081fec5660bd9a",
+                              "metallicMap": "4e405ac3b2e7d201f0f8314a138ba332",
+                              "roughnessMap": "4e405ac3b2e7d201f0f8314a138ba332",
+                              "normalMap": "06490e0130fb6196e5b7c24d41d915a9",
+                              "occlusionMap": "4e405ac3b2e7d201f0f8314a138ba332"
+                            },
+                            "config": {
+                              "side": "double",
+                              "wireframe": false,
+                              "transparent": false,
+                              "castShadow": true,
+                              "probeable": true
+                            }
                           }
-                        ]
+                        },
+                        "animationMappings": null,
+                        "stateMachine": null,
+                        "ragdoll": null
                       }
-                    }
-                  ]
+                    ],
+                    "variables": {
+                      "__modelId": {
+                        "type": "string",
+                        "value": "fcafd5f569be4835bf29933807b3c402",
+                        "access": "public"
+                      }
+                    },
+                    "spawnOnStart": true
+                  },
+                  {
+                    "id": "290cc328e73dc57149102a53c80aeece",
+                    "name": "Muzzle",
+                    "type": "node",
+                    "position": [0, 0.09139999747276306, 0.7781000137329102],
+                    "rotation": [0, 0, 0],
+                    "scale": [1, 1, 1],
+                    "children": [],
+                    "variables": {},
+                    "spawnOnStart": true
+                  }
+                ],
+                "variables": {
+                  "__scriptId": {
+                    "type": "string",
+                    "value": "d4c337d97faa6a10486009d4e8120dc2",
+                    "access": "public"
+                  }
+                },
+                "spawnOnStart": true,
+                "socketAttachment": {
+                  "target": "parent",
+                  "socket": "Shotgun Grip"
+                },
+                "scriptVars": {
+                  "displayName": "SAPS-12",
+                  "auto": false,
+                  "roundsPerMinute": 76,
+                  "pellets": 9,
+                  "range": 60,
+                  "impulse": 90,
+                  "damage": 12,
+                  "magazine": 6,
+                  "reserveRounds": 36,
+                  "hipSpread": 4.2,
+                  "aimSpread": 2.6,
+                  "recoilPitch": 4.2,
+                  "recoilYaw": 0.9,
+                  "shake": 0.18,
+                  "kick": 9,
+                  "reloadSeconds": 3.6,
+                  "equipSeconds": 1.1,
+                  "aimFov": 62,
+                  "aimMove": 0.75,
+                  "aimClips": false,
+                  "aimOffset": [-0.09, 0.045, 0.1],
+                  "shotSound": "ShotShotgun",
+                  "fireTrigger": "ShotgunFire"
                 }
-              ]
-            },
-            "brain": "machine",
-            "brainId": "adca9c4d963cf07335296ec9b468c97e",
-            "id": "3c3236f5676e8cf4ce7e4087978bd196"
+              }
+            ],
+            "variables": {},
+            "spawnOnStart": true
+          },
+          {
+            "id": "7c2d3d9ceb78282b2ec386c3c79b8c94",
+            "name": "Sounds",
+            "type": "node",
+            "position": [0, 0, 0],
+            "rotation": [0, 0, 0],
+            "scale": [1, 1, 1],
+            "children": [
+              {
+                "id": "66222da94e69b844dcde45a2142fe749",
+                "name": "ShotPistol",
+                "type": "sound",
+                "position": [0, 0, 0],
+                "rotation": [0, 0, 0],
+                "scale": [1, 1, 1],
+                "children": [],
+                "variables": {},
+                "spawnOnStart": true,
+                "sound": {
+                  "mode": "ambient",
+                  "sampleId": "freesound_community-realistic-gun-fire-100696.mp3",
+                  "volume": 1,
+                  "loopMode": "inherit",
+                  "playOnStart": false,
+                  "distanceModel": "inverse",
+                  "refDistance": 1,
+                  "maxDistance": 100,
+                  "rolloffFactor": 1,
+                  "voices": 16,
+                  "whenFull": "quietest",
+                  "pitchVariation": 0.5,
+                  "volumeVariation": 0.1
+                }
+              },
+              {
+                "id": "d0186fdd671d6a79259ef2059be63b5e",
+                "name": "ShotRifle",
+                "type": "sound",
+                "position": [0, 0, 0],
+                "rotation": [0, 0, 0],
+                "scale": [1, 1, 1],
+                "children": [],
+                "variables": {},
+                "spawnOnStart": true,
+                "sound": {
+                  "mode": "ambient",
+                  "sampleId": "freesound_community-realistic-gun-fire-100696.mp3",
+                  "volume": 0.85,
+                  "loopMode": "inherit",
+                  "playOnStart": false,
+                  "distanceModel": "inverse",
+                  "refDistance": 1,
+                  "maxDistance": 100,
+                  "rolloffFactor": 1,
+                  "voices": 16,
+                  "whenFull": "quietest",
+                  "pitchVariation": 0.5,
+                  "volumeVariation": 0.1
+                }
+              },
+              {
+                "id": "1d4c7fa966a8c6bf9b2f82c092896cb2",
+                "name": "ShotShotgun",
+                "type": "sound",
+                "position": [0, 0, 0],
+                "rotation": [0, 0, 0],
+                "scale": [1, 1, 1],
+                "children": [],
+                "variables": {},
+                "spawnOnStart": true,
+                "sound": {
+                  "mode": "ambient",
+                  "sampleId": "freesound_community-realistic-gun-fire-100696.mp3",
+                  "volume": 1,
+                  "loopMode": "inherit",
+                  "playOnStart": false,
+                  "distanceModel": "inverse",
+                  "refDistance": 1,
+                  "maxDistance": 100,
+                  "rolloffFactor": 1,
+                  "voices": 16,
+                  "whenFull": "quietest",
+                  "pitchVariation": 0.5,
+                  "volumeVariation": 0.1
+                }
+              }
+            ],
+            "variables": {},
+            "spawnOnStart": true
           }
         ],
         "variables": {
           "__scriptId": {
             "type": "string",
-            "value": "49ae6e9c93542477adbdf51b735ea2ce",
+            "value": "9f1491b697e58590d3e47ac6c8afefce",
             "access": "public"
           }
         },
@@ -14922,14 +15044,14 @@
         "crouchCapsuleHeight": 1.2,
         "crouchSpeed": 0.36,
         "scriptVars": {
-          "walkScale": 0.38,
+          "walkScale": 0.381,
           "walkDeflection": 0.6,
-          "backScale": 0.73,
-          "backDiagonalScale": 0.48,
-          "walkBackDiagonalScale": 0.86,
+          "backScale": 0.724,
+          "backDiagonalScale": 0.485,
+          "walkBackDiagonalScale": 0.858,
           "directionEase": 0.15,
           "runTurnSpeed": 3.5,
-          "sprintTakeoff": 5,
+          "sprintTakeoff": 4.98,
           "runTurnAngle": 135,
           "runTurnRelease": 30,
           "runTurnSeconds": 1.2,
@@ -14943,14 +15065,14 @@
           "farTurnShare": 0.35,
           "lookSpeed": 5,
           "lookPitchRest": 12,
-          "walkFootSpeed": 1.9,
-          "runFootSpeed": 3.8,
+          "walkFootSpeed": 1.919,
+          "runFootSpeed": 3.775,
           "runFootWeight": 0.3,
           "stairsLayer": "Stair Ramp",
-          "stairUpWalkSpeed": 0.55,
+          "stairUpWalkSpeed": 0.549,
           "stairUpRunSpeed": 1.25,
-          "stairDownWalkSpeed": 0.8,
-          "stairDownRunSpeed": 1.88,
+          "stairDownWalkSpeed": 0.804,
+          "stairDownRunSpeed": 1.875,
           "stairGrade": 0.25,
           "stairGrace": 0.15,
           "stairBrake": 1.5,
@@ -14963,24 +15085,7 @@
           "fireAimReady": 0.7,
           "alignSeconds": 0.35,
           "alignMaxSeconds": 0.6,
-          "settleSeconds": 0.3,
-          "hearing": 35,
-          "nearMiss": 2.5,
-          "sightRange": 16,
-          "sightAngle": 150,
-          "noticeSeconds": 0.9,
-          "staggerShock": 40,
-          "knockdownShock": 56,
-          "shockHalfLife": 0.6,
-          "downSeconds": 7,
-          "stuckSeconds": 18,
-          "watchMin": 2.5,
-          "watchMax": 4.5,
-          "fleeMin": 18,
-          "fleeMax": 30,
-          "startleMin": 0.4,
-          "startleMax": 0.8,
-          "alertSeconds": 1.6
+          "settleSeconds": 0.3
         }
       }
     ],
@@ -15017,625 +15122,24 @@
   "textureIds": [
     "a1577223f44963abb2964e208d70ff60",
     "0350d27653c5d8043b78d316fb090f28",
-    "d12c954b12364b76bdf0f481936ed026"
+    "d12c954b12364b76bdf0f481936ed026",
+    "880ad90c3a8471539dc565c21a347e21",
+    "aa64235601ef8da0e0e3dae6ffe374ac",
+    "5073b8b9c1e71bc77274e26734456daf",
+    "7f52f31ae3774a6671320d18acd590d9",
+    "a13d482458670e23d0c854270416585d",
+    "b41058e0fc2b48723b5e52e553e3936a",
+    "f69b348b6d4c8ff9981859501aed1dc3",
+    "2db0ca4fe50d0f548d9d3dd84e0501c0",
+    "284890b17935dacd530505c30bbda932",
+    "b4a0c77634c13ece38081fec5660bd9a",
+    "4e405ac3b2e7d201f0f8314a138ba332",
+    "06490e0130fb6196e5b7c24d41d915a9"
   ],
-  "scripts": {},
-  "variant": {
-    "baseTemplateId": "83897d967bcb6fdd8909fc97ce183124",
-    "diff": {
-      "version": 2,
-      "nodes": {
-        "": {
-          "merge": {
-            "name": "Civilian"
-          }
-        },
-        "Character": {
-          "merge": {
-            "variables": {
-              "__scriptId": {
-                "value": "49ae6e9c93542477adbdf51b735ea2ce"
-              }
-            },
-            "scriptVars": {
-              "walkScale": 0.38,
-              "backScale": 0.73,
-              "backDiagonalScale": 0.48,
-              "walkBackDiagonalScale": 0.86,
-              "sprintTakeoff": 5,
-              "walkFootSpeed": 1.9,
-              "runFootSpeed": 3.8,
-              "stairUpWalkSpeed": 0.55,
-              "stairDownWalkSpeed": 0.8,
-              "stairDownRunSpeed": 1.88,
-              "hearing": 35,
-              "nearMiss": 2.5,
-              "sightRange": 16,
-              "sightAngle": 150,
-              "noticeSeconds": 0.9,
-              "staggerShock": 40,
-              "knockdownShock": 56,
-              "shockHalfLife": 0.6,
-              "downSeconds": 7,
-              "stuckSeconds": 18,
-              "watchMin": 2.5,
-              "watchMax": 4.5,
-              "fleeMin": 18,
-              "fleeMax": 30,
-              "startleMin": 0.4,
-              "startleMax": 0.8,
-              "alertSeconds": 1.6
-            }
-          }
-        },
-        "Character/Mannequin": {
-          "merge": {
-            "variables": {
-              "__materialId": {
-                "value": "31ebef24c54d10fdc2da9cad742b971d"
-              },
-              "__materialIds": {
-                "value": "[\"31ebef24c54d10fdc2da9cad742b971d\"]"
-              }
-            },
-            "model": {
-              "material": {
-                "baseColor": [0.15, 0.35, 1]
-              }
-            }
-          }
-        }
-      },
-      "added": [
-        {
-          "parent": "Character",
-          "index": 1,
-          "node": {
-            "name": "AI Controller",
-            "type": "controller",
-            "position": [0, 0, 0],
-            "rotation": [0, 0, 0],
-            "scale": [1, 1, 1],
-            "children": [],
-            "variables": {},
-            "spawnOnStart": true,
-            "possessedId": "@path:Character",
-            "aimSourceId": null,
-            "navMeshId": null,
-            "controlSource": "ai",
-            "moveAction": "Move",
-            "lookAction": "Look",
-            "jumpAction": "Jump",
-            "sprintAction": "Sprint",
-            "crouchAction": "",
-            "aimSource": "possessed",
-            "driveAimTarget": true,
-            "goal": "idle",
-            "targetKey": "target",
-            "goalPoint": [0, 0, 0],
-            "steering": {
-              "maxSpeed": 3,
-              "arriveRadius": 0.4,
-              "slowRadius": 2.5,
-              "standoff": 2,
-              "wanderRadius": 1.2,
-              "wanderDistance": 2.5,
-              "wanderJitter": 90,
-              "separationRadius": 1.5,
-              "avoidDistance": 1,
-              "avoidStrength": 1.5
-            },
-            "routeName": "",
-            "flockRadius": 6,
-            "separationWeight": 1.5,
-            "alignmentWeight": 1,
-            "cohesionWeight": 0.8,
-            "perception": {
-              "fieldOfView": 150,
-              "range": 16,
-              "memorySpan": 5,
-              "reactionTime": 0.9
-            },
-            "eyeHeight": 1.6,
-            "autoAcquire": false,
-            "repath": {
-              "interval": 2,
-              "targetDrift": 1
-            },
-            "waypointRadius": 0.6,
-            "whiskerCount": 3,
-            "whiskerSpread": 60,
-            "behavior": {
-              "parameters": [
-                {
-                  "name": "Knocked",
-                  "type": "boolean",
-                  "default": false,
-                  "source": {
-                    "kind": "builtin",
-                    "name": "isKnocked"
-                  }
-                },
-                {
-                  "name": "At Goal",
-                  "type": "boolean",
-                  "default": false,
-                  "source": {
-                    "kind": "builtin",
-                    "name": "atGoal"
-                  }
-                },
-                {
-                  "name": "Stuck",
-                  "type": "boolean",
-                  "default": false,
-                  "source": {
-                    "kind": "builtin",
-                    "name": "isStuck"
-                  }
-                },
-                {
-                  "name": "Restless",
-                  "type": "boolean",
-                  "default": false,
-                  "source": {
-                    "kind": "builtin",
-                    "name": "restless"
-                  }
-                },
-                {
-                  "name": "In Sight",
-                  "type": "boolean",
-                  "default": false,
-                  "source": {
-                    "kind": "sense",
-                    "name": "targetInSight"
-                  }
-                },
-                {
-                  "name": "Has Target",
-                  "type": "boolean",
-                  "default": false,
-                  "source": {
-                    "kind": "sense",
-                    "name": "hasTarget"
-                  }
-                },
-                {
-                  "name": "Distance",
-                  "type": "number",
-                  "default": 0,
-                  "source": {
-                    "kind": "sense",
-                    "name": "planarDistanceToTarget"
-                  }
-                },
-                {
-                  "name": "Since Shot",
-                  "type": "number",
-                  "default": 999,
-                  "source": {
-                    "kind": "builtin",
-                    "name": "sinceShot"
-                  }
-                },
-                {
-                  "name": "Since Danger",
-                  "type": "number",
-                  "default": 999,
-                  "source": {
-                    "kind": "builtin",
-                    "name": "sinceDanger"
-                  }
-                },
-                {
-                  "name": "Since Watched",
-                  "type": "number",
-                  "default": 999,
-                  "source": {
-                    "kind": "builtin",
-                    "name": "sinceWatched"
-                  }
-                },
-                {
-                  "name": "Threat Distance",
-                  "type": "number",
-                  "default": 999,
-                  "source": {
-                    "kind": "builtin",
-                    "name": "threatDistance"
-                  }
-                },
-                {
-                  "name": "Knock",
-                  "type": "trigger",
-                  "default": false,
-                  "source": {
-                    "kind": "reaction",
-                    "name": "knockCount"
-                  }
-                },
-                {
-                  "name": "Hurt For",
-                  "type": "number",
-                  "default": 0,
-                  "source": {
-                    "kind": "layerTime",
-                    "layer": "Health"
-                  }
-                }
-              ],
-              "states": [
-                {
-                  "name": "wait",
-                  "goal": "idle",
-                  "isEntry": true,
-                  "x": 40,
-                  "y": 160
-                },
-                {
-                  "name": "roam",
-                  "goal": "path",
-                  "targetKey": "point",
-                  "x": 260,
-                  "y": 160
-                },
-                {
-                  "name": "watch",
-                  "goal": "idle",
-                  "x": 260,
-                  "y": 20
-                },
-                {
-                  "name": "alert",
-                  "goal": "idle",
-                  "x": 480,
-                  "y": 20
-                },
-                {
-                  "name": "flee",
-                  "goal": "path",
-                  "targetKey": "point",
-                  "x": 700,
-                  "y": 160
-                },
-                {
-                  "name": "cower",
-                  "goal": "idle",
-                  "x": 700,
-                  "y": 20
-                },
-                {
-                  "name": "knocked",
-                  "goal": "idle",
-                  "x": 480,
-                  "y": 300
-                }
-              ],
-              "transitions": [
-                {
-                  "from": "*",
-                  "to": "knocked",
-                  "condition": {
-                    "op": "and",
-                    "children": [
-                      {
-                        "param": "Knocked",
-                        "op": "true"
-                      }
-                    ]
-                  }
-                },
-                {
-                  "from": "knocked",
-                  "to": "flee",
-                  "condition": {
-                    "op": "and",
-                    "children": [
-                      {
-                        "param": "Knocked",
-                        "op": "false"
-                      }
-                    ]
-                  }
-                },
-                {
-                  "from": "*",
-                  "to": "flee",
-                  "condition": {
-                    "op": "and",
-                    "children": [
-                      {
-                        "param": "Since Danger",
-                        "op": "lt",
-                        "value": 1
-                      },
-                      {
-                        "param": "Knocked",
-                        "op": "false"
-                      }
-                    ]
-                  }
-                },
-                {
-                  "from": "wait",
-                  "to": "alert",
-                  "condition": {
-                    "op": "and",
-                    "children": [
-                      {
-                        "param": "Since Shot",
-                        "op": "lt",
-                        "value": 1
-                      }
-                    ]
-                  }
-                },
-                {
-                  "from": "roam",
-                  "to": "alert",
-                  "condition": {
-                    "op": "and",
-                    "children": [
-                      {
-                        "param": "Since Shot",
-                        "op": "lt",
-                        "value": 1
-                      }
-                    ]
-                  }
-                },
-                {
-                  "from": "watch",
-                  "to": "alert",
-                  "condition": {
-                    "op": "and",
-                    "children": [
-                      {
-                        "param": "Since Shot",
-                        "op": "lt",
-                        "value": 1
-                      }
-                    ]
-                  }
-                },
-                {
-                  "from": "alert",
-                  "to": "flee",
-                  "condition": {
-                    "op": "and",
-                    "children": [
-                      {
-                        "param": "Restless",
-                        "op": "true"
-                      },
-                      {
-                        "param": "Threat Distance",
-                        "op": "lt",
-                        "value": 22
-                      }
-                    ]
-                  }
-                },
-                {
-                  "from": "alert",
-                  "to": "roam",
-                  "condition": {
-                    "op": "and",
-                    "children": [
-                      {
-                        "param": "Restless",
-                        "op": "true"
-                      }
-                    ]
-                  }
-                },
-                {
-                  "from": "wait",
-                  "to": "watch",
-                  "condition": {
-                    "op": "and",
-                    "children": [
-                      {
-                        "param": "In Sight",
-                        "op": "true"
-                      },
-                      {
-                        "param": "Distance",
-                        "op": "lt",
-                        "value": 6
-                      },
-                      {
-                        "param": "Since Watched",
-                        "op": "gt",
-                        "value": 20
-                      }
-                    ]
-                  }
-                },
-                {
-                  "from": "roam",
-                  "to": "watch",
-                  "condition": {
-                    "op": "and",
-                    "children": [
-                      {
-                        "param": "In Sight",
-                        "op": "true"
-                      },
-                      {
-                        "param": "Distance",
-                        "op": "lt",
-                        "value": 6
-                      },
-                      {
-                        "param": "Since Watched",
-                        "op": "gt",
-                        "value": 20
-                      }
-                    ]
-                  }
-                },
-                {
-                  "from": "watch",
-                  "to": "roam",
-                  "condition": {
-                    "op": "or",
-                    "children": [
-                      {
-                        "param": "Restless",
-                        "op": "true"
-                      },
-                      {
-                        "param": "Distance",
-                        "op": "gt",
-                        "value": 9.6
-                      },
-                      {
-                        "param": "Has Target",
-                        "op": "false"
-                      }
-                    ]
-                  }
-                },
-                {
-                  "from": "wait",
-                  "to": "roam",
-                  "condition": {
-                    "op": "and",
-                    "children": [
-                      {
-                        "param": "Restless",
-                        "op": "true"
-                      }
-                    ]
-                  }
-                },
-                {
-                  "from": "roam",
-                  "to": "wait",
-                  "condition": {
-                    "op": "or",
-                    "children": [
-                      {
-                        "param": "At Goal",
-                        "op": "true"
-                      },
-                      {
-                        "param": "Stuck",
-                        "op": "true"
-                      }
-                    ]
-                  }
-                },
-                {
-                  "from": "flee",
-                  "to": "cower",
-                  "condition": {
-                    "op": "and",
-                    "children": [
-                      {
-                        "op": "or",
-                        "children": [
-                          {
-                            "param": "At Goal",
-                            "op": "true"
-                          },
-                          {
-                            "param": "Stuck",
-                            "op": "true"
-                          }
-                        ]
-                      },
-                      {
-                        "param": "Since Danger",
-                        "op": "gt",
-                        "value": 7
-                      }
-                    ]
-                  }
-                },
-                {
-                  "from": "cower",
-                  "to": "roam",
-                  "condition": {
-                    "op": "and",
-                    "children": [
-                      {
-                        "param": "Restless",
-                        "op": "true"
-                      }
-                    ]
-                  }
-                }
-              ],
-              "layers": [
-                {
-                  "name": "Health",
-                  "states": [
-                    {
-                      "name": "Fine",
-                      "goal": "idle",
-                      "isEntry": true,
-                      "x": 40,
-                      "y": 40
-                    },
-                    {
-                      "name": "Hurt",
-                      "goal": "idle",
-                      "x": 300,
-                      "y": 40,
-                      "outputs": [
-                        {
-                          "field": "hurt",
-                          "value": true
-                        }
-                      ]
-                    }
-                  ],
-                  "transitions": [
-                    {
-                      "from": "*",
-                      "to": "Hurt",
-                      "condition": {
-                        "op": "and",
-                        "children": [
-                          {
-                            "param": "Knock",
-                            "op": "trigger"
-                          }
-                        ]
-                      },
-                      "restart": true
-                    },
-                    {
-                      "from": "Hurt",
-                      "to": "Fine",
-                      "condition": {
-                        "op": "and",
-                        "children": [
-                          {
-                            "param": "Hurt For",
-                            "op": "gt",
-                            "value": 12
-                          }
-                        ]
-                      }
-                    }
-                  ]
-                }
-              ]
-            },
-            "brain": "machine",
-            "brainId": "adca9c4d963cf07335296ec9b468c97e"
-          }
-        }
-      ],
-      "removed": [
-        "Character/Weapons",
-        "Character/Sounds"
-      ],
-      "scripts": {}
-    }
+  "scripts": {
+    "a54fd87ccd8c332db7fe7a659d00bf95": "import { CharacterNode, MathUtils } from 'cleo'\nimport type { Animator, CameraRigNode, ColliderNode, ControllerNode, LayerName, Node, TriggerName } from 'cleo'\nimport { animTrigger, attribute, eventListener, observable } from 'cleo/decorators'\n\n/**\n * A Sandbox character's body: everything the Mannequin's animator is told, whoever drives it. The base of the player\n * (SandboxPlayer: its input, camera, first person and HUD) and of the NPCs (SandboxNpc: their brain), and the script\n * of the Sandbox Character template they are all variants of. Attach to the **Character** node (\"Character\").\n *\n *   Sandbox Character   capsule Collider, friction 0 (the root of the template)\n *   └─ Character        THIS script (or a subclass), on a Character node\n *      ├─ Mannequin     the animated model: its Animator decides every pose\n *      ├─ Weapons       the pistol, the rifle and the shotgun, each on its grip socket on the right hand (SandboxGun)\n *      └─ Sounds        the shots\n *\n * A Controller (the player's, or an AI one) writes this frame's intent; the Character turns it into velocity, facing,\n * the jump and the turn-in-place request; the Mannequin's Animator reads all of that by itself (Linked parameters,\n * read off this node). What is left for a script is what only the game knows, in the style of Advanced Locomotion\n * System v4. What the character WANTS beyond the intent (to walk, to aim, to pull the trigger, which weapon, where it\n * shoots from) are hooks a subclass answers (`wantsWalk`, `wantsAim`, `triggerHeld`, `pickWeapon`, `aimRay`...): the\n * player from its input and camera, an NPC from its brain. This class wants nothing: on its own it stands idle.\n *\n *   - the GAIT: jog by default (the Character's walkSpeed), Walk held for a walk, Sprint held for a sprint (its\n *     runSpeed), a stick picking walk or jog by how far it is pushed;\n *   - the ROTATION MODE: walking and jogging face the camera and strafe (facing `aim`), sprinting faces where it\n *     goes, in any direction (facing `velocity`); after a sprint the body stays as it stopped until the camera moves;\n *   - the RUNNING TURN: a sprint reversed holds `runTurn` (-1 left, +1 right) while the animator's turn clip turns\n *     the body by its root motion;\n *   - the JUMP's facing: a jump taken off on the move faces the way it flies, not the camera (as on the stairs, and\n *     as ALS's in-air rotation), turning to its velocity through the flight; a standing jump keeps facing;\n *   - the LEAN: the sideways acceleration in the body's frame, as two layer weights (`leanLeft`, `leanRight`), and\n *     the forward one as a third (`leanForward`), weight into the step as it sets off and speeds up;\n *   - travel eased down when going backwards, to the speed the backward clips cover, so their feet do not slide;\n *   - `hasMoveInput`, `running`, `sprinting` and `moveAngle`, which the animator cannot measure (a Stop needs \"the\n *     player let go\", the start \"a sprint, set off the way the body faces\");\n *   - `groundSpeed`, the body's speed unsmoothed, for the blend space (the measured one lags a speeding body);\n *   - `footPlacement`, the foot IK weight while moving: full at a walk, light at a run (the solver plants the\n *     lower foot whenever it nears the ground, which a run's flight phase between strides must not do);\n *   - the LOOK-AT: where the camera faces off the body (`lookYaw`, `lookPitch`) and the Look layer's weight\n *     (`lookWeight`, up standing still; crouched, the Look Head layer's `lookHeadWeight` instead: the head alone\n *     turns), and the turn in place held back `turnDelay` seconds so the head turns first;\n *   - the CAR: a car hands it its seat (`boardVehicle`) and takes it back (`leaveVehicle`): it lets go of its own\n *     Controller, takes its body out of the physics world and rides in the seat, getting in and out by the animator's\n *     root motion (`enterTrigger`, `exitTrigger`), and takes its Controller back once on its feet (SandboxCar);\n *   - the STAIRS: whether the body is on a flight (`onStairs`, the ramp under it on `stairsLayer`) and which way it\n *     goes along it (`stairs`, +1 up, -1 down, from the climb under its travel), the flight's pace (one tread a\n *     step, slowing down BEFORE the first riser, seen ahead), facing where it goes on the flight, and `stairRate`,\n *     how much faster the stair clips play while the body still slows onto it;\n *   - the WEAPONS: Equip (or the mouse wheel) cycles none, the pistol, the rifle, the shotgun: the one in the hands\n *     goes down and is put away, the next is shown and comes up (its layer's weight, `pistolWeight` / `rifleWeight` /\n *     `shotgunWeight`), and the body takes its STANCE as it does (`stance`: 0 unarmed, 1 the pistol pack's moves, 2\n *     the rifle pack's, which the shotgun shares); Aim held aims it (`aiming`, the aim layers' weights, where the\n *     aim goes off the body in `aimYaw` / `aimPitch`), facing the aim and strafing, turning in place sooner; not\n *     aimed, it is held at the low ready, the aim's own hold turned muzzle-down (`loweredWeight`, the Lowered layer),\n *     and a sprint carries it as the sprint clip does (the pistol one-handed: `supportHand`); in third person, Aim\n *     held also zooms the camera in and blurs everything but what the crosshair is on (`aimingDown`);\n *   - FIRING: the trigger of the weapon in the hands (its SandboxGun shoots by raycast along `aimRay`, a round off its\n *     magazine, and a character it hits reacts). Fired from the hip, the weapon comes up first and stays up\n *     `fireAimHold` seconds after the last shot, and the body takes the weapon's recoil (its gun's `fireTrigger`);\n *   - RELOADING: Reload, or a pull on an empty magazine, fills the magazine from the reserve (`reloading`: the weapon\n *     layer's Reload in third person, the viewmodel's reload clips in first person); out of the reserve, the weapon is\n *     dry;\n *   - CROUCHING: the Crouch action toggles it (the Controller's), the Character shortens its capsule (`crouched`, which\n *     the animator reads), and the eye drops in first person;\n *   - the REACTIONS: hit (unless shots do not move it: `reactsToShots`), shoved or run over (`struckByVehicle`, its\n *     reactions' `impact`), the body is its reactions' (physics/reactive/): it stumbles, staggers, falls and gets up,\n *     and nothing it is asked does anything meanwhile;\n *   - the TEAM (`team`): who it is to the others (the player, a civilian, an enemy), what an NPC's senses filter on.\n *\n * It names no clip, no state and no key, and plays no animation (a car is got into by firing a trigger by name).\n *\n * The attributes the CHARACTER decides are public (how fast its clips go backwards, where its foot placement eases\n * off, how long it takes to turn round to the camera), so every copy and variant can set its own; how the behaviour\n * feels (the stick, the lean, the running turn) is protected, set once here.\n */\n/** The weapons' grip holders (their SandboxGun) on the hand: 1 the pistol, 2 the rifle, 3 the shotgun. */\nconst WEAPON_GRIPS = ['Pistol Grip', 'Rifle Grip', 'Shotgun Grip']\n/** The body's stance with each weapon in the hands: the pistol's, then the rifle's for both long guns. */\nconst STANCES = [1, 2, 2]\n\nexport default class SandboxCharacterNode extends CharacterNode {\n    /** Walk speed as a share of the jog (the Character's walkSpeed): the walk clips' speed over the jog's. */\n    @attribute('Gait', { min: 0, max: 1, step: 0.01 })\n    public walkScale: number = 0.38\n\n    /** A stick pushed less than this walks; past it, it jogs. */\n    @attribute('Gait', { min: 0, max: 1, step: 0.05 })\n    protected walkDeflection: number = 0.6\n\n    /** Speed share travelling straight back: the backward clips cover less ground than the forward ones. */\n    @attribute('Gait', { min: 0.1, max: 1, step: 0.01 })\n    public backScale: number = 0.73\n\n    /** Speed share travelling diagonally back at a jog (the back-diagonal clip's speed), and at a walk. */\n    @attribute('Gait', { min: 0.1, max: 1, step: 0.01 })\n    public backDiagonalScale: number = 0.48\n\n    @attribute('Gait', { min: 0.1, max: 1, step: 0.01 })\n    public walkBackDiagonalScale: number = 0.86\n\n    /** Seconds the speed share takes to follow a change of direction. */\n    @attribute('Gait', { min: 0, max: 1, step: 0.01 })\n    protected directionEase: number = 0.15\n\n    /** A sprint faster than this (m/s) that is asked to go more than `runTurnAngle` the other way turns round. */\n    @attribute('Running Turn', { min: 0, max: 10, step: 0.1 })\n    public runTurnSpeed: number = 3.5\n\n    /**\n     * The acceleration (m/s2) a sprint takes off at, from a standstill or speeding up the way it already goes: the\n     * start clip's own, so it plays at its own speed and is seen. Everything else (a jog, a walk, braking, a turn)\n     * keeps the Character's Acceleration.\n     */\n    @attribute('Gait', { min: 0.5, max: 30, step: 0.1 })\n    public sprintTakeoff: number = 5\n\n    @attribute('Running Turn', { min: 90, max: 180, step: 1 })\n    protected runTurnAngle: number = 135\n\n    /** The turn lets go once the body is this close to the way it is asked to go (degrees), or after `runTurnSeconds`. */\n    @attribute('Running Turn', { min: 0, max: 90, step: 1 })\n    protected runTurnRelease: number = 30\n\n    @attribute('Running Turn', { min: 0.2, max: 3, step: 0.05 })\n    protected runTurnSeconds: number = 1.2\n\n    /** Taking off faster than this over the ground (m/s), a jump faces the way it flies; slower, as it stood. */\n    @attribute('Jump', { min: 0, max: 5, step: 0.1 })\n    protected jumpTurnSpeed: number = 1\n\n    /** Sideways acceleration (m/s2) that leans the body all the way. */\n    @attribute('Lean', { min: 0.5, max: 20, step: 0.5 })\n    protected leanAcceleration: number = 4\n\n    /** How fast the lean follows, per second (ALS's lean interpolation speed). */\n    @attribute('Lean', { min: 0.5, max: 20, step: 0.5 })\n    protected leanSpeed: number = 4\n\n    /** Forward acceleration (m/s2) that leans the body forward all the way: setting off, speeding up. */\n    @attribute('Lean', { min: 0.5, max: 30, step: 0.5 })\n    protected leanForwardAcceleration: number = 8\n\n    /** How fast the forward lean follows, per second: a start is over in half a second. */\n    @attribute('Lean', { min: 0.5, max: 30, step: 0.5 })\n    protected leanForwardSpeed: number = 8\n\n    /** After a sprint, how far the camera must swing (degrees) before standing still turns to face it again. */\n    @attribute('Turn In Place', { min: 0, max: 180, step: 1 })\n    protected lookAroundAngle: number = 20\n\n    /**\n     * Seconds the camera must stay round past the turn threshold before the body turns in place to it: meanwhile\n     * the head looks round (the Look layer). A character's own reaction time, so public.\n     */\n    @attribute('Turn In Place', { min: 0, max: 3, step: 0.05 })\n    public turnDelay: number = 1\n\n    /** The share of `turnDelay` waited before a turn to a camera swung right round behind (past 135 degrees). */\n    @attribute('Turn In Place', { min: 0, max: 1, step: 0.05 })\n    protected farTurnShare: number = 0.35\n\n    /** How fast the look-at comes in standing still, and goes as the body moves off, per second. */\n    @attribute('Look', { min: 0.5, max: 20, step: 0.5 })\n    protected lookSpeed: number = 5\n\n    /**\n     * The camera pitch (degrees, down +) that is a level look: the rig's resting pitch, which looks a little down\n     * at the character. Pitched further down the head looks down, pitched up it looks up.\n     */\n    @attribute('Look', { min: -45, max: 45, step: 1 })\n    protected lookPitchRest: number = 12\n\n    /** Foot placement is full up to this speed (m/s)... */\n    @attribute('Foot Placement', { min: 0, max: 10, step: 0.1 })\n    public walkFootSpeed: number = 1.9\n\n    /** ...and down to `runFootWeight` from this one. The lean fades in over the same range. */\n    @attribute('Foot Placement', { min: 0, max: 10, step: 0.1 })\n    public runFootSpeed: number = 3.8\n\n    @attribute('Foot Placement', { min: 0, max: 1, step: 0.05 })\n    public runFootWeight: number = 0.3\n\n    /** The collision layer of the ramps laid over flights of stairs: what the capsule climbs, and how a flight is known. */\n    @attribute('Stairs')\n    public stairsLayer: LayerName = 'Stair Ramp'\n\n    /**\n     * A flight's pace, horizontal m/s, walking and running, up and down: one tread a step at the stair clips'\n     * rate (the build fits them to the clips and the course's treads). Faster, and the feet slide on the treads.\n     */\n    @attribute('Stairs', { min: 0.1, max: 5, step: 0.01 })\n    public stairUpWalkSpeed: number = 0.55\n\n    @attribute('Stairs', { min: 0.1, max: 5, step: 0.01 })\n    public stairUpRunSpeed: number = 1.25\n\n    @attribute('Stairs', { min: 0.1, max: 5, step: 0.01 })\n    public stairDownWalkSpeed: number = 0.8\n\n    @attribute('Stairs', { min: 0.1, max: 5, step: 0.01 })\n    public stairDownRunSpeed: number = 1.88\n\n    /** The climb along the travel (rise over run) that counts as going up or down a flight; it lets go at 60% of it. */\n    @attribute('Stairs', { min: 0.05, max: 1, step: 0.01 })\n    protected stairGrade: number = 0.25\n\n    /** Seconds a flight still counts after the ramp last showed under the body (it meets the ground at its foot). */\n    @attribute('Stairs', { min: 0, max: 1, step: 0.01 })\n    protected stairGrace: number = 0.15\n\n    /**\n     * How much harder than its Acceleration the body brakes for a flight ahead: it starts slowing that much later,\n     * and still reaches the flight's pace by its first step.\n     */\n    @attribute('Stairs', { min: 1, max: 4, step: 0.05 })\n    protected stairBrake: number = 1.5\n\n    /** The animator's trigger that plays getting into a car, and the one that plays getting out of it. */\n    @attribute('Car')\n    public enterTrigger: TriggerName = 'EnterCar'\n\n    @attribute('Car')\n    public exitTrigger: TriggerName = 'ExitCar'\n\n    /**\n     * Seconds a metre the body takes to step onto where getting in starts, from where it stood when the player\n     * pressed Interact (the clip reaches for the door meanwhile), and the most it may take.\n     */\n    /** Seconds a weapon takes to come up into the hands, and to go down out of them. */\n    @attribute('Weapons', { min: 0.05, max: 2, step: 0.05 })\n    protected equipSeconds: number = 0.3\n\n    /** Seconds the aim takes to come up, and to go down. */\n    @attribute('Weapons', { min: 0.02, max: 1, step: 0.01 })\n    protected aimSeconds: number = 0.15\n\n    /** Aiming and standing still, the camera turned further than this (degrees) turns the body in place to it, at once. */\n    @attribute('Weapons', { min: 10, max: 120, step: 1 })\n    protected aimTurnThreshold: number = 45\n\n    /** Fired from the hip, the weapon stays up (aimed) this many seconds after the last shot. */\n    @attribute('Weapons', { min: 0, max: 3, step: 0.05 })\n    protected fireAimHold: number = 0.6\n\n    /** How far up the weapon must be (its aim's weight) before a shot goes. */\n    @attribute('Weapons', { min: 0, max: 1, step: 0.05 })\n    protected fireAimReady: number = 0.7\n\n    @attribute('Car', { min: 0, max: 2, step: 0.05 })\n    protected alignSeconds: number = 0.35\n\n    @attribute('Car', { min: 0, max: 2, step: 0.05 })\n    protected alignMaxSeconds: number = 0.6\n\n    /** Seconds what is left of getting in (a few millimetres) eases out over once seated. */\n    @attribute('Car', { min: 0, max: 2, step: 0.05 })\n    protected settleSeconds: number = 0.3\n\n    // ----- read by the car (SandboxCar) -----------------------------------------------------------------------\n\n    /** In a car: getting in, seated or getting out. */\n    public inVehicle: boolean = false\n    /** Seated: done getting in. The car may drive off. */\n    public seated: boolean = false\n\n    // ----- read by the animator (Linked parameters) -----------------------------------------------------------\n\n    /** MoveInput: the player is asking to move. */\n    public hasMoveInput: boolean = false\n    /**\n     * GroundSpeed: how fast the body crosses the ground this frame, as the physics has it. The blend space's\n     * speed: the measured `planarSpeed` is smoothed, and reads a body speeding up into a sprint a metre a second\n     * slow, which slides the feet forward.\n     */\n    public groundSpeed: number = 0\n    /** Running: at a jog or a sprint, not a walk. */\n    public running: boolean = false\n    /** Sprinting: Sprint held with the stick all the way, which is what the start clip sets off into. */\n    public sprinting: boolean = false\n    /** MoveAngle: degrees from the body's facing to the input, unsmoothed (+ left, - right). */\n    public moveAngle: number = 0\n    /** RunTurn: -1 a running turn to the left, +1 to the right, 0 none. */\n    public runTurn: number = 0\n    /** LeanLeft, LeanRight, LeanForward: the lean layers' weights. */\n    public leanLeft: number = 0\n    public leanRight: number = 0\n    public leanForward: number = 0\n    /** FootPlacement: the locomotion's foot IK weight. */\n    public footPlacement: number = 1\n    /**\n     * LookYaw, LookPitch: where the camera faces, off the body (degrees; yaw + left, pitch + down), clamped to the\n     * Look blend space's range. LookWeight: the Look layer's weight, up while standing still. LookHeadWeight: the Look\n     * Head layer's, which takes over crouched: the head alone turns, not the trunk.\n     */\n    public lookYaw: number = 0\n    public lookPitch: number = 0\n    public lookWeight: number = 0\n    public lookHeadWeight: number = 0\n    /** OnStairs: standing or moving on a flight of stairs (its ramp is under the body). */\n    public onStairs: boolean = false\n    /** Stairs: on a flight, the way along it: +1 up, -1 down, 0 across it or off it. */\n    public stairs: number = 0\n    /** StairRate: how much faster the stair clips play while the body is still faster than their pace. */\n    public stairRate: number = 1\n    /**\n     * The weapon in the hands: 0 none, 1 the pistol, 2 the rifle, 3 the shotgun (the one shown; Equip picks the next).\n     * Setting it tells `weapon:Equipped` (the weapon and the one before), which shows the model in the hand.\n     */\n    @observable('weapon:Equipped')\n    public weapon: number = 0\n    /** PistolWeight, RifleWeight, ShotgunWeight: the weapon layers' weights, the one in the hands up, faded in and out. */\n    public pistolWeight: number = 0\n    public rifleWeight: number = 0\n    public shotgunWeight: number = 0\n    /**\n     * Stance: how the body moves with what it holds, the animator's sets of moves: 0 unarmed, 1 the pistol, 2 a long gun\n     * (the rifle and the shotgun). It changes once the weapon coming up is halfway in the hands.\n     */\n    public stance: number = 0\n    /** Aiming: Aim held with a weapon in the hands, not sprinting. PistolAimWeight, RifleAimWeight, ShotgunAimWeight: the aim layers'. */\n    public aiming: boolean = false\n    public pistolAimWeight: number = 0\n    public rifleAimWeight: number = 0\n    public shotgunAimWeight: number = 0\n    /**\n     * LoweredWeight: the Lowered layer's weight: the weapon in the hands at the low ready (its aim's own hold turned\n     * muzzle-down), all the way while it is not aimed, lifting as it aims.\n     */\n    public loweredWeight: number = 0\n    /** SupportHand: the pistol's left hand on it (the Pistol layer's hand IK), let go over a sprint, and while hurt. */\n    public supportHand: number = 1\n\n    /**\n     * Hurt: an NPC's brain sets it (its Health layer's Hurt state outputs it) after a stagger or a knock-down, for a\n     * while. The animator's Pain (its pain layers: the left hand on the chest, the trunk bowed over it) reads it eased\n     * (`painWeight`), and the pistol's left hand lets go of it for the chest.\n     */\n    public hurt: boolean = false\n\n    /** Pain: `hurt` eased in and out over 0.4 s, the animator's Pain (its pain layers' weight), so the pose never pops. */\n    public painWeight: number = 0\n    /** Reloading: the weapon in the hands is being reloaded (the Reload pose). */\n    public reloading: boolean = false\n    /** The spread of the weapon in the hands now, degrees (the crosshair's). */\n    public spreadNow: number = 0\n    /** AimYaw, AimPitch: where the camera aims, off the body (degrees; yaw + left, pitch + down), for the aim blend spaces. */\n    public aimYaw: number = 0\n    public aimPitch: number = 0\n\n    protected _directionScale: number = 1\n    protected _lean: number = 0\n    protected _lastVelocity: number[] = [0, 0]\n    protected _turnTime: number = 0\n    protected _wasSprinting: boolean = false\n    protected _afterSprint: boolean = false\n    protected _stopYaw: number = 0\n    /** The heading the jump in flight faces (degrees); null a jump that keeps facing, undefined on the ground. */\n    protected _jumpYaw: number | null | undefined = undefined\n    /** The Character's own Acceleration, as authored: what everything but a sprint take-off uses. */\n    protected _acceleration: number = -1\n    /** The stairs' collision layer bit (`stairsLayer`), looked up once. */\n    protected _stairBit: number = -1\n    /** The horizontal pace the stairs ask for this frame (`_stairsToward`), m/s. */\n    protected _stairPace: number = 0\n    /** Seconds since the ramp of a flight was last under the body, and its normal then. */\n    protected _offStairs: number = Infinity\n    protected _stairNormal: number[] = [0, 1, 0]\n\n    /** The car: what this character is doing in one, and what that needs. */\n    protected _carPhase: 'none' | 'entering' | 'seated' | 'exiting' = 'none'\n    /** The seat it rides on, and its own Controller, given back once it is out. */\n    protected _seat: Node | null = null\n    protected _ownController: ControllerNode | null = null\n    /** Stepping onto where getting in starts: the body's pose when it sat down to it, the step, and how far along. */\n    protected _alignFrom: MathUtils.YawPose = [0, 0, 0, 0]\n    protected _alignStep: MathUtils.YawPose = [0, 0, 0, 0]\n    protected _alignT: number = 1\n    protected _alignTime: number = 0\n    /** Seconds since getting in started, and how long its clip plays. */\n    protected _carTime: number = 0\n    protected _enterSeconds: number = 0\n\n    /** The weapon the hands go to next (Equip): 0 none, 1 the pistol, 2 the rifle, 3 the shotgun. */\n    protected _weaponWanted: number = 0\n    /** The aim's weight, before the weapon's own scales it. */\n    protected _aim: number = 0\n    /** The look-at's weight before the crouch splits it, and how far into the crouch's head-only look it is (0..1). */\n    protected _lookAmount: number = 0\n    protected _lookCrouch: number = 0\n    /** The Character's turn threshold as authored: aiming turns in place sooner. */\n    protected _turnThreshold: number = -1\n    /** The weapons' nodes on the hand: the grip holders (their SandboxGun), and their viewmodels under the camera. */\n    protected _weaponNodes: (Node | null)[] | null = null\n    /** Seconds played, and until when the weapon in the hands is busy (coming up, reloading). */\n    protected _time: number = 0\n    protected _busyUntil: number = 0\n    /** Bumped by a weapon change: a reload it cuts short leaves the magazine as it was. */\n    protected _reloadToken: number = 0\n    /** Seconds the weapon stays up for a shot from the hip. */\n    protected _fireHold: number = 0\n    protected readonly _look: number[] = [0, 0, 1]\n    /** Where the shot is fired from (`aimRay`). */\n    protected readonly _eye: number[] = [0, 0, 0]\n\n    // ----- who it is -------------------------------------------------------------------------------------------\n\n    /** Who this character is to the others: 'player', 'civilian', 'enemy' ('neutral' here). What NPCs' senses filter on. */\n    public get team(): string { return 'neutral' }\n\n    /** Whether a car lets it in (SandboxCar boards only a character that drives). */\n    public get canDrive(): boolean { return false }\n\n    /** Whether a gunshot moves it (SandboxGun asks): every character's does but the player's. */\n    public get reactsToShots(): boolean { return true }\n\n    /**\n     * Hit by a vehicle closing on it at `speed` m/s, the vehicle going at `velocity`: its reactions' `impact`, the legs\n     * taken out at the car's speed and the trunk thrown over the bonnet, bracing with its knees bent and its arms\n     * round its head. False, and nothing done, when it has none, rides in a car or is down already.\n     */\n    public struckByVehicle(vehicle: Node, velocity: ArrayLike<number>, speed: number): boolean {\n        const reactions = this.reactions\n        if (!reactions || this._carPhase !== 'none' || reactions.isDown || !(speed > 0)) return false\n        reactions.impact({ velocity: [velocity[0], 0, velocity[2]] })\n        return true\n    }\n\n    // ----- what it wants (the hooks: the player answers from its input and camera, an NPC from its brain) --------\n\n    /** Walk rather than jog. */\n    protected wantsWalk(): boolean { return false }\n    /** Aim the weapon in the hands. */\n    protected wantsAim(): boolean { return false }\n    /** The trigger held this frame, and pulled this frame. */\n    protected triggerHeld(): boolean { return false }\n    protected triggerStarted(): boolean { return false }\n    /** Reload the weapon in the hands. */\n    protected wantsReload(): boolean { return false }\n    /** The weapon the hands go to next (`current` the one they are going to now): 0 none, 1 the pistol, 2 the rifle, 3 the shotgun. */\n    protected pickWeapon(delta: number, current: number): number { return current }\n    /** Seen from its own eyes (the player's first person). */\n    protected firstPersonView(): boolean { return false }\n    /** Before the frame's locomotion (the player's view toggle). */\n    protected beforeLocomotion(delta: number): void {}\n    /** Whether the way it moves now may be sprinted (the player's first person sprints only ahead). */\n    protected sprintAllowed(fp: boolean): boolean { return true }\n    /** In first person: how the body faces (the player's: the camera, always). */\n    protected faceFirstPerson(intent: any): void {}\n    /** The aim pitch that is a level look (degrees, down +): the player's camera rests pitched down at it. */\n    protected lookRest(): number { return this.lookPitchRest }\n    /** Find the weapons in the hands: the grips under Weapons (none: it carries none). */\n    protected resolveWeapons(): void {\n        const weapons = this.getChildByName('Weapons')[0]\n        this._weaponNodes = WEAPON_GRIPS.map(n => weapons?.getChildByName(n)[0] ?? null)\n    }\n    /** Where a shot goes from and along: written into `eye` and `look` (unit); false, and no shot, without one. */\n    protected aimRay(eye: number[], look: number[]): boolean { return false }\n    /** How far up the aim is, for the gun's spread (the player's first person: down the sights). */\n    protected spreadAim(fp: boolean): number { return this._aim }\n    /** How SandboxGun draws the shot (`view`). */\n    protected shotView(fp: boolean): any { return { firstPerson: false } }\n    /** After the aim's weight (the player's sights and zoom). */\n    protected afterAim(delta: number, fp: boolean): void {}\n    /** After the weapons, every frame (the player's viewmodel and HUD). */\n    protected afterWeapons(delta: number, fp: boolean): void {}\n    /** A shot just went (the player's viewmodel clip). */\n    protected onFired(recoil: any, fp: boolean): void {}\n    /** After the trigger, every frame (the player's camera coming back from its kick). */\n    protected afterFire(delta: number): void {}\n    /** A shot's recoil (the player's camera kick); the body's is taken here. */\n    protected onRecoil(recoil: any): void {}\n    /** Set off a reaction of its own, standing (the player's Trip and Shove keys). */\n    protected provoke(reactions: any): void {}\n\n    onUpdate(delta: number) {\n        if (this._carPhase !== 'none') { this._ride(delta); return }\n        if (this._reacting(delta)) return\n        if (this._acceleration < 0) this._acceleration = this.acceleration\n        if (this._turnThreshold < 0) this._turnThreshold = this.turnThreshold\n        const v = this.velocity\n        this.groundSpeed = Math.hypot(v[0], v[2])\n        const intent = this.drive()\n        const [right, forward] = intent.move\n        const amount = Math.min(1, Math.hypot(right, forward))\n        this.hasMoveInput = amount > 0.1\n        const run = Math.min(1, Math.max(0, (this.planarSpeed - this.walkFootSpeed) / Math.max(0.01, this.runFootSpeed - this.walkFootSpeed)))\n        this.footPlacement = 1 + (this.runFootWeight - 1) * run\n\n        // The view: first person or third (not in a car, where the car's camera has it).\n        this.beforeLocomotion(delta)\n        const fp = this.firstPersonView()\n\n        const facing = this.worldForward\n        const bodyYaw = Math.atan2(facing[0], facing[2]) * 180 / Math.PI\n        // The input as a world heading (angles are counter-clockwise: right is negative), then off the body.\n        const inputYaw = intent.basisYaw + Math.atan2(-right, forward) * 180 / Math.PI\n        this.moveAngle = this.hasMoveInput ? this._wrap(inputYaw - bodyYaw) : 0\n        // The way it goes over the ground: the stick's, or while it brakes with none, its travel's.\n        const travel = this.hasMoveInput ? [Math.sin(inputYaw * Math.PI / 180), Math.cos(inputYaw * Math.PI / 180)]\n            : this.groundSpeed > 0.3 ? [v[0] / this.groundSpeed, v[2] / this.groundSpeed] : null\n        // The gait the stick asks for, as below: a run (a jog or a sprint) or a walk; the stairs brake to its pace.\n        const runGait = (intent.sprint && amount > 0.9) || !(this.wantsWalk() || amount < this.walkDeflection)\n        const pace = this._stairsToward(delta, travel, runGait)\n        this._lean = this._leanToward(delta, facing, run)\n        // The weapons: what is in the hands, and whether it aims (a sprint lowers it). No sprint crouched, reloading or\n        // aiming down the sights; in first person, only ahead.\n        const ahead = this.sprintAllowed(fp)\n        const sprintAsked = intent.sprint && amount > 0.9 && this.hasMoveInput && !this.crouched && ahead\n            && !(fp && (this.reloading || this.wantsAim()))\n        this._weaponsToward(delta, false, sprintAsked, intent.aimYaw - bodyYaw, intent.aimPitch)\n        this._lookToward(delta, intent.aimYaw - bodyYaw, intent.aimPitch)\n        // In a jump taken off on the move, the body faces the way it flies, whatever the stick and the camera do.\n        const jumpFacing = this._jumpTurn(delta, v, bodyYaw)\n        // The turn in place waits for the head: it engages only once the camera has stayed round this long. Aiming,\n        // it turns at once, and sooner.\n        this.turnSettleSeconds = this.aiming ? 0.05 : this.turnDelay\n        this.turnSettleFarSeconds = this.aiming ? 0.05 : this.turnDelay * this.farTurnShare\n        this.turnThreshold = this.aiming ? this.aimTurnThreshold : this._turnThreshold\n\n        // First person: the body faces the camera, always (its shadow is all that shows of it), and walks slower aimed.\n        if (fp) this.faceFirstPerson(intent)\n\n        if (!this.hasMoveInput) {\n            this.acceleration = this._acceleration\n            this.running = false\n            this.sprinting = false\n            this.runTurn = 0\n            // Stopping out of a sprint: stay as stopped until the camera is swung, rather than turning to it at once\n            // (or aiming).\n            if (this._wasSprinting) { this._afterSprint = true; this._stopYaw = intent.aimYaw; this._wasSprinting = false }\n            if (this._afterSprint && (this.aiming || Math.abs(this._wrap(intent.aimYaw - this._stopYaw)) > this.lookAroundAngle)) this._afterSprint = false\n            // Standing on a flight: no turning in place on the steps.\n            if (!fp) this.facingMode = jumpFacing || this._afterSprint || this.onStairs ? 'none' : 'aim'\n            return\n        }\n\n        // Sprint: in any direction, with the stick (nearly) all the way (not crouched; in first person, only ahead).\n        const sprinting = sprintAsked\n        intent.sprint = sprinting\n        this.sprinting = sprinting\n        // The take-off: speeding up into a sprint from a standstill, or along the way the body already goes (not\n        // braking to reverse, which the running turn and the stop expect at the Character's own rate).\n        const along = this.groundSpeed < 0.5 || Math.abs(this._wrap(inputYaw - Math.atan2(v[0], v[2]) * 180 / Math.PI)) < 60\n        // Onto or on a flight, the Character's own: a sprint's gentle take-off would carry it up the steps too fast.\n        // Slowing for one, `stairBrake` times harder, which is what lets the slowing start that late.\n        this.acceleration = pace !== 0 && this.groundSpeed > this._stairPace + 0.05 ? this._acceleration * this.stairBrake\n            : sprinting && along && pace === 0 && this.groundSpeed < this.runSpeed - 0.05 ? this.sprintTakeoff : this._acceleration\n\n        // The running turn: a fast sprint asked to go back the way it came.\n        if (sprinting && this.runTurn === 0 && this.planarSpeed > this.runTurnSpeed && Math.abs(this.moveAngle) > this.runTurnAngle) {\n            this.runTurn = this.moveAngle > 0 ? -1 : 1\n            this._turnTime = 0\n        }\n        if (this.runTurn !== 0) {\n            this._turnTime += delta\n            if (!sprinting || Math.abs(this.moveAngle) < this.runTurnRelease || this._turnTime > this.runTurnSeconds) this.runTurn = 0\n        }\n        // While the turn clip turns the body, nothing else may. On a flight it faces the way it goes: the stair\n        // clips go forward only. In first person it faces the camera (above).\n        if (!fp) this.facingMode = jumpFacing || this.runTurn !== 0 ? 'none' : sprinting || this.stairs !== 0 ? 'velocity' : 'aim'\n        else if (this.runTurn !== 0) this.runTurn = 0\n        this._wasSprinting = sprinting\n        this._afterSprint = false\n\n        // Walk: the Walk action, or a stick pushed less than walkDeflection (scaled up to a full walk at it).\n        let scale = 1\n        const walking = !sprinting && (this.wantsWalk() || amount < this.walkDeflection)\n        if (walking) scale = this.wantsWalk() ? this.walkScale : this.walkScale * Math.min(1, amount / this.walkDeflection) / amount\n        this.running = !walking\n\n        // Strafing backwards: full speed up to the side, the diagonal share at 135 degrees, the back share straight\n        // back: the speeds the backward clips cover. A sprint faces where it goes, so it is always \"forward\".\n        // Each stance's clips have their own: the rifle pack moves as fast every way, as does every crouch; the pistol\n        // pack backs off at 0.7 (its diagonals are the rifle's legs, at 0.85).\n        const angle = Math.abs(Math.atan2(right, forward) * 180 / Math.PI)\n        const [backShare, diagonal] = this.crouched || this.stance === 2 ? [1, 1]\n            : this.stance === 1 ? [0.7, 0.85]\n            : [this.backScale, walking ? this.walkBackDiagonalScale : this.backDiagonalScale]\n        const target = sprinting || angle <= 90 ? 1\n            : angle <= 135 ? 1 + (diagonal - 1) * (angle - 90) / 45\n            : diagonal + (backShare - diagonal) * (angle - 135) / 45\n        const k = this.directionEase > 0 ? 1 - Math.exp(-delta / this.directionEase) : 1\n        this._directionScale += (target - this._directionScale) * k\n\n        if (pace !== 0) {\n            // A flight, or one ahead: its pace, walking or running as on the flat. The Character's speed runs along\n            // the ground, the pace over it: sqrt(1 + grade^2) of it along a flight's slope (on the flat before one, 1).\n            const up = pace > 0\n            const flat = walking ? (up ? this.stairUpWalkSpeed : this.stairDownWalkSpeed) * (this.wantsWalk() ? 1 : Math.min(1, amount / this.walkDeflection))\n                : up ? this.stairUpRunSpeed : this.stairDownRunSpeed\n            const nominal = sprinting ? this.runSpeed : this.walkSpeed\n            const slope = this.onStairs ? Math.hypot(1, this._grade(travel)) : 1\n            intent.speedScale *= Math.min(1, flat * slope / Math.max(0.01, nominal))\n            return\n        }\n        intent.speedScale *= scale * this._directionScale\n    }\n\n    /**\n     * The jump's facing. Decided at take-off (`isJumping` comes up the frame after the jump launches, with its\n     * velocity): faster than `jumpTurnSpeed` over the ground, the body turns toward its horizontal velocity at the\n     * Character's turnSpeed until it lands, as `velocity` facing turns it on the stairs (holding the last heading\n     * while the velocity is too slow to read, against a wall); slower, nothing turns it. True while it turns the\n     * body itself, which the Character must then leave alone (`facingMode` 'none').\n     */\n    protected _jumpTurn(delta: number, v: ArrayLike<number>, bodyYaw: number): boolean {\n        if (!this.isJumping) { this._jumpYaw = undefined; return false }\n        const speed = Math.hypot(v[0], v[2])\n        if (this._jumpYaw === undefined) this._jumpYaw = speed > this.jumpTurnSpeed ? Math.atan2(v[0], v[2]) * 180 / Math.PI : null\n        if (this._jumpYaw === null) return false\n        if (speed > 0.3) this._jumpYaw = Math.atan2(v[0], v[2]) * 180 / Math.PI\n        const diff = this._wrap(this._jumpYaw - bodyYaw)\n        const step = Math.min(Math.abs(diff), this.turnSpeed * delta)\n        if (step > 1e-4) this.setWorldYaw(bodyYaw + Math.sign(diff) * step)\n        return true\n    }\n\n    /**\n     * The stairs, every frame: whether a flight is under the body (`onStairs`), which way the travel goes along it\n     * (`stairs`), how much faster the stair clips play while the body is still faster than their pace\n     * (`stairRate`), and the pace to keep: +1 a flight going up (under the body or ahead of it, as close as braking\n     * to the gait's pace at `stairBrake` takes), -1 down, 0 none.\n     */\n    protected _stairsToward(delta: number, travel: number[] | null, run: boolean): number {\n        const physics = this.scene?.physics as any\n        if (this._stairBit < 0) this._stairBit = physics?.layer?.(this.stairsLayer) ?? 0\n        const p = this.worldPosition\n        // Straight down onto the stairs' ramps alone (their layer), `reach` above and below the feet, and only onto\n        // the top of one: a ramp's end, where it meets a landing, leans the other way.\n        const ramp = (x: number, z: number, y: number, reach: number) => {\n            const hit = this._stairBit && physics ? physics.raycast([x, y + reach, z], [x, y - reach, z], { layerMask: this._stairBit }) : null\n            return hit && hit.normal[1] >= 0.7 ? hit : null\n        }\n        const here = ramp(p[0], p[2], p[1], 0.6)\n        if (here) { this._offStairs = 0; this._stairNormal = [here.normal[0], here.normal[1], here.normal[2]] }\n        else this._offStairs += delta\n        this.onStairs = this.isGrounded && this._offStairs <= this.stairGrace\n        // Up or down it, by the climb under the travel: let go below 60% of the grade, not at once.\n        if (!this.onStairs) this.stairs = 0\n        else if (travel) {\n            const grade = this._grade(travel)\n            if (Math.abs(grade) >= this.stairGrade) this.stairs = Math.sign(grade)\n            else if (Math.abs(grade) < this.stairGrade * 0.6) this.stairs = 0\n        }\n        // No travel on a flight: it keeps the way it went, so a stop there settles into Idle, not the walk.\n        const fastest = this.stairs > 0 ? this.stairUpRunSpeed : this.stairDownRunSpeed\n        this.stairRate = this.stairs !== 0 ? Math.max(1, this.groundSpeed / Math.max(0.01, fastest)) : 1\n        // The gait's pace: up or down once known, else the slower of the two (up).\n        const paceOf = (dir: number) => run ? (dir < 0 ? this.stairDownRunSpeed : dir > 0 ? this.stairUpRunSpeed : Math.min(this.stairUpRunSpeed, this.stairDownRunSpeed))\n            : (dir < 0 ? this.stairDownWalkSpeed : dir > 0 ? this.stairUpWalkSpeed : Math.min(this.stairUpWalkSpeed, this.stairDownWalkSpeed))\n        this._stairPace = paceOf(this.stairs)\n        if (this.stairs !== 0) return this.stairs\n        if (this.onStairs || !travel || !this.hasMoveInput) return 0\n        // Ahead: as far as braking from this speed to the gait's pace takes at `stairBrake`, no further (at least\n        // past the capsule's front).\n        const brake = 2 * Math.max(0.5, this._acceleration * this.stairBrake)\n        const reach = Math.max(0.3, (this.groundSpeed ** 2 - this._stairPace ** 2) / brake)\n        // Tall enough to meet a ramp that far up (or down) a flight at its steepest.\n        const ahead = ramp(p[0] + travel[0] * reach, p[2] + travel[1] * reach, p[1], 0.5 + reach)\n        if (!ahead) return 0\n        const n = ahead.normal\n        const grade = -(travel[0] * n[0] + travel[1] * n[2]) / Math.max(1e-3, n[1])\n        if (Math.abs(grade) < this.stairGrade) return 0\n        this._stairPace = paceOf(Math.sign(grade))\n        return Math.sign(grade)\n    }\n\n    /** The climb along `travel` (rise over run, + up) of the flight last under the body. */\n    protected _grade(travel: number[] | null): number {\n        if (!travel) return 0\n        const n = this._stairNormal\n        return -(travel[0] * n[0] + travel[1] * n[2]) / Math.max(1e-3, n[1])\n    }\n\n    /**\n     * The lean: the body's sideways acceleration (its velocity's change, on the body's left axis), as a share of\n     * `leanAcceleration`, faded in from a walk to a run and followed at `leanSpeed`. Positive leans left.\n     */\n    protected _leanToward(delta: number, facing: ArrayLike<number>, run: number): number {\n        const v = this.velocity\n        if (!(delta > 0)) return this._lean\n        const ax = (v[0] - this._lastVelocity[0]) / delta, az = (v[2] - this._lastVelocity[1]) / delta\n        this._lastVelocity = [v[0], v[2]]\n        // The body's left is (forward.z, 0, -forward.x): +X when it faces +Z.\n        const sideways = ax * facing[2] - az * facing[0]\n        // Forward: speeding up along the way the body faces. Never back: a stop has its own clip.\n        const ahead = ax * facing[0] + az * facing[2]\n        const forwardTarget = !this.isGrounded ? 0 : Math.max(0, Math.min(1, ahead / this.leanForwardAcceleration))\n        this.leanForward += (forwardTarget - this.leanForward) * (1 - Math.exp(-this.leanForwardSpeed * delta))\n        const target = this.runTurn !== 0 || !this.isGrounded ? 0 : Math.max(-1, Math.min(1, sideways / this.leanAcceleration)) * run\n        const lean = this._lean + (target - this._lean) * (1 - Math.exp(-this.leanSpeed * delta))\n        this.leanLeft = Math.max(0, lean)\n        this.leanRight = Math.max(0, -lean)\n        return lean\n    }\n\n    /**\n     * ALS's look-at: the head (and the trunk under it) toward where the camera faces, at full weight standing still\n     * and faded out once the body moves, for the Look layer.\n     */\n    protected _lookToward(delta: number, yaw: number, pitch: number) {\n        // Straight behind, the side it looks round on stays the one it was: flipped across, the trunk would whip from\n        // one shoulder to the other.\n        let off = this._wrap(yaw)\n        if (Math.abs(off) > 150 && this.lookYaw !== 0 && Math.sign(off) !== Math.sign(this.lookYaw)) off = Math.sign(this.lookYaw) * Math.abs(off)\n        // Held by its reactions (a flinch after a hit, a stagger), the look stays where it was: the reaction has the head.\n        const hold = (this as unknown as { reactionHold?: { turn: number } | null }).reactionHold\n        if (!hold || !(hold.turn < 1)) {\n            this.lookYaw = Math.max(-90, Math.min(90, off))\n            this.lookPitch = Math.max(-45, Math.min(45, pitch - this.lookRest()))\n        }\n        // Aiming, the aim turns the head with the weapon. Past 110 degrees off the body there is no looking round:\n        // the body turns instead, and the look fades.\n        const still = !this.hasMoveInput && this.isGrounded && this.groundSpeed < 0.3 && !this.aiming && Math.abs(off) <= 110\n        if (delta > 0) {\n            this._lookAmount += ((still ? 1 : 0) - this._lookAmount) * (1 - Math.exp(-this.lookSpeed * delta))\n            // Crouched, the head alone turns (the Look Head layer); standing, the trunk under it too (Look).\n            this._lookCrouch = Math.max(0, Math.min(1, this._lookCrouch + (this.crouched ? delta : -delta) / 0.25))\n        }\n        this._lookWeights()\n    }\n\n    /** The look-at's weight split between the trunk's look (Look) and the head's alone (Look Head, crouched). */\n    protected _lookWeights() {\n        const c = MathUtils.smoothstep(0, 1, this._lookCrouch)\n        this.lookWeight = this._lookAmount * (1 - c)\n        this.lookHeadWeight = this._lookAmount * c\n    }\n\n    /**\n     * The weapons, every frame, in either view. Equip (or the mouse wheel) picks the next weapon (none, the pistol,\n     * the rifle, the shotgun, round again): the one in the hands goes down and away, the next comes up (its layer's\n     * weight in third person over `equipSeconds`; its viewmodel's Equip clip in first person) and fires once it is up.\n     * Reload, or a pull on an empty magazine, reloads it (the Reload pose held in third person, the viewmodel's\n     * reload clips in first person), filling the magazine from the reserve near the end. Aim held with one up aims it\n     * (third person: the aim layers, facing the camera and strafing, turning in place sooner; first person: down the\n     * sights, Firing Line's way), unless the body sprints, reloads or is told to put it away (`holster`: in a car).\n     * `yaw` and `pitch`: where the camera aims, off the body.\n     */\n    protected _weaponsToward(delta: number, holster: boolean, sprinting: boolean, yaw: number, pitch: number) {\n        if (!this._weaponNodes) {\n            this.resolveWeapons()\n            this._showWeapon(this.weapon)\n        }\n        this._time += delta\n        const fp = this.firstPersonView() && !holster\n        // Picking the next weapon (or the last, the wheel turned back).\n        this._weaponWanted = holster ? 0 : this.pickWeapon(delta, this._weaponWanted)\n        const gun = this._gun\n        // A reload: asked for, or a pull with nothing in the magazine.\n        if (!holster && gun && this.weapon === this._weaponWanted && (this.wantsReload() || (gun.ammo <= 0 && this.triggerStarted()))) this._tryReload(fp)\n        // Fired from the hip in third person: up it comes, and stays up a moment after.\n        const firing = !holster && !fp && this.weapon > 0 && this.weapon === this._weaponWanted && !sprinting && !this.reloading && this.triggerHeld()\n        this._fireHold = firing ? this.fireAimHold : Math.max(0, this._fireHold - delta)\n        const step = delta > 0 ? delta / Math.max(0.01, this.equipSeconds) : 0\n        const weights = [this.pistolWeight, this.rifleWeight, this.shotgunWeight]\n        if (this.weapon !== this._weaponWanted) {\n            // Down out of the hands, then away; the next one shown, coming up.\n            const k = this.weapon - 1\n            if (k >= 0) weights[k] = Math.max(0, weights[k] - step)\n            if (k < 0 || weights[k] < 0.35 || fp) {\n                if (k >= 0) weights[k] = 0\n                this._reloadToken++\n                this.reloading = false\n                this.weapon = this._weaponWanted   // weapon:Equipped shows it\n                this._busyUntil = this._time + this._equipTime(fp)\n            }\n        } else if (this.weapon > 0) weights[this.weapon - 1] = Math.min(1, weights[this.weapon - 1] + step)\n        ;[this.pistolWeight, this.rifleWeight, this.shotgunWeight] = weights\n        // The stance follows the weapon more than halfway in the hands; with none, the body is unarmed. Between two\n        // weapons it keeps the last one's, so a swap is one cross-fade, not two.\n        const top = weights.indexOf(Math.max(...weights))\n        if (weights[top] >= 0.5) this.stance = STANCES[top]\n        else if (weights[top] < 0.05) this.stance = 0\n        const up = this.weapon > 0 && this.weapon === this._weaponWanted && this._time >= this._busyUntil\n        // Aiming: Aim held (or, in third person, a shot from the hip), the weapon up, not sprinting or reloading.\n        this.aiming = !holster && up && !sprinting && !this.reloading && (this.wantsAim() || this._fireHold > 0)\n        const aimStep = delta > 0 ? delta / Math.max(0.01, this.aimSeconds) : 0\n        this._aim = Math.max(0, Math.min(1, this._aim + (this.aiming && !fp ? aimStep : -aimStep)))\n        this.afterAim(delta, fp)\n        this.pistolAimWeight = this._aim * this.pistolWeight\n        this.rifleAimWeight = this._aim * this.rifleWeight\n        this.shotgunAimWeight = this._aim * this.shotgunWeight\n        // Not aimed, the weapon is held at the low ready: the aim's own hold, turned muzzle-down (the Lowered layer).\n        this.loweredWeight = Math.max(...weights) * (1 - this._aim)\n        // The pistol's left hand lets go over a sprint, as the arms go over to the sprint's (0.3 s, as their blend).\n        const supportStep = delta > 0 ? delta / 0.3 : 0\n        this.supportHand = Math.max(0, Math.min(1, this.supportHand + ((this.sprinting && !this.aiming) || this.hurt ? -supportStep : supportStep)))\n        const painStep = delta > 0 ? delta / 0.4 : 0\n        this.painWeight = Math.max(0, Math.min(1, this.painWeight + (this.hurt ? painStep : -painStep)))\n        // Where the camera aims off the body: the aim layers' blend.\n        this.aimYaw = Math.max(-90, Math.min(90, this._wrap(yaw)))\n        this.aimPitch = Math.max(-60, Math.min(60, pitch))\n        this._fire(delta, holster, sprinting, fp, up)\n        this.afterWeapons(delta, fp)\n    }\n\n    /** The SandboxGun of the weapon in the hands, or null. */\n    protected get _gun(): any {\n        return this.weapon > 0 ? this._weaponNodes?.[this.weapon - 1] ?? null : null\n    }\n\n    /** Seconds the weapon coming into the hands keeps them busy: its layer's fade (the player's first person: its clip). */\n    protected _equipTime(fp: boolean): number {\n        if (this.weapon === 0) return 0\n        return this.equipSeconds\n    }\n\n    /**\n     * A reload, if one would fill anything and the weapon is up and not reloading already: the Reload pose held for\n     * the gun's `reloadSeconds`, the magazine filled near its end (the player's first person: its viewmodel's clips).\n     */\n    protected _tryReload(fp: boolean) {\n        const gun = this._gun\n        if (!gun || this.reloading || this._time < this._busyUntil || !gun.canReload) return\n        const token = ++this._reloadToken\n        this.reloading = true\n        const secs = gun.reloadSeconds\n        this._busyUntil = this._time + secs\n        this.after(secs * 0.82, () => { if (token === this._reloadToken) gun.reload() })\n        this.after(secs, () => { if (token === this._reloadToken) this.reloading = false })\n    }\n\n    /**\n     * The trigger: the weapon in the hands (its SandboxGun) fires along `aimRay` (the player's camera, an NPC's eye on\n     * its target) once it is up, a round off its magazine a shot. Each shot comes back as `weapon:Shot`, whose recoil\n     * the body takes (`_shot`).\n     */\n    protected _fire(delta: number, holster: boolean, sprinting: boolean, fp: boolean, up: boolean) {\n        const gun = this._gun\n        const moving = this.planarSpeed > 0.4\n        this.spreadNow = gun ? gun.spread(this.spreadAim(fp), moving, this.sprinting, this.crouched, this.isGrounded) : 0\n        if (gun?.pull && this.aimRay(this._eye, this._look)) {\n            const weight = [this.pistolWeight, this.rifleWeight, this.shotgunWeight][this.weapon - 1] ?? 0\n            const ready = !holster && !sprinting && up && !this.reloading && (fp || (weight >= 0.95 && this._aim >= this.fireAimReady))\n            const recoil = gun.pull(!holster && this.triggerHeld(), ready, this._eye, this._look, this.spreadNow,\n                this.ownBodies(), this.shotView(fp))\n            if (recoil) this.onFired(recoil, fp)\n        }\n        this.afterFire(delta)\n    }\n\n    /**\n     * What its own shots pass through: its capsule, and its limbs while its reactions hold them (a flinch keeps the\n     * gun in hand, and a shot from behind its head would meet its own powered ragdoll).\n     */\n    public ownBodies(): unknown {\n        const body = (this.collider as ColliderNode | null)?.body ?? null\n        const parts = this.reactions?.ragdoll?.parts\n        if (!parts?.length) return body\n        const all: unknown[] = body ? [body] : []\n        for (const p of parts) all.push(p.body)\n        return all\n    }\n\n    /**\n     * A shot from the weapon in the hands (SandboxGun's `weapon:Shot`, bubbling up from the grip): the body takes the\n     * gun's recoil clip, and the player's camera its kick (`onRecoil`). A shot fired some other way carries no recoil.\n     */\n    @eventListener('weapon:Shot')\n    protected _shot(shot: { recoil?: { pitch: number, yaw: number, kick: number, shake?: number } | null }) {\n        const recoil = shot?.recoil\n        if (!recoil) return\n        this.onRecoil(recoil)\n        this._bodyRecoil()\n    }\n\n    /** The body's recoil for the shot just fired: the gun's `fireTrigger`, sent down to the animator under this character. */\n    @animTrigger()\n    protected _bodyRecoil() {\n        return this._gun?.fireTrigger ?? ''\n    }\n\n    /** The weapon in the hands changed (`weapon:Equipped`, from setting `weapon`): its model shown, the others hidden. */\n    @eventListener('weapon:Equipped')\n    protected _equipped(weapon: number) {\n        this._showWeapon(weapon)\n    }\n\n    /** Show the weapon `weapon` (1 the pistol, 2 the rifle, 3 the shotgun) on the hand, and hide the others; 0 hides them all. */\n    protected _showWeapon(weapon: number) {\n        this._weaponNodes?.forEach((n, k) => { if (n) n.visible = weapon === k + 1 })\n    }\n\n    /** An angle into -180..180 degrees. */\n    protected _wrap(degrees: number): number {\n        return ((degrees + 180) % 360 + 360) % 360 - 180\n    }\n\n    // ----- the car ------------------------------------------------------------------------------------------------\n\n    /** The Mannequin's animator (the model under this Character). */\n    protected get _animator(): Animator | null {\n        for (const c of this.children) {\n            const animator = (c as unknown as { animator?: Animator | null }).animator\n            if (animator) return animator\n        }\n        return null\n    }\n\n    /**\n     * Thrown out of the car at speed (it was asked to stop going faster than its `bailSpeed`): out of the seat at\n     * once and into the world, its body its reactions' from there, leaving with the car's `velocity` out through\n     * `exitDirection`, clear of the car for a moment; it tumbles, comes to rest and gets up where it lies. Its own\n     * Controller has it again (it ignores the stick until it is up). False, and nothing done, when it has no reactions\n     * or is not seated.\n     */\n    public bailOut(velocity: ArrayLike<number>, exitDirection: ArrayLike<number>, vehicle: Node): boolean {\n        const reactions = this.reactions\n        const body = this.collider as ColliderNode | null\n        const scene = this.scene\n        if (this._carPhase !== 'seated' || !reactions || !body || !scene) return false\n        // Out of the seat where it sits, upright; its body stays out of the world (the reaction has it now).\n        const f = body.worldForward\n        body.reparent(scene.root)\n        body.setRotation([0, Math.atan2(f[0], f[2]) * 180 / Math.PI, 0])\n        body.updateTransforms(null)\n        this._ownController?.possess(this)\n        this._ownController = null\n        this._seat = null\n        this._carPhase = 'none'\n        this.inVehicle = false\n        this.seated = false\n        // Out of the seated clip: the body flies on whatever the animator stands it in.\n        this._animator?.forceState('Idle', 0.2)\n        reactions.bail({ velocity, exitDirection, vehicle })\n        return true\n    }\n\n    /** The camera rig this character is seen through: its Controller's aim. */\n    public cameraRig(): CameraRigNode | null {\n        return (this._ownController ?? this.controller)?.aimRig ?? null\n    }\n\n    /**\n     * A car hands this character its seat: it gets in. It lets go of its Controller, takes its body out of the\n     * physics world (`physicsEnabled`) and moves under `seat`, keeping where it stands; fires `enterTrigger`, and\n     * steps onto `enterPoint` (a child of the seat: where getting in starts) while the clip reaches for the door.\n     * The clip's root motion then carries it into the seat. False, and nothing done, when it cannot: in the air,\n     * already in a car, with an animator that has no such trigger, or a character that does not drive (`canDrive`).\n     */\n    public boardVehicle(seat: Node, enterPoint: Node): boolean {\n        const body = this.collider as ColliderNode | null\n        const animator = this._animator\n        const info = animator?.triggerInfo(this.enterTrigger)\n        if (!this.canDrive || this._carPhase !== 'none' || !body || !animator || !info || !this.isGrounded || this.isJumping) return false\n        this._ownController = this.controller\n        this._ownController?.release()\n        body.physicsEnabled = false\n        // Where the character faces is its own turn (the Character turns itself, not its Collider), and the step\n        // and the clip's root motion turn the Collider: fold the one into the other first, so they turn all of it.\n        const facing = this.worldForward\n        const heading = Math.atan2(facing[0], facing[2]) * 180 / Math.PI\n        body.setWorldYaw(heading)\n        body.updateTransforms(body.parent ? body.parent.worldTransform : null)\n        // The same heading in the world: no turn of its own left under the Collider.\n        this.setWorldYaw(heading)\n        this.updateTransforms(body.worldTransform)\n        body.reparent(seat)\n        this._seat = seat\n        // The step: from where it stands to where the clip starts, both in the seat's frame, eased in over the\n        // first part of the clip (time by distance).\n        this._alignFrom = this._localPose(body)\n        // Onto the start along the ground, at the height it stands at: the car may sit lower or higher on its springs\n        // than modelled (the backends' springs differ), and once seated the body eases onto the Seat itself.\n        const to: MathUtils.YawPose = this._localPose(enterPoint)\n        to[1] = this._alignFrom[1]\n        this._alignStep = MathUtils.yawPoseMul(MathUtils.yawPoseInvert(this._alignFrom), to)\n        const distance = Math.hypot(this._alignStep[0], this._alignStep[2])\n        this._alignTime = Math.min(this.alignMaxSeconds, this.alignSeconds * distance + 0.1)\n        this._alignT = 0\n        this._getIn()\n        this._enterSeconds = info.clipLength / Math.max(0.01, info.speed)\n        this._carTime = 0\n        this._carPhase = 'entering'\n        this.inVehicle = true\n        this.seated = false\n        return true\n    }\n\n    /** The car lets this character out: it gets out (`exitTrigger`), carried by the clip to the car's side. False when not seated. */\n    public leaveVehicle(): boolean {\n        const animator = this._animator\n        if (this._carPhase !== 'seated' || !animator || !animator.triggerInfo(this.exitTrigger)) return false\n        this._getOut()\n        this._carPhase = 'exiting'\n        this.seated = false\n        return true\n    }\n\n    /** The animator's getting-in clip: `enterTrigger`, sent down to the animator under this character. */\n    @animTrigger()\n    protected _getIn() {\n        return this.enterTrigger\n    }\n\n    /** The animator's getting-out clip: `exitTrigger`, the same way. */\n    @animTrigger()\n    protected _getOut() {\n        return this.exitTrigger\n    }\n\n    /**\n     * Getting out is over once the animator has left the exit trigger's states (back where it rests): it says so\n     * with `animation:TriggerEnded`, bubbling up from the model, and the character stands up.\n     */\n    @eventListener('animation:TriggerEnded')\n    protected _triggerEnded(info: { trigger?: string, layer?: string | null }) {\n        if (this._carPhase !== 'exiting' || info?.trigger !== this.exitTrigger || info.layer) return\n        const body = this.collider as ColliderNode | null\n        if (body) this._standUp(body)\n    }\n\n    /** In a car: no walking (no intent asked for), nothing for the animator but the car's clips. */\n    protected _ride(delta: number) {\n        const body = this.collider as ColliderNode | null\n        if (!body) return\n        this.hasMoveInput = false\n        this.running = false\n        this.sprinting = false\n        this.runTurn = 0\n        this.groundSpeed = 0\n        this.onStairs = false\n        this.stairs = 0\n        this.stairRate = 1\n        this.footPlacement = 0\n        this.facingMode = 'none'\n        const ease = delta > 0 ? 1 - Math.exp(-this.lookSpeed * delta) : 0\n        this.leanLeft = 0\n        this.leanRight = 0\n        this.leanForward = 0\n        this._lookAmount -= this._lookAmount * ease\n        this._lookWeights()\n        // No weapon in a car: put away.\n        this._weaponsToward(delta, true, false, 0, 0)\n        this._carTime += delta\n\n        if (this._carPhase === 'entering') {\n            // The step onto the start, as a correction under the root motion that is already carrying the body:\n            // pose = start * step(t) * motion, applied by how much further along the step is this frame.\n            if (this._alignT < 1) {\n                const t0 = MathUtils.smoothstep(0, 1, this._alignT)\n                this._alignT = this._alignTime > 0 ? Math.min(1, this._alignT + delta / this._alignTime) : 1\n                const t1 = MathUtils.smoothstep(0, 1, this._alignT)\n                const none: MathUtils.YawPose = [0, 0, 0, 0]\n                const from = MathUtils.yawPoseLerp(none, this._alignStep, t0)\n                const to = MathUtils.yawPoseLerp(none, this._alignStep, t1)\n                const start = this._alignFrom\n                const shift = MathUtils.yawPoseMul(start, MathUtils.yawPoseMul(to, MathUtils.yawPoseMul(MathUtils.yawPoseInvert(from), MathUtils.yawPoseInvert(start))))\n                this._setLocalPose(body, MathUtils.yawPoseMul(shift, this._localPose(body)))\n            }\n            if (this._carTime >= this._enterSeconds) { this._carPhase = 'seated'; this.seated = true }\n            return\n        }\n        if (this._carPhase === 'seated') {\n            // On the seat: what the clip's travel left over (a few millimetres) eased out.\n            const k = this.settleSeconds > 0 && delta > 0 ? 1 - Math.exp(-3 * delta / this.settleSeconds) : 1\n            const pose = this._localPose(body)\n            if (Math.hypot(pose[0], pose[1], pose[2]) > 1e-4 || Math.abs(pose[3]) > 0.01)\n                this._setLocalPose(body, MathUtils.yawPoseLerp(pose, [0, 0, 0, 0], k))\n            return\n        }\n        // Getting out: the clip carries the body; `_triggerEnded` stands it up when the animator is done.\n    }\n\n    /** Out of the car: on its feet in the world again, upright, its body back in the physics world, its Controller back. */\n    protected _standUp(body: ColliderNode) {\n        const scene = this.scene\n        if (!scene) return\n        const f = body.worldForward\n        const yaw = Math.atan2(f[0], f[2]) * 180 / Math.PI\n        body.reparent(scene.root)\n        body.setRotation([0, yaw, 0])\n        // On the ground under it: the clip stands it at the Seat's floor, which is the car's (on its springs).\n        const p = body.worldPosition, physics = scene.physics\n        const ground = physics?.raycast([p[0], p[1] + 1, p[2]], [p[0], p[1] - 1.5, p[2]], { collidingWith: body.body, groundOnly: true })\n        if (ground) body.setPosition([p[0], ground.point[1] + 0.02, p[2]])\n        body.updateTransforms(null)\n        body.physicsEnabled = true\n        this._ownController?.possess(this)\n        this._ownController = null\n        this._seat = null\n        this._carPhase = 'none'\n        this.inVehicle = false\n        this.seated = false\n    }\n\n    // ----- reactions ------------------------------------------------------------------------------------------------\n\n    /**\n     * Its reactions (the skeleton's, physics/reactive/): what sets one off is a hit, a car, or the subclass's own\n     * (`provoke`: the player's Trip and Shove keys). On its feet (a flinch, a stagger) it keeps its control: it goes on\n     * walking, aiming and firing while its upper body sways and the shove carries it. Off its feet (it falls, lies,\n     * gets up) the body is the physics', not the stick's: nothing it is asked does anything, and its weapon is put\n     * away. True while it sits a reaction out.\n     */\n    protected _reacting(delta: number): boolean {\n        const reactions = this.reactions\n        if (!reactions) return false\n        if (!reactions.reacting && this.isGrounded && !this.isJumping) this.provoke(reactions)\n        if (!reactions.isDown) return false\n        this.hasMoveInput = false\n        this.running = false\n        this.sprinting = false\n        this.runTurn = 0\n        this.groundSpeed = 0\n        this.facingMode = 'none'\n        this._weaponsToward(delta, true, false, 0, 0)\n        return true\n    }\n\n    /** A node's upright pose in its parent's frame: `[x, y, z, yaw]`. */\n    protected _localPose(node: Node): MathUtils.YawPose {\n        const p = node.position, q = node.quaternion\n        // +Z turned by the rotation: its heading is the yaw.\n        const fx = 2 * (q[0] * q[2] + q[3] * q[1]), fz = 1 - 2 * (q[0] * q[0] + q[1] * q[1])\n        return [p[0], p[1], p[2], Math.atan2(fx, fz) * 180 / Math.PI]\n    }\n\n    /** Places `node` at an upright pose in its parent's frame, its world transform brought up to date at once. */\n    protected _setLocalPose(node: Node, pose: MathUtils.YawPose) {\n        node.setPosition([pose[0], pose[1], pose[2]])\n        node.setRotation([0, pose[3], 0])\n        node.updateTransforms(node.parent ? node.parent.worldTransform : null)\n    }\n}\n",
+    "73c9baae199e5fd880bcf4b74f4d68bd": "import { Logger, MathUtils, Node } from 'cleo'\nimport type { LayerName, TemplateName, TriggerName } from 'cleo'\nimport { attribute, eventDispatch } from 'cleo/decorators'\n\n/** What one shot was, as the gun tells it (`weapon:Shot`). */\nexport interface SandboxShot {\n    gun: Node\n    /** What the first pellet hit (the only one, but for a shotgun), or null: nothing within `range`. */\n    hit: { point: number[], node: Node | null } | null\n    /** Every pellet's hit (a shotgun fires `pellets` of them); null where a pellet hit nothing. */\n    hits: ({ point: number[], node: Node | null } | null)[]\n    /** The kick a pull of the trigger gives (camera pitch up and yaw, degrees, the weapon's own, the camera's shake); null for a shot fired directly. */\n    recoil: { pitch: number, yaw: number, kick: number, shake: number } | null\n}\n\n/** Where a shot is seen from: the third person's weapon in the hands, or the first person's viewmodel. */\nexport interface SandboxShotView {\n    /** Fired in first person: the camera's ray alone, and no flash or sound of the gun's own (the viewmodel's clip has them). */\n    firstPerson: boolean\n    /** Where the tracer starts in first person: the viewmodel's muzzle where it is drawn. */\n    muzzle?: ArrayLike<number> | null\n}\n\n/**\n * A Sandbox gun: the weapon in the hands, in either view. Attach to a weapon's holder (the `Pistol Grip`, `Rifle Grip`\n * and `Shotgun Grip` nodes on the Mannequin's hand), whose child `Muzzle` is the end of its bore. Its numbers are the\n * weapon's (Firing Line's pistol, AK-47 and SAPS-12), set on each holder in the Player template. The character\n * holding it (SandboxPlayer) calls {@link pull} every frame with the trigger and where the crosshair looks; the gun\n * decides when a shot goes, spends a round from its magazine, and returns the recoil for the holder to apply. It\n * keeps its own magazine and reserve (`ammo`, `reserve`), so a weapon put away and taken out again is as it was left;\n * {@link reload} fills the magazine from the reserve. Out of the reserve, it is dry until the scene starts again.\n *\n * A SHOT is a raycast per pellet (a pistol and a rifle fire one; the shotgun `pellets`), each its own way inside the\n * spread's cone. In third person a pellet is two raycasts: from the camera through the crosshair, up to `range`\n * (what the player aims at), then from the muzzle to that point (what the bullet meets on its way: a corner the\n * camera sees past but the gun does not). In first person the camera's alone, as Firing Line fires. Neither meets the\n * shooter's own body, the trigger zones or the layers named in `passThroughLayers` (the stairs' ramps: there to be\n * walked on, not seen).\n *\n * A HIT on a dynamic body pushes it: the shot's `impulse` (shared by its pellets) along the shot at the point it hit\n * (so a crate hit high tips, a ball spins), no more than `maxPushSpeed` of speed at once. A hit on a hard surface\n * (anything but a character) leaves sparks and dust (`impactTemplate`) and a hole (`holeTemplate`), the hole moving\n * with what it is on; a character throws nothing (its body's reaction is the hit); the shot draws a tracer\n * (`tracerTemplate`). In third person the gun flashes at its muzzle (`flashTemplate`) and plays its shot (`shotSound`,\n * a cue in the character's `Sounds` group); in first person the viewmodel's fire clip does both. A template the scene\n * does not have is skipped, with a warning once.\n *\n * SPREAD is Firing Line's: a cone round the crosshair, from `hipSpread` to `aimSpread` as the weapon aims, half again\n * moving (2.2 times at a sprint), less crouched, much more in the air, and wider the longer it fires (bloom, up to 1.6\n * times the hip spread, settling at 5 degrees a second). The holder reads {@link spread} for its crosshair.\n *\n * EVERY SHOT is told as the event `weapon:Shot` (a {@link SandboxShot}), dispatched at the gun: it bubbles up to the\n * character holding it, whose `@eventListener('weapon:Shot')` applies the recoil, and then reaches anything listening\n * with `@onEvent('weapon:Shot')` anywhere (a hit marker, a sound, a score).\n */\nexport default class SandboxGunNode extends Node {\n    /** The weapon's name, on the HUD. */\n    @attribute('Weapon')\n    public displayName: string = 'Pistol'\n\n    /** Holding the trigger keeps firing (a rifle); a pistol or the shotgun fires once per pull. */\n    @attribute('Firing')\n    public auto: boolean = false\n\n    @attribute('Firing', { min: 30, max: 1500, step: 1 })\n    public roundsPerMinute: number = 380\n\n    /** Pellets a shot fires, each its own way inside the spread: 1, but for a shotgun. */\n    @attribute('Firing', { min: 1, max: 24, step: 1 })\n    public pellets: number = 1\n\n    /** How far a shot reaches, m. */\n    @attribute('Firing', { min: 5, max: 1000, step: 5 })\n    public range: number = 140\n\n    /**\n     * The push a shot gives a dynamic body, newton-seconds (shared by its pellets): far more than a real bullet's (a\n     * rifle's carries about 4), so a shot crate shoves. No body is sped up by more than `maxPushSpeed` by one hit, so a\n     * ball is not shot away.\n     */\n    @attribute('Firing', { min: 0, max: 500, step: 0.5 })\n    public impulse: number = 14\n\n    @attribute('Firing', { min: 0, max: 50, step: 0.25 })\n    public maxPushSpeed: number = 2.5\n\n    /** Damage a pellet deals at close range (nothing in the Sandbox takes it yet: kept for game modes). */\n    @attribute('Firing', { min: 0, max: 500, step: 1 })\n    public damage: number = 26\n\n    /**\n     * A pull that comes while the gun cannot fire yet (still coming up from the hip, or between two shots) fires as soon\n     * as it can, if that is within this many seconds.\n     */\n    @attribute('Firing', { min: 0, max: 1, step: 0.05 })\n    public pullBuffer: number = 0.35\n\n    /** Rounds a magazine holds, and the rounds carried besides it. */\n    @attribute('Ammunition', { min: 1, max: 200, step: 1 })\n    public magazine: number = 12\n\n    @attribute('Ammunition', { min: 0, max: 2000, step: 1 })\n    public reserveRounds: number = 84\n\n    /** Spread, degrees from the crosshair at most: from the hip, and aimed. */\n    @attribute('Spread', { min: 0, max: 20, step: 0.05 })\n    public hipSpread: number = 1.6\n\n    @attribute('Spread', { min: 0, max: 20, step: 0.05 })\n    public aimSpread: number = 0.25\n\n    /** The camera's kick per shot, degrees: up, and up to this either way; and how hard the camera shakes (0..1). */\n    @attribute('Recoil', { min: 0, max: 20, step: 0.05 })\n    public recoilPitch: number = 1.5\n\n    @attribute('Recoil', { min: 0, max: 10, step: 0.05 })\n    public recoilYaw: number = 0.45\n\n    @attribute('Recoil', { min: 0, max: 1, step: 0.01 })\n    public shake: number = 0.04\n\n    /** The weapon's own kick per shot, degrees up, carried on `weapon:Shot` for listeners (the Sandbox's body takes `fireTrigger`'s clip instead). */\n    @attribute('Recoil', { min: 0, max: 30, step: 0.5 })\n    public kick: number = 7\n\n    /** Seconds a reload and the weapon coming into the hands take where no clip says (third person). */\n    @attribute('Timing', { min: 0.1, max: 10, step: 0.05 })\n    public reloadSeconds: number = 2.2\n\n    @attribute('Timing', { min: 0.1, max: 5, step: 0.05 })\n    public equipSeconds: number = 1.2\n\n    /** First person, aimed: the field of view (degrees), the share of the walk it moves at, and whether its viewmodel has aim clips. */\n    @attribute('First Person', { min: 10, max: 120, step: 1 })\n    public aimFov: number = 62\n\n    @attribute('First Person', { min: 0.1, max: 1, step: 0.05 })\n    public aimMove: number = 0.7\n\n    @attribute('First Person')\n    public aimClips: boolean = true\n\n    /** First person, aimed without aim clips: how far the viewmodel comes in to the sights (m: left, up, forward). */\n    @attribute('First Person')\n    public aimOffset: number[] = [0, 0.012, 0]\n\n    /** Collision layers a shot passes through, by name. */\n    @attribute('Hits')\n    public passThroughLayers: LayerName[] = ['Stair Ramp']\n\n    /** Bullet holes this gun keeps; the oldest goes when there are more. */\n    @attribute('Hits', { min: 0, max: 500, step: 1 })\n    public maxHoles: number = 60\n\n    @attribute('Effects')\n    public flashTemplate: TemplateName = 'Muzzle Flash' as TemplateName\n\n    @attribute('Effects')\n    public impactTemplate: TemplateName = 'Bullet Impact' as TemplateName\n\n    @attribute('Effects')\n    public holeTemplate: TemplateName = 'Bullet Hole' as TemplateName\n\n    @attribute('Effects')\n    public tracerTemplate: TemplateName = 'Tracer' as TemplateName\n\n    /** The shot's cue in the holder's `Sounds` group (third person; in first person the fire clip plays it). */\n    @attribute('Effects')\n    public shotSound: string = 'ShotPistol'\n\n    /** The holder's body recoil, an animator trigger (the Recoil layer's kick of this weapon), raised on every shot. */\n    @attribute('Effects')\n    public fireTrigger: TriggerName = '' as TriggerName\n\n    /** Rounds in the magazine, and in the reserve. */\n    public ammo: number = 12\n    public reserve: number = 84\n    /** Shots fired, ever, and what the last one hit (null: nothing within `range`). */\n    public shots: number = 0\n    public lastHit: { point: number[], node: Node | null } | null = null\n    /** The last pull found the magazine empty. */\n    public dry: boolean = false\n\n    /** Seconds to the next shot the rate allows (below 0: the shot is late by that much, and the next comes as early). */\n    private _cooldown: number = 0\n    private _held: boolean = false\n    /** Seconds a pull that could not fire yet still waits to. */\n    private _queued: number = 0\n    private _bloom: number = 0\n    private _mask: number | null = null\n    private _holes: Node[] = []\n    private _missing: Set<string> = new Set()\n    private readonly _dir: number[] = [0, 0, 0]\n\n    onStart() {\n        this.ammo = this.magazine\n        this.reserve = this.reserveRounds\n    }\n\n    onUpdate(delta: number) {\n        this._cooldown -= delta\n        this._queued = Math.max(0, this._queued - delta)\n        this._bloom = Math.max(0, this._bloom - 5 * delta)\n    }\n\n    /**\n     * The spread now, degrees: `aim` 0 from the hip to 1 aimed, and whether the holder is moving, sprinting,\n     * crouching and on the ground.\n     */\n    public spread(aim: number, moving: boolean, sprinting = false, crouched = false, grounded = true): number {\n        const a = Math.max(0, Math.min(1, aim))\n        const base = this.hipSpread + (this.aimSpread - this.hipSpread) * a\n        return base * (moving ? (sprinting ? 2.2 : 1.5) : 1) * (crouched ? 0.7 : 1) * (grounded ? 1 : 2.5) + this._bloom * (1 - a * 0.6)\n    }\n\n    /** Whether a reload would put anything in the magazine. */\n    public get canReload(): boolean {\n        return this.ammo < this.magazine && this.reserve > 0\n    }\n\n    /** Fill the magazine from the reserve; returns the rounds moved. */\n    public reload(): number {\n        const take = Math.min(this.magazine - this.ammo, this.reserve)\n        this.ammo += take\n        this.reserve -= take\n        return take\n    }\n\n    /**\n     * The trigger, every frame: `held` whether it is pulled, `ready` whether the weapon is up to fire, `eye` and\n     * `look` the camera's position and the way the crosshair looks (unit), `spread` the cone (degrees), `shooter` the\n     * body the shots never meet, `view` where it is seen from. Fires when the trigger asks, the gun is ready and the\n     * magazine holds a round; returns the recoil of the shot, or null when it did not fire (`dry` says whether that\n     * was an empty magazine).\n     */\n    public pull(held: boolean, ready: boolean, eye: ArrayLike<number>, look: ArrayLike<number>, spread: number, shooter: unknown, view: SandboxShotView)\n        : SandboxShot['recoil'] {\n        // A pull (the trigger going down) waits `pullBuffer` for the gun to be able to fire; an automatic fires while held.\n        const pulled = held && !this._held\n        if (pulled) this._queued = this.pullBuffer\n        this._held = held\n        this.dry = false\n        const wants = this.auto ? held : this._queued > 0\n        if (!wants || !ready) { this._cooldown = Math.max(0, this._cooldown); return null }\n        if (this._cooldown > 0) return null\n        if (this.ammo <= 0) { this.dry = pulled || this.auto; this._queued = 0; return null }\n        // The rate kept on average, whatever the frame rate: a shot late by part of a frame brings the next one forward.\n        const interval = 60 / Math.max(1, this.roundsPerMinute)\n        this._cooldown = Math.max(this._cooldown, -interval) + interval\n        this._queued = 0\n        this.ammo--\n        const recoil = { pitch: this.recoilPitch, yaw: (Math.random() * 2 - 1) * this.recoilYaw, kick: this.kick, shake: this.shake }\n        this.fire(eye, look, spread, shooter, recoil, view)\n        this._bloom = Math.min(this.hipSpread * 1.6, this._bloom + this.hipSpread * 0.12)\n        return recoil\n    }\n\n    /**\n     * One shot from the camera at `eye` along `look`, `spread` degrees round it at most, passing `shooter`'s body:\n     * a raycast (or two) per pellet, the push, the effects, and the `weapon:Shot` event (with `recoil`, when a pull\n     * fired it). Spends no round. Returns what the first pellet hit, or null.\n     */\n    public fire(eye: ArrayLike<number>, look: ArrayLike<number>, spread: number, shooter?: unknown,\n        recoil: SandboxShot['recoil'] = null, view: SandboxShotView = { firstPerson: false }): { point: number[], node: Node | null } | null {\n        const hits = this._shoot(eye, look, spread, shooter, view)\n        this._told({ gun: this, hit: hits[0] ?? null, hits, recoil })\n        return hits[0] ?? null\n    }\n\n    /** Tell the shot: what this returns is the `weapon:Shot` event, dispatched here and bubbling to the holder. */\n    @eventDispatch('weapon:Shot')\n    private _told(shot: SandboxShot): SandboxShot {\n        return shot\n    }\n\n    /** The shot itself: its pellets' raycasts, the pushes and the effects. */\n    private _shoot(eye: ArrayLike<number>, look: ArrayLike<number>, spread: number, shooter: unknown, view: SandboxShotView) {\n        const physics = this.scene?.physics as any\n        this.shots++\n        const muzzleNode = this.getChildByName('Muzzle')[0] ?? this\n        muzzleNode.updateTransforms(muzzleNode.parent ? muzzleNode.parent.worldTransform : null)\n        const m = view.firstPerson && view.muzzle ? view.muzzle : muzzleNode.worldPosition\n        const muzzle = [m[0], m[1], m[2]]\n        if (!view.firstPerson) {\n            const f = muzzleNode.worldForward\n            this._spawn(this.flashTemplate, muzzle, eulerAlong([f[0], f[1], f[2]]))\n            this._playSound()\n        }\n        this.lastHit = null\n        const hits: ({ point: number[], node: Node | null } | null)[] = []\n        if (!physics) return hits\n        const options = { ignore: shooter ?? null, layerMask: this._layerMask(physics) }\n        const pellets = Math.max(1, Math.round(this.pellets))\n        const push = this.impulse / pellets\n        for (let k = 0; k < pellets; k++) {\n            const dir = MathUtils.randomInCone(this._dir, look, spread) as number[]\n            // What the crosshair looks at...\n            const far = [eye[0] + dir[0] * this.range, eye[1] + dir[1] * this.range, eye[2] + dir[2] * this.range]\n            const seen = physics.raycast([eye[0], eye[1], eye[2]], far, options)\n            let hit = seen, way = [dir[0], dir[1], dir[2]]\n            if (!view.firstPerson) {\n                // ...and, in third person, what the bullet meets on its way there from the muzzle (a little past it,\n                // so it meets the surface).\n                const target = seen ? seen.point : far\n                const toTarget = [target[0] - muzzle[0], target[1] - muzzle[1], target[2] - muzzle[2]]\n                const length = Math.hypot(toTarget[0], toTarget[1], toTarget[2])\n                if (length < 1e-3) { hits.push(null); continue }\n                way = [toTarget[0] / length, toTarget[1] / length, toTarget[2] / length]\n                const end = [muzzle[0] + way[0] * (length + 0.05), muzzle[1] + way[1] * (length + 0.05), muzzle[2] + way[2] * (length + 0.05)]\n                hit = physics.raycast(muzzle, end, options)\n                // One tracer a shot: the first pellet's.\n                if (k === 0) this._tracer(muzzle, hit ? hit.point : target)\n            } else if (k === 0) this._tracer(muzzle, seen ? seen.point : far)\n            const record = hit ? { point: [hit.point[0], hit.point[1], hit.point[2]], node: hit.node ?? null } : null\n            hits.push(record)\n            if (k === 0) this.lastHit = record\n            if (!hit) continue\n            this._push(hit, way, push)\n            this._impact(hit)\n        }\n        return hits\n    }\n\n    /** Every layer but `passThroughLayers`, looked up by name once. */\n    private _layerMask(physics: any): number {\n        if (this._mask === null) {\n            let mask = -1\n            for (const name of this.passThroughLayers ?? []) if (name) mask &= ~(physics.layer?.(name) ?? 0)\n            this._mask = mask\n        }\n        return this._mask\n    }\n\n    /**\n     * A dynamic body hit is pushed along the shot, at the point hit (measured from its centre). A character hit (its\n     * capsule, or a limb of a body already reacting) takes the shot with its whole body instead: its reactions, on\n     * the limb the shot meets (`physics.applyHit`), flinch, stumble, stagger or fall by how hard it lands. Not one\n     * that shots do not move (`reactsToShots` false: the player): neither its reactions nor its limbs are pushed.\n     */\n    private _push(hit: any, way: number[], impulse: number): void {\n        const physics = this.scene?.physics as any\n        if (this._unmoved(physics, hit)) return\n        if (impulse > 0 && physics?.reactionsFor?.(hit.body) && physics.applyHit(hit, way, impulse)) return\n        const body = hit.body\n        if (!body || !body.isDynamic || impulse <= 0) return\n        const origin = body.owner?.worldPosition ?? hit.point\n        const push = Math.min(impulse, this.maxPushSpeed * Math.max(0, body.mass ?? 0))\n        if (push <= 0) return\n        body.wakeUp?.()\n        body.impulse([way[0] * push, way[1] * push, way[2] * push],\n            [hit.point[0] - origin[0], hit.point[1] - origin[1], hit.point[2] - origin[2]])\n    }\n\n    /**\n     * Sparks and dust off a hard surface, and a hole in it: one that moves with what it is on. A character throws\n     * nothing: its body's reaction is the hit (no sparks off flesh, and a decal does not follow a skinned body's limbs;\n     * the Mannequin's materials have Receive decals off besides, so a hole in the ground at its feet does not paint\n     * its legs).\n     */\n    private _impact(hit: any): void {\n        if (this._onCharacter(hit)) return\n        const n = hit.normal\n        const at = [hit.point[0] + n[0] * 0.01, hit.point[1] + n[1] * 0.01, hit.point[2] + n[2] * 0.01]\n        const rotation = eulerOntoNormal(n)\n        this._spawn(this.impactTemplate, at, rotation)\n        const hole = this._spawn(this.holeTemplate, at, [rotation[0], rotation[1], Math.random() * 360])\n        if (!hole) return\n        // On a body that moves, the hole goes with it.\n        if (hit.node && hit.body?.isDynamic) hole.reparent(hit.node)\n        this._holes.push(hole)\n        while (this._holes.length > this.maxHoles) {\n            const old = this._holes.shift()!\n            if (old.scene) old.remove({ immediate: true })\n        }\n    }\n\n    /** A streak from the muzzle to where the shot ended (none for a shot too short to see one). */\n    private _tracer(from: number[], to: number[]): void {\n        const d = [to[0] - from[0], to[1] - from[1], to[2] - from[2]]\n        const length = Math.hypot(d[0], d[1], d[2])\n        if (length < 2) return\n        const node: any = this._spawn(this.tracerTemplate, from, eulerAlong(d))\n        if (node) node.tracerLength = length\n    }\n\n    /** The shot's cue, from the nearest `Sounds` group above the gun (the character's). */\n    private _playSound(): void {\n        if (!this.shotSound) return\n        for (let n: Node | null = this.parent; n; n = n.parent) {\n            const group = n.getChildByName('Sounds')[0]\n            if (!group) continue\n            const cue = group.getChildByName(this.shotSound)[0] as any\n            cue?.play?.()\n            return\n        }\n    }\n\n    /** Whether `hit` struck a character that shots do not move (its capsule, or a limb of its reacting body). */\n    private _unmoved(physics: any, hit: any): boolean {\n        const reactions = physics?.reactionsFor?.(hit.body) ?? (hit.node ? physics?.reactionsFor?.(hit.node) : null)\n        let character: any = hit.node?.character ?? null\n        for (let n: Node | null = reactions?.node ?? null; n && !character; n = n.parent) if (n.nodeType === 'character') character = n\n        return !!character && character.reactsToShots === false\n    }\n\n    /** Whether `hit` struck a character: a limb of a reacting body, its capsule, or anything on a skinned body. */\n    private _onCharacter(hit: any): boolean {\n        if (hit.ragdoll || (this.scene?.physics as any)?.ragdollPartOf?.(hit.body)) return true\n        if (hit.node?.character) return true\n        for (let n: any = hit.node ?? null; n; n = n.parent) if (n.nodeType === 'character' || n.model?.skin) return true\n        return false\n    }\n\n    /** Spawn an effect template, or nothing (and a warning, once) when the scene has none of that name. */\n    private _spawn(template: string, position: number[], rotation: number[]): Node | null {\n        if (!template || this._missing.has(template)) return null\n        const node = (this.scene as any)?.instantiate(template, { position, rotation }) ?? null\n        if (!node) {\n            this._missing.add(template)\n            Logger.warn(`SandboxGun: no \"${template}\" template, so that effect is skipped`, 'Script')\n        }\n        return node\n    }\n}\n\n/** Euler degrees [pitch, yaw, 0] that turn a node's +Z along `d`. */\nfunction eulerAlong(d: ArrayLike<number>): number[] {\n    const aim = MathUtils.aimFromDirection([d[0], d[1], d[2]] as any)\n    return [aim.pitch, aim.yaw, 0]\n}\n\n/** Euler degrees [pitch, yaw, 0] that turn a node's +Y onto `normal` (a decal projects down its -Y). */\nfunction eulerOntoNormal(normal: ArrayLike<number>): number[] {\n    const ny = Math.max(-1, Math.min(1, normal[1]))\n    return [Math.acos(ny) * 180 / Math.PI, Math.atan2(normal[0], normal[2]) * 180 / Math.PI, 0]\n}\n",
+    "8e330d7faf38d7cf74ad6f91020ac77a": "import { Logger, MathUtils, Node } from 'cleo'\nimport type { LayerName, TemplateName, TriggerName } from 'cleo'\nimport { attribute, eventDispatch } from 'cleo/decorators'\n\n/** What one shot was, as the gun tells it (`weapon:Shot`). */\nexport interface SandboxShot {\n    gun: Node\n    /** What the first pellet hit (the only one, but for a shotgun), or null: nothing within `range`. */\n    hit: { point: number[], node: Node | null } | null\n    /** Every pellet's hit (a shotgun fires `pellets` of them); null where a pellet hit nothing. */\n    hits: ({ point: number[], node: Node | null } | null)[]\n    /** The kick a pull of the trigger gives (camera pitch up and yaw, degrees, the weapon's own, the camera's shake); null for a shot fired directly. */\n    recoil: { pitch: number, yaw: number, kick: number, shake: number } | null\n}\n\n/** Where a shot is seen from: the third person's weapon in the hands, or the first person's viewmodel. */\nexport interface SandboxShotView {\n    /** Fired in first person: the camera's ray alone, and no flash or sound of the gun's own (the viewmodel's clip has them). */\n    firstPerson: boolean\n    /** Where the tracer starts in first person: the viewmodel's muzzle where it is drawn. */\n    muzzle?: ArrayLike<number> | null\n}\n\n/**\n * A Sandbox gun: the weapon in the hands, in either view. Attach to a weapon's holder (the `Pistol Grip`, `Rifle Grip`\n * and `Shotgun Grip` nodes on the Mannequin's hand), whose child `Muzzle` is the end of its bore. Its numbers are the\n * weapon's (Firing Line's pistol, AK-47 and SAPS-12), set on each holder in the Player template. The character\n * holding it (SandboxPlayer) calls {@link pull} every frame with the trigger and where the crosshair looks; the gun\n * decides when a shot goes, spends a round from its magazine, and returns the recoil for the holder to apply. It\n * keeps its own magazine and reserve (`ammo`, `reserve`), so a weapon put away and taken out again is as it was left;\n * {@link reload} fills the magazine from the reserve. Out of the reserve, it is dry until the scene starts again.\n *\n * A SHOT is a raycast per pellet (a pistol and a rifle fire one; the shotgun `pellets`), each its own way inside the\n * spread's cone. In third person a pellet is two raycasts: from the camera through the crosshair, up to `range`\n * (what the player aims at), then from the muzzle to that point (what the bullet meets on its way: a corner the\n * camera sees past but the gun does not). In first person the camera's alone, as Firing Line fires. Neither meets the\n * shooter's own body, the trigger zones or the layers named in `passThroughLayers` (the stairs' ramps: there to be\n * walked on, not seen).\n *\n * A HIT on a dynamic body pushes it: the shot's `impulse` (shared by its pellets) along the shot at the point it hit\n * (so a crate hit high tips, a ball spins), no more than `maxPushSpeed` of speed at once. A hit on a hard surface\n * (anything but a character) leaves sparks and dust (`impactTemplate`) and a hole (`holeTemplate`), the hole moving\n * with what it is on; a character throws nothing (its body's reaction is the hit); the shot draws a tracer\n * (`tracerTemplate`). In third person the gun flashes at its muzzle (`flashTemplate`) and plays its shot (`shotSound`,\n * a cue in the character's `Sounds` group); in first person the viewmodel's fire clip does both. A template the scene\n * does not have is skipped, with a warning once.\n *\n * SPREAD is Firing Line's: a cone round the crosshair, from `hipSpread` to `aimSpread` as the weapon aims, half again\n * moving (2.2 times at a sprint), less crouched, much more in the air, and wider the longer it fires (bloom, up to 1.6\n * times the hip spread, settling at 5 degrees a second). The holder reads {@link spread} for its crosshair.\n *\n * EVERY SHOT is told as the event `weapon:Shot` (a {@link SandboxShot}), dispatched at the gun: it bubbles up to the\n * character holding it, whose `@eventListener('weapon:Shot')` applies the recoil, and then reaches anything listening\n * with `@onEvent('weapon:Shot')` anywhere (a hit marker, a sound, a score).\n */\nexport default class SandboxGunNode extends Node {\n    /** The weapon's name, on the HUD. */\n    @attribute('Weapon')\n    public displayName: string = 'Pistol'\n\n    /** Holding the trigger keeps firing (a rifle); a pistol or the shotgun fires once per pull. */\n    @attribute('Firing')\n    public auto: boolean = false\n\n    @attribute('Firing', { min: 30, max: 1500, step: 1 })\n    public roundsPerMinute: number = 380\n\n    /** Pellets a shot fires, each its own way inside the spread: 1, but for a shotgun. */\n    @attribute('Firing', { min: 1, max: 24, step: 1 })\n    public pellets: number = 1\n\n    /** How far a shot reaches, m. */\n    @attribute('Firing', { min: 5, max: 1000, step: 5 })\n    public range: number = 140\n\n    /**\n     * The push a shot gives a dynamic body, newton-seconds (shared by its pellets): far more than a real bullet's (a\n     * rifle's carries about 4), so a shot crate shoves. No body is sped up by more than `maxPushSpeed` by one hit, so a\n     * ball is not shot away.\n     */\n    @attribute('Firing', { min: 0, max: 500, step: 0.5 })\n    public impulse: number = 14\n\n    @attribute('Firing', { min: 0, max: 50, step: 0.25 })\n    public maxPushSpeed: number = 2.5\n\n    /** Damage a pellet deals at close range (nothing in the Sandbox takes it yet: kept for game modes). */\n    @attribute('Firing', { min: 0, max: 500, step: 1 })\n    public damage: number = 26\n\n    /**\n     * A pull that comes while the gun cannot fire yet (still coming up from the hip, or between two shots) fires as soon\n     * as it can, if that is within this many seconds.\n     */\n    @attribute('Firing', { min: 0, max: 1, step: 0.05 })\n    public pullBuffer: number = 0.35\n\n    /** Rounds a magazine holds, and the rounds carried besides it. */\n    @attribute('Ammunition', { min: 1, max: 200, step: 1 })\n    public magazine: number = 12\n\n    @attribute('Ammunition', { min: 0, max: 2000, step: 1 })\n    public reserveRounds: number = 84\n\n    /** Spread, degrees from the crosshair at most: from the hip, and aimed. */\n    @attribute('Spread', { min: 0, max: 20, step: 0.05 })\n    public hipSpread: number = 1.6\n\n    @attribute('Spread', { min: 0, max: 20, step: 0.05 })\n    public aimSpread: number = 0.25\n\n    /** The camera's kick per shot, degrees: up, and up to this either way; and how hard the camera shakes (0..1). */\n    @attribute('Recoil', { min: 0, max: 20, step: 0.05 })\n    public recoilPitch: number = 1.5\n\n    @attribute('Recoil', { min: 0, max: 10, step: 0.05 })\n    public recoilYaw: number = 0.45\n\n    @attribute('Recoil', { min: 0, max: 1, step: 0.01 })\n    public shake: number = 0.04\n\n    /** The weapon's own kick per shot, degrees up, carried on `weapon:Shot` for listeners (the Sandbox's body takes `fireTrigger`'s clip instead). */\n    @attribute('Recoil', { min: 0, max: 30, step: 0.5 })\n    public kick: number = 7\n\n    /** Seconds a reload and the weapon coming into the hands take where no clip says (third person). */\n    @attribute('Timing', { min: 0.1, max: 10, step: 0.05 })\n    public reloadSeconds: number = 2.2\n\n    @attribute('Timing', { min: 0.1, max: 5, step: 0.05 })\n    public equipSeconds: number = 1.2\n\n    /** First person, aimed: the field of view (degrees), the share of the walk it moves at, and whether its viewmodel has aim clips. */\n    @attribute('First Person', { min: 10, max: 120, step: 1 })\n    public aimFov: number = 62\n\n    @attribute('First Person', { min: 0.1, max: 1, step: 0.05 })\n    public aimMove: number = 0.7\n\n    @attribute('First Person')\n    public aimClips: boolean = true\n\n    /** First person, aimed without aim clips: how far the viewmodel comes in to the sights (m: left, up, forward). */\n    @attribute('First Person')\n    public aimOffset: number[] = [0, 0.012, 0]\n\n    /** Collision layers a shot passes through, by name. */\n    @attribute('Hits')\n    public passThroughLayers: LayerName[] = ['Stair Ramp']\n\n    /** Bullet holes this gun keeps; the oldest goes when there are more. */\n    @attribute('Hits', { min: 0, max: 500, step: 1 })\n    public maxHoles: number = 60\n\n    @attribute('Effects')\n    public flashTemplate: TemplateName = 'Muzzle Flash' as TemplateName\n\n    @attribute('Effects')\n    public impactTemplate: TemplateName = 'Bullet Impact' as TemplateName\n\n    @attribute('Effects')\n    public holeTemplate: TemplateName = 'Bullet Hole' as TemplateName\n\n    @attribute('Effects')\n    public tracerTemplate: TemplateName = 'Tracer' as TemplateName\n\n    /** The shot's cue in the holder's `Sounds` group (third person; in first person the fire clip plays it). */\n    @attribute('Effects')\n    public shotSound: string = 'ShotPistol'\n\n    /** The holder's body recoil, an animator trigger (the Recoil layer's kick of this weapon), raised on every shot. */\n    @attribute('Effects')\n    public fireTrigger: TriggerName = '' as TriggerName\n\n    /** Rounds in the magazine, and in the reserve. */\n    public ammo: number = 12\n    public reserve: number = 84\n    /** Shots fired, ever, and what the last one hit (null: nothing within `range`). */\n    public shots: number = 0\n    public lastHit: { point: number[], node: Node | null } | null = null\n    /** The last pull found the magazine empty. */\n    public dry: boolean = false\n\n    /** Seconds to the next shot the rate allows (below 0: the shot is late by that much, and the next comes as early). */\n    private _cooldown: number = 0\n    private _held: boolean = false\n    /** Seconds a pull that could not fire yet still waits to. */\n    private _queued: number = 0\n    private _bloom: number = 0\n    private _mask: number | null = null\n    private _holes: Node[] = []\n    private _missing: Set<string> = new Set()\n    private readonly _dir: number[] = [0, 0, 0]\n\n    onStart() {\n        this.ammo = this.magazine\n        this.reserve = this.reserveRounds\n    }\n\n    onUpdate(delta: number) {\n        this._cooldown -= delta\n        this._queued = Math.max(0, this._queued - delta)\n        this._bloom = Math.max(0, this._bloom - 5 * delta)\n    }\n\n    /**\n     * The spread now, degrees: `aim` 0 from the hip to 1 aimed, and whether the holder is moving, sprinting,\n     * crouching and on the ground.\n     */\n    public spread(aim: number, moving: boolean, sprinting = false, crouched = false, grounded = true): number {\n        const a = Math.max(0, Math.min(1, aim))\n        const base = this.hipSpread + (this.aimSpread - this.hipSpread) * a\n        return base * (moving ? (sprinting ? 2.2 : 1.5) : 1) * (crouched ? 0.7 : 1) * (grounded ? 1 : 2.5) + this._bloom * (1 - a * 0.6)\n    }\n\n    /** Whether a reload would put anything in the magazine. */\n    public get canReload(): boolean {\n        return this.ammo < this.magazine && this.reserve > 0\n    }\n\n    /** Fill the magazine from the reserve; returns the rounds moved. */\n    public reload(): number {\n        const take = Math.min(this.magazine - this.ammo, this.reserve)\n        this.ammo += take\n        this.reserve -= take\n        return take\n    }\n\n    /**\n     * The trigger, every frame: `held` whether it is pulled, `ready` whether the weapon is up to fire, `eye` and\n     * `look` the camera's position and the way the crosshair looks (unit), `spread` the cone (degrees), `shooter` the\n     * body the shots never meet, `view` where it is seen from. Fires when the trigger asks, the gun is ready and the\n     * magazine holds a round; returns the recoil of the shot, or null when it did not fire (`dry` says whether that\n     * was an empty magazine).\n     */\n    public pull(held: boolean, ready: boolean, eye: ArrayLike<number>, look: ArrayLike<number>, spread: number, shooter: unknown, view: SandboxShotView)\n        : SandboxShot['recoil'] {\n        // A pull (the trigger going down) waits `pullBuffer` for the gun to be able to fire; an automatic fires while held.\n        const pulled = held && !this._held\n        if (pulled) this._queued = this.pullBuffer\n        this._held = held\n        this.dry = false\n        const wants = this.auto ? held : this._queued > 0\n        if (!wants || !ready) { this._cooldown = Math.max(0, this._cooldown); return null }\n        if (this._cooldown > 0) return null\n        if (this.ammo <= 0) { this.dry = pulled || this.auto; this._queued = 0; return null }\n        // The rate kept on average, whatever the frame rate: a shot late by part of a frame brings the next one forward.\n        const interval = 60 / Math.max(1, this.roundsPerMinute)\n        this._cooldown = Math.max(this._cooldown, -interval) + interval\n        this._queued = 0\n        this.ammo--\n        const recoil = { pitch: this.recoilPitch, yaw: (Math.random() * 2 - 1) * this.recoilYaw, kick: this.kick, shake: this.shake }\n        this.fire(eye, look, spread, shooter, recoil, view)\n        this._bloom = Math.min(this.hipSpread * 1.6, this._bloom + this.hipSpread * 0.12)\n        return recoil\n    }\n\n    /**\n     * One shot from the camera at `eye` along `look`, `spread` degrees round it at most, passing `shooter`'s body:\n     * a raycast (or two) per pellet, the push, the effects, and the `weapon:Shot` event (with `recoil`, when a pull\n     * fired it). Spends no round. Returns what the first pellet hit, or null.\n     */\n    public fire(eye: ArrayLike<number>, look: ArrayLike<number>, spread: number, shooter?: unknown,\n        recoil: SandboxShot['recoil'] = null, view: SandboxShotView = { firstPerson: false }): { point: number[], node: Node | null } | null {\n        const hits = this._shoot(eye, look, spread, shooter, view)\n        this._told({ gun: this, hit: hits[0] ?? null, hits, recoil })\n        return hits[0] ?? null\n    }\n\n    /** Tell the shot: what this returns is the `weapon:Shot` event, dispatched here and bubbling to the holder. */\n    @eventDispatch('weapon:Shot')\n    private _told(shot: SandboxShot): SandboxShot {\n        return shot\n    }\n\n    /** The shot itself: its pellets' raycasts, the pushes and the effects. */\n    private _shoot(eye: ArrayLike<number>, look: ArrayLike<number>, spread: number, shooter: unknown, view: SandboxShotView) {\n        const physics = this.scene?.physics as any\n        this.shots++\n        const muzzleNode = this.getChildByName('Muzzle')[0] ?? this\n        muzzleNode.updateTransforms(muzzleNode.parent ? muzzleNode.parent.worldTransform : null)\n        const m = view.firstPerson && view.muzzle ? view.muzzle : muzzleNode.worldPosition\n        const muzzle = [m[0], m[1], m[2]]\n        if (!view.firstPerson) {\n            const f = muzzleNode.worldForward\n            this._spawn(this.flashTemplate, muzzle, eulerAlong([f[0], f[1], f[2]]))\n            this._playSound()\n        }\n        this.lastHit = null\n        const hits: ({ point: number[], node: Node | null } | null)[] = []\n        if (!physics) return hits\n        const options = { ignore: shooter ?? null, layerMask: this._layerMask(physics) }\n        const pellets = Math.max(1, Math.round(this.pellets))\n        const push = this.impulse / pellets\n        for (let k = 0; k < pellets; k++) {\n            const dir = MathUtils.randomInCone(this._dir, look, spread) as number[]\n            // What the crosshair looks at...\n            const far = [eye[0] + dir[0] * this.range, eye[1] + dir[1] * this.range, eye[2] + dir[2] * this.range]\n            const seen = physics.raycast([eye[0], eye[1], eye[2]], far, options)\n            let hit = seen, way = [dir[0], dir[1], dir[2]]\n            if (!view.firstPerson) {\n                // ...and, in third person, what the bullet meets on its way there from the muzzle (a little past it,\n                // so it meets the surface).\n                const target = seen ? seen.point : far\n                const toTarget = [target[0] - muzzle[0], target[1] - muzzle[1], target[2] - muzzle[2]]\n                const length = Math.hypot(toTarget[0], toTarget[1], toTarget[2])\n                if (length < 1e-3) { hits.push(null); continue }\n                way = [toTarget[0] / length, toTarget[1] / length, toTarget[2] / length]\n                const end = [muzzle[0] + way[0] * (length + 0.05), muzzle[1] + way[1] * (length + 0.05), muzzle[2] + way[2] * (length + 0.05)]\n                hit = physics.raycast(muzzle, end, options)\n                // One tracer a shot: the first pellet's.\n                if (k === 0) this._tracer(muzzle, hit ? hit.point : target)\n            } else if (k === 0) this._tracer(muzzle, seen ? seen.point : far)\n            const record = hit ? { point: [hit.point[0], hit.point[1], hit.point[2]], node: hit.node ?? null } : null\n            hits.push(record)\n            if (k === 0) this.lastHit = record\n            if (!hit) continue\n            this._push(hit, way, push)\n            this._impact(hit)\n        }\n        return hits\n    }\n\n    /** Every layer but `passThroughLayers`, looked up by name once. */\n    private _layerMask(physics: any): number {\n        if (this._mask === null) {\n            let mask = -1\n            for (const name of this.passThroughLayers ?? []) if (name) mask &= ~(physics.layer?.(name) ?? 0)\n            this._mask = mask\n        }\n        return this._mask\n    }\n\n    /**\n     * A dynamic body hit is pushed along the shot, at the point hit (measured from its centre). A character hit (its\n     * capsule, or a limb of a body already reacting) takes the shot with its whole body instead: its reactions, on\n     * the limb the shot meets (`physics.applyHit`), flinch, stumble, stagger or fall by how hard it lands. Not one\n     * that shots do not move (`reactsToShots` false: the player): neither its reactions nor its limbs are pushed.\n     */\n    private _push(hit: any, way: number[], impulse: number): void {\n        const physics = this.scene?.physics as any\n        if (this._unmoved(physics, hit)) return\n        if (impulse > 0 && physics?.reactionsFor?.(hit.body) && physics.applyHit(hit, way, impulse)) return\n        const body = hit.body\n        if (!body || !body.isDynamic || impulse <= 0) return\n        const origin = body.owner?.worldPosition ?? hit.point\n        const push = Math.min(impulse, this.maxPushSpeed * Math.max(0, body.mass ?? 0))\n        if (push <= 0) return\n        body.wakeUp?.()\n        body.impulse([way[0] * push, way[1] * push, way[2] * push],\n            [hit.point[0] - origin[0], hit.point[1] - origin[1], hit.point[2] - origin[2]])\n    }\n\n    /**\n     * Sparks and dust off a hard surface, and a hole in it: one that moves with what it is on. A character throws\n     * nothing: its body's reaction is the hit (no sparks off flesh, and a decal does not follow a skinned body's limbs;\n     * the Mannequin's materials have Receive decals off besides, so a hole in the ground at its feet does not paint\n     * its legs).\n     */\n    private _impact(hit: any): void {\n        if (this._onCharacter(hit)) return\n        const n = hit.normal\n        const at = [hit.point[0] + n[0] * 0.01, hit.point[1] + n[1] * 0.01, hit.point[2] + n[2] * 0.01]\n        const rotation = eulerOntoNormal(n)\n        this._spawn(this.impactTemplate, at, rotation)\n        const hole = this._spawn(this.holeTemplate, at, [rotation[0], rotation[1], Math.random() * 360])\n        if (!hole) return\n        // On a body that moves, the hole goes with it.\n        if (hit.node && hit.body?.isDynamic) hole.reparent(hit.node)\n        this._holes.push(hole)\n        while (this._holes.length > this.maxHoles) {\n            const old = this._holes.shift()!\n            if (old.scene) old.remove({ immediate: true })\n        }\n    }\n\n    /** A streak from the muzzle to where the shot ended (none for a shot too short to see one). */\n    private _tracer(from: number[], to: number[]): void {\n        const d = [to[0] - from[0], to[1] - from[1], to[2] - from[2]]\n        const length = Math.hypot(d[0], d[1], d[2])\n        if (length < 2) return\n        const node: any = this._spawn(this.tracerTemplate, from, eulerAlong(d))\n        if (node) node.tracerLength = length\n    }\n\n    /** The shot's cue, from the nearest `Sounds` group above the gun (the character's). */\n    private _playSound(): void {\n        if (!this.shotSound) return\n        for (let n: Node | null = this.parent; n; n = n.parent) {\n            const group = n.getChildByName('Sounds')[0]\n            if (!group) continue\n            const cue = group.getChildByName(this.shotSound)[0] as any\n            cue?.play?.()\n            return\n        }\n    }\n\n    /** Whether `hit` struck a character that shots do not move (its capsule, or a limb of its reacting body). */\n    private _unmoved(physics: any, hit: any): boolean {\n        const reactions = physics?.reactionsFor?.(hit.body) ?? (hit.node ? physics?.reactionsFor?.(hit.node) : null)\n        let character: any = hit.node?.character ?? null\n        for (let n: Node | null = reactions?.node ?? null; n && !character; n = n.parent) if (n.nodeType === 'character') character = n\n        return !!character && character.reactsToShots === false\n    }\n\n    /** Whether `hit` struck a character: a limb of a reacting body, its capsule, or anything on a skinned body. */\n    private _onCharacter(hit: any): boolean {\n        if (hit.ragdoll || (this.scene?.physics as any)?.ragdollPartOf?.(hit.body)) return true\n        if (hit.node?.character) return true\n        for (let n: any = hit.node ?? null; n; n = n.parent) if (n.nodeType === 'character' || n.model?.skin) return true\n        return false\n    }\n\n    /** Spawn an effect template, or nothing (and a warning, once) when the scene has none of that name. */\n    private _spawn(template: string, position: number[], rotation: number[]): Node | null {\n        if (!template || this._missing.has(template)) return null\n        const node = (this.scene as any)?.instantiate(template, { position, rotation }) ?? null\n        if (!node) {\n            this._missing.add(template)\n            Logger.warn(`SandboxGun: no \"${template}\" template, so that effect is skipped`, 'Script')\n        }\n        return node\n    }\n}\n\n/** Euler degrees [pitch, yaw, 0] that turn a node's +Z along `d`. */\nfunction eulerAlong(d: ArrayLike<number>): number[] {\n    const aim = MathUtils.aimFromDirection([d[0], d[1], d[2]] as any)\n    return [aim.pitch, aim.yaw, 0]\n}\n\n/** Euler degrees [pitch, yaw, 0] that turn a node's +Y onto `normal` (a decal projects down its -Y). */\nfunction eulerOntoNormal(normal: ArrayLike<number>): number[] {\n    const ny = Math.max(-1, Math.min(1, normal[1]))\n    return [Math.acos(ny) * 180 / Math.PI, Math.atan2(normal[0], normal[2]) * 180 / Math.PI, 0]\n}\n",
+    "81d9c40e85c6e1a26dfbf1034b57d9f6": "import { Logger, MathUtils, Node } from 'cleo'\nimport type { LayerName, TemplateName, TriggerName } from 'cleo'\nimport { attribute, eventDispatch } from 'cleo/decorators'\n\n/** What one shot was, as the gun tells it (`weapon:Shot`). */\nexport interface SandboxShot {\n    gun: Node\n    /** What the first pellet hit (the only one, but for a shotgun), or null: nothing within `range`. */\n    hit: { point: number[], node: Node | null } | null\n    /** Every pellet's hit (a shotgun fires `pellets` of them); null where a pellet hit nothing. */\n    hits: ({ point: number[], node: Node | null } | null)[]\n    /** The kick a pull of the trigger gives (camera pitch up and yaw, degrees, the weapon's own, the camera's shake); null for a shot fired directly. */\n    recoil: { pitch: number, yaw: number, kick: number, shake: number } | null\n}\n\n/** Where a shot is seen from: the third person's weapon in the hands, or the first person's viewmodel. */\nexport interface SandboxShotView {\n    /** Fired in first person: the camera's ray alone, and no flash or sound of the gun's own (the viewmodel's clip has them). */\n    firstPerson: boolean\n    /** Where the tracer starts in first person: the viewmodel's muzzle where it is drawn. */\n    muzzle?: ArrayLike<number> | null\n}\n\n/**\n * A Sandbox gun: the weapon in the hands, in either view. Attach to a weapon's holder (the `Pistol Grip`, `Rifle Grip`\n * and `Shotgun Grip` nodes on the Mannequin's hand), whose child `Muzzle` is the end of its bore. Its numbers are the\n * weapon's (Firing Line's pistol, AK-47 and SAPS-12), set on each holder in the Player template. The character\n * holding it (SandboxPlayer) calls {@link pull} every frame with the trigger and where the crosshair looks; the gun\n * decides when a shot goes, spends a round from its magazine, and returns the recoil for the holder to apply. It\n * keeps its own magazine and reserve (`ammo`, `reserve`), so a weapon put away and taken out again is as it was left;\n * {@link reload} fills the magazine from the reserve. Out of the reserve, it is dry until the scene starts again.\n *\n * A SHOT is a raycast per pellet (a pistol and a rifle fire one; the shotgun `pellets`), each its own way inside the\n * spread's cone. In third person a pellet is two raycasts: from the camera through the crosshair, up to `range`\n * (what the player aims at), then from the muzzle to that point (what the bullet meets on its way: a corner the\n * camera sees past but the gun does not). In first person the camera's alone, as Firing Line fires. Neither meets the\n * shooter's own body, the trigger zones or the layers named in `passThroughLayers` (the stairs' ramps: there to be\n * walked on, not seen).\n *\n * A HIT on a dynamic body pushes it: the shot's `impulse` (shared by its pellets) along the shot at the point it hit\n * (so a crate hit high tips, a ball spins), no more than `maxPushSpeed` of speed at once. A hit on a hard surface\n * (anything but a character) leaves sparks and dust (`impactTemplate`) and a hole (`holeTemplate`), the hole moving\n * with what it is on; a character throws nothing (its body's reaction is the hit); the shot draws a tracer\n * (`tracerTemplate`). In third person the gun flashes at its muzzle (`flashTemplate`) and plays its shot (`shotSound`,\n * a cue in the character's `Sounds` group); in first person the viewmodel's fire clip does both. A template the scene\n * does not have is skipped, with a warning once.\n *\n * SPREAD is Firing Line's: a cone round the crosshair, from `hipSpread` to `aimSpread` as the weapon aims, half again\n * moving (2.2 times at a sprint), less crouched, much more in the air, and wider the longer it fires (bloom, up to 1.6\n * times the hip spread, settling at 5 degrees a second). The holder reads {@link spread} for its crosshair.\n *\n * EVERY SHOT is told as the event `weapon:Shot` (a {@link SandboxShot}), dispatched at the gun: it bubbles up to the\n * character holding it, whose `@eventListener('weapon:Shot')` applies the recoil, and then reaches anything listening\n * with `@onEvent('weapon:Shot')` anywhere (a hit marker, a sound, a score).\n */\nexport default class SandboxGunNode extends Node {\n    /** The weapon's name, on the HUD. */\n    @attribute('Weapon')\n    public displayName: string = 'Pistol'\n\n    /** Holding the trigger keeps firing (a rifle); a pistol or the shotgun fires once per pull. */\n    @attribute('Firing')\n    public auto: boolean = false\n\n    @attribute('Firing', { min: 30, max: 1500, step: 1 })\n    public roundsPerMinute: number = 380\n\n    /** Pellets a shot fires, each its own way inside the spread: 1, but for a shotgun. */\n    @attribute('Firing', { min: 1, max: 24, step: 1 })\n    public pellets: number = 1\n\n    /** How far a shot reaches, m. */\n    @attribute('Firing', { min: 5, max: 1000, step: 5 })\n    public range: number = 140\n\n    /**\n     * The push a shot gives a dynamic body, newton-seconds (shared by its pellets): far more than a real bullet's (a\n     * rifle's carries about 4), so a shot crate shoves. No body is sped up by more than `maxPushSpeed` by one hit, so a\n     * ball is not shot away.\n     */\n    @attribute('Firing', { min: 0, max: 500, step: 0.5 })\n    public impulse: number = 14\n\n    @attribute('Firing', { min: 0, max: 50, step: 0.25 })\n    public maxPushSpeed: number = 2.5\n\n    /** Damage a pellet deals at close range (nothing in the Sandbox takes it yet: kept for game modes). */\n    @attribute('Firing', { min: 0, max: 500, step: 1 })\n    public damage: number = 26\n\n    /**\n     * A pull that comes while the gun cannot fire yet (still coming up from the hip, or between two shots) fires as soon\n     * as it can, if that is within this many seconds.\n     */\n    @attribute('Firing', { min: 0, max: 1, step: 0.05 })\n    public pullBuffer: number = 0.35\n\n    /** Rounds a magazine holds, and the rounds carried besides it. */\n    @attribute('Ammunition', { min: 1, max: 200, step: 1 })\n    public magazine: number = 12\n\n    @attribute('Ammunition', { min: 0, max: 2000, step: 1 })\n    public reserveRounds: number = 84\n\n    /** Spread, degrees from the crosshair at most: from the hip, and aimed. */\n    @attribute('Spread', { min: 0, max: 20, step: 0.05 })\n    public hipSpread: number = 1.6\n\n    @attribute('Spread', { min: 0, max: 20, step: 0.05 })\n    public aimSpread: number = 0.25\n\n    /** The camera's kick per shot, degrees: up, and up to this either way; and how hard the camera shakes (0..1). */\n    @attribute('Recoil', { min: 0, max: 20, step: 0.05 })\n    public recoilPitch: number = 1.5\n\n    @attribute('Recoil', { min: 0, max: 10, step: 0.05 })\n    public recoilYaw: number = 0.45\n\n    @attribute('Recoil', { min: 0, max: 1, step: 0.01 })\n    public shake: number = 0.04\n\n    /** The weapon's own kick per shot, degrees up, carried on `weapon:Shot` for listeners (the Sandbox's body takes `fireTrigger`'s clip instead). */\n    @attribute('Recoil', { min: 0, max: 30, step: 0.5 })\n    public kick: number = 7\n\n    /** Seconds a reload and the weapon coming into the hands take where no clip says (third person). */\n    @attribute('Timing', { min: 0.1, max: 10, step: 0.05 })\n    public reloadSeconds: number = 2.2\n\n    @attribute('Timing', { min: 0.1, max: 5, step: 0.05 })\n    public equipSeconds: number = 1.2\n\n    /** First person, aimed: the field of view (degrees), the share of the walk it moves at, and whether its viewmodel has aim clips. */\n    @attribute('First Person', { min: 10, max: 120, step: 1 })\n    public aimFov: number = 62\n\n    @attribute('First Person', { min: 0.1, max: 1, step: 0.05 })\n    public aimMove: number = 0.7\n\n    @attribute('First Person')\n    public aimClips: boolean = true\n\n    /** First person, aimed without aim clips: how far the viewmodel comes in to the sights (m: left, up, forward). */\n    @attribute('First Person')\n    public aimOffset: number[] = [0, 0.012, 0]\n\n    /** Collision layers a shot passes through, by name. */\n    @attribute('Hits')\n    public passThroughLayers: LayerName[] = ['Stair Ramp']\n\n    /** Bullet holes this gun keeps; the oldest goes when there are more. */\n    @attribute('Hits', { min: 0, max: 500, step: 1 })\n    public maxHoles: number = 60\n\n    @attribute('Effects')\n    public flashTemplate: TemplateName = 'Muzzle Flash' as TemplateName\n\n    @attribute('Effects')\n    public impactTemplate: TemplateName = 'Bullet Impact' as TemplateName\n\n    @attribute('Effects')\n    public holeTemplate: TemplateName = 'Bullet Hole' as TemplateName\n\n    @attribute('Effects')\n    public tracerTemplate: TemplateName = 'Tracer' as TemplateName\n\n    /** The shot's cue in the holder's `Sounds` group (third person; in first person the fire clip plays it). */\n    @attribute('Effects')\n    public shotSound: string = 'ShotPistol'\n\n    /** The holder's body recoil, an animator trigger (the Recoil layer's kick of this weapon), raised on every shot. */\n    @attribute('Effects')\n    public fireTrigger: TriggerName = '' as TriggerName\n\n    /** Rounds in the magazine, and in the reserve. */\n    public ammo: number = 12\n    public reserve: number = 84\n    /** Shots fired, ever, and what the last one hit (null: nothing within `range`). */\n    public shots: number = 0\n    public lastHit: { point: number[], node: Node | null } | null = null\n    /** The last pull found the magazine empty. */\n    public dry: boolean = false\n\n    /** Seconds to the next shot the rate allows (below 0: the shot is late by that much, and the next comes as early). */\n    private _cooldown: number = 0\n    private _held: boolean = false\n    /** Seconds a pull that could not fire yet still waits to. */\n    private _queued: number = 0\n    private _bloom: number = 0\n    private _mask: number | null = null\n    private _holes: Node[] = []\n    private _missing: Set<string> = new Set()\n    private readonly _dir: number[] = [0, 0, 0]\n\n    onStart() {\n        this.ammo = this.magazine\n        this.reserve = this.reserveRounds\n    }\n\n    onUpdate(delta: number) {\n        this._cooldown -= delta\n        this._queued = Math.max(0, this._queued - delta)\n        this._bloom = Math.max(0, this._bloom - 5 * delta)\n    }\n\n    /**\n     * The spread now, degrees: `aim` 0 from the hip to 1 aimed, and whether the holder is moving, sprinting,\n     * crouching and on the ground.\n     */\n    public spread(aim: number, moving: boolean, sprinting = false, crouched = false, grounded = true): number {\n        const a = Math.max(0, Math.min(1, aim))\n        const base = this.hipSpread + (this.aimSpread - this.hipSpread) * a\n        return base * (moving ? (sprinting ? 2.2 : 1.5) : 1) * (crouched ? 0.7 : 1) * (grounded ? 1 : 2.5) + this._bloom * (1 - a * 0.6)\n    }\n\n    /** Whether a reload would put anything in the magazine. */\n    public get canReload(): boolean {\n        return this.ammo < this.magazine && this.reserve > 0\n    }\n\n    /** Fill the magazine from the reserve; returns the rounds moved. */\n    public reload(): number {\n        const take = Math.min(this.magazine - this.ammo, this.reserve)\n        this.ammo += take\n        this.reserve -= take\n        return take\n    }\n\n    /**\n     * The trigger, every frame: `held` whether it is pulled, `ready` whether the weapon is up to fire, `eye` and\n     * `look` the camera's position and the way the crosshair looks (unit), `spread` the cone (degrees), `shooter` the\n     * body the shots never meet, `view` where it is seen from. Fires when the trigger asks, the gun is ready and the\n     * magazine holds a round; returns the recoil of the shot, or null when it did not fire (`dry` says whether that\n     * was an empty magazine).\n     */\n    public pull(held: boolean, ready: boolean, eye: ArrayLike<number>, look: ArrayLike<number>, spread: number, shooter: unknown, view: SandboxShotView)\n        : SandboxShot['recoil'] {\n        // A pull (the trigger going down) waits `pullBuffer` for the gun to be able to fire; an automatic fires while held.\n        const pulled = held && !this._held\n        if (pulled) this._queued = this.pullBuffer\n        this._held = held\n        this.dry = false\n        const wants = this.auto ? held : this._queued > 0\n        if (!wants || !ready) { this._cooldown = Math.max(0, this._cooldown); return null }\n        if (this._cooldown > 0) return null\n        if (this.ammo <= 0) { this.dry = pulled || this.auto; this._queued = 0; return null }\n        // The rate kept on average, whatever the frame rate: a shot late by part of a frame brings the next one forward.\n        const interval = 60 / Math.max(1, this.roundsPerMinute)\n        this._cooldown = Math.max(this._cooldown, -interval) + interval\n        this._queued = 0\n        this.ammo--\n        const recoil = { pitch: this.recoilPitch, yaw: (Math.random() * 2 - 1) * this.recoilYaw, kick: this.kick, shake: this.shake }\n        this.fire(eye, look, spread, shooter, recoil, view)\n        this._bloom = Math.min(this.hipSpread * 1.6, this._bloom + this.hipSpread * 0.12)\n        return recoil\n    }\n\n    /**\n     * One shot from the camera at `eye` along `look`, `spread` degrees round it at most, passing `shooter`'s body:\n     * a raycast (or two) per pellet, the push, the effects, and the `weapon:Shot` event (with `recoil`, when a pull\n     * fired it). Spends no round. Returns what the first pellet hit, or null.\n     */\n    public fire(eye: ArrayLike<number>, look: ArrayLike<number>, spread: number, shooter?: unknown,\n        recoil: SandboxShot['recoil'] = null, view: SandboxShotView = { firstPerson: false }): { point: number[], node: Node | null } | null {\n        const hits = this._shoot(eye, look, spread, shooter, view)\n        this._told({ gun: this, hit: hits[0] ?? null, hits, recoil })\n        return hits[0] ?? null\n    }\n\n    /** Tell the shot: what this returns is the `weapon:Shot` event, dispatched here and bubbling to the holder. */\n    @eventDispatch('weapon:Shot')\n    private _told(shot: SandboxShot): SandboxShot {\n        return shot\n    }\n\n    /** The shot itself: its pellets' raycasts, the pushes and the effects. */\n    private _shoot(eye: ArrayLike<number>, look: ArrayLike<number>, spread: number, shooter: unknown, view: SandboxShotView) {\n        const physics = this.scene?.physics as any\n        this.shots++\n        const muzzleNode = this.getChildByName('Muzzle')[0] ?? this\n        muzzleNode.updateTransforms(muzzleNode.parent ? muzzleNode.parent.worldTransform : null)\n        const m = view.firstPerson && view.muzzle ? view.muzzle : muzzleNode.worldPosition\n        const muzzle = [m[0], m[1], m[2]]\n        if (!view.firstPerson) {\n            const f = muzzleNode.worldForward\n            this._spawn(this.flashTemplate, muzzle, eulerAlong([f[0], f[1], f[2]]))\n            this._playSound()\n        }\n        this.lastHit = null\n        const hits: ({ point: number[], node: Node | null } | null)[] = []\n        if (!physics) return hits\n        const options = { ignore: shooter ?? null, layerMask: this._layerMask(physics) }\n        const pellets = Math.max(1, Math.round(this.pellets))\n        const push = this.impulse / pellets\n        for (let k = 0; k < pellets; k++) {\n            const dir = MathUtils.randomInCone(this._dir, look, spread) as number[]\n            // What the crosshair looks at...\n            const far = [eye[0] + dir[0] * this.range, eye[1] + dir[1] * this.range, eye[2] + dir[2] * this.range]\n            const seen = physics.raycast([eye[0], eye[1], eye[2]], far, options)\n            let hit = seen, way = [dir[0], dir[1], dir[2]]\n            if (!view.firstPerson) {\n                // ...and, in third person, what the bullet meets on its way there from the muzzle (a little past it,\n                // so it meets the surface).\n                const target = seen ? seen.point : far\n                const toTarget = [target[0] - muzzle[0], target[1] - muzzle[1], target[2] - muzzle[2]]\n                const length = Math.hypot(toTarget[0], toTarget[1], toTarget[2])\n                if (length < 1e-3) { hits.push(null); continue }\n                way = [toTarget[0] / length, toTarget[1] / length, toTarget[2] / length]\n                const end = [muzzle[0] + way[0] * (length + 0.05), muzzle[1] + way[1] * (length + 0.05), muzzle[2] + way[2] * (length + 0.05)]\n                hit = physics.raycast(muzzle, end, options)\n                // One tracer a shot: the first pellet's.\n                if (k === 0) this._tracer(muzzle, hit ? hit.point : target)\n            } else if (k === 0) this._tracer(muzzle, seen ? seen.point : far)\n            const record = hit ? { point: [hit.point[0], hit.point[1], hit.point[2]], node: hit.node ?? null } : null\n            hits.push(record)\n            if (k === 0) this.lastHit = record\n            if (!hit) continue\n            this._push(hit, way, push)\n            this._impact(hit)\n        }\n        return hits\n    }\n\n    /** Every layer but `passThroughLayers`, looked up by name once. */\n    private _layerMask(physics: any): number {\n        if (this._mask === null) {\n            let mask = -1\n            for (const name of this.passThroughLayers ?? []) if (name) mask &= ~(physics.layer?.(name) ?? 0)\n            this._mask = mask\n        }\n        return this._mask\n    }\n\n    /**\n     * A dynamic body hit is pushed along the shot, at the point hit (measured from its centre). A character hit (its\n     * capsule, or a limb of a body already reacting) takes the shot with its whole body instead: its reactions, on\n     * the limb the shot meets (`physics.applyHit`), flinch, stumble, stagger or fall by how hard it lands. Not one\n     * that shots do not move (`reactsToShots` false: the player): neither its reactions nor its limbs are pushed.\n     */\n    private _push(hit: any, way: number[], impulse: number): void {\n        const physics = this.scene?.physics as any\n        if (this._unmoved(physics, hit)) return\n        if (impulse > 0 && physics?.reactionsFor?.(hit.body) && physics.applyHit(hit, way, impulse)) return\n        const body = hit.body\n        if (!body || !body.isDynamic || impulse <= 0) return\n        const origin = body.owner?.worldPosition ?? hit.point\n        const push = Math.min(impulse, this.maxPushSpeed * Math.max(0, body.mass ?? 0))\n        if (push <= 0) return\n        body.wakeUp?.()\n        body.impulse([way[0] * push, way[1] * push, way[2] * push],\n            [hit.point[0] - origin[0], hit.point[1] - origin[1], hit.point[2] - origin[2]])\n    }\n\n    /**\n     * Sparks and dust off a hard surface, and a hole in it: one that moves with what it is on. A character throws\n     * nothing: its body's reaction is the hit (no sparks off flesh, and a decal does not follow a skinned body's limbs;\n     * the Mannequin's materials have Receive decals off besides, so a hole in the ground at its feet does not paint\n     * its legs).\n     */\n    private _impact(hit: any): void {\n        if (this._onCharacter(hit)) return\n        const n = hit.normal\n        const at = [hit.point[0] + n[0] * 0.01, hit.point[1] + n[1] * 0.01, hit.point[2] + n[2] * 0.01]\n        const rotation = eulerOntoNormal(n)\n        this._spawn(this.impactTemplate, at, rotation)\n        const hole = this._spawn(this.holeTemplate, at, [rotation[0], rotation[1], Math.random() * 360])\n        if (!hole) return\n        // On a body that moves, the hole goes with it.\n        if (hit.node && hit.body?.isDynamic) hole.reparent(hit.node)\n        this._holes.push(hole)\n        while (this._holes.length > this.maxHoles) {\n            const old = this._holes.shift()!\n            if (old.scene) old.remove({ immediate: true })\n        }\n    }\n\n    /** A streak from the muzzle to where the shot ended (none for a shot too short to see one). */\n    private _tracer(from: number[], to: number[]): void {\n        const d = [to[0] - from[0], to[1] - from[1], to[2] - from[2]]\n        const length = Math.hypot(d[0], d[1], d[2])\n        if (length < 2) return\n        const node: any = this._spawn(this.tracerTemplate, from, eulerAlong(d))\n        if (node) node.tracerLength = length\n    }\n\n    /** The shot's cue, from the nearest `Sounds` group above the gun (the character's). */\n    private _playSound(): void {\n        if (!this.shotSound) return\n        for (let n: Node | null = this.parent; n; n = n.parent) {\n            const group = n.getChildByName('Sounds')[0]\n            if (!group) continue\n            const cue = group.getChildByName(this.shotSound)[0] as any\n            cue?.play?.()\n            return\n        }\n    }\n\n    /** Whether `hit` struck a character that shots do not move (its capsule, or a limb of its reacting body). */\n    private _unmoved(physics: any, hit: any): boolean {\n        const reactions = physics?.reactionsFor?.(hit.body) ?? (hit.node ? physics?.reactionsFor?.(hit.node) : null)\n        let character: any = hit.node?.character ?? null\n        for (let n: Node | null = reactions?.node ?? null; n && !character; n = n.parent) if (n.nodeType === 'character') character = n\n        return !!character && character.reactsToShots === false\n    }\n\n    /** Whether `hit` struck a character: a limb of a reacting body, its capsule, or anything on a skinned body. */\n    private _onCharacter(hit: any): boolean {\n        if (hit.ragdoll || (this.scene?.physics as any)?.ragdollPartOf?.(hit.body)) return true\n        if (hit.node?.character) return true\n        for (let n: any = hit.node ?? null; n; n = n.parent) if (n.nodeType === 'character' || n.model?.skin) return true\n        return false\n    }\n\n    /** Spawn an effect template, or nothing (and a warning, once) when the scene has none of that name. */\n    private _spawn(template: string, position: number[], rotation: number[]): Node | null {\n        if (!template || this._missing.has(template)) return null\n        const node = (this.scene as any)?.instantiate(template, { position, rotation }) ?? null\n        if (!node) {\n            this._missing.add(template)\n            Logger.warn(`SandboxGun: no \"${template}\" template, so that effect is skipped`, 'Script')\n        }\n        return node\n    }\n}\n\n/** Euler degrees [pitch, yaw, 0] that turn a node's +Z along `d`. */\nfunction eulerAlong(d: ArrayLike<number>): number[] {\n    const aim = MathUtils.aimFromDirection([d[0], d[1], d[2]] as any)\n    return [aim.pitch, aim.yaw, 0]\n}\n\n/** Euler degrees [pitch, yaw, 0] that turn a node's +Y onto `normal` (a decal projects down its -Y). */\nfunction eulerOntoNormal(normal: ArrayLike<number>): number[] {\n    const ny = Math.max(-1, Math.min(1, normal[1]))\n    return [Math.acos(ny) * 180 / Math.PI, Math.atan2(normal[0], normal[2]) * 180 / Math.PI, 0]\n}\n"
   }
 }

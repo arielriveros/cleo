@@ -98,7 +98,7 @@
           "min": 0,
           "max": 500,
           "step": 0.5,
-          "tooltip": "The push a shot gives a dynamic body, newton-seconds (shared by its pellets): far more than a real bullet's (a rifle's carries about 4), so a shot crate shoves. No body is sped up by more than `maxPushSpeed` by one hit, so a ball is not shot away."
+          "tooltip": "The push a shot gives a dynamic body, newton-seconds (shared by its pellets): far more than a real bullet's (a rifle's carries about 4), so a shot crate shoves. No body is sped up by more than `maxPushSpeed` by one hit, so a ball is not shot away. A character takes it as one hit of what its pellets carry: it staggers from 60 and an NPC is knocked down past its `knockdownShock` (56), so the shotgun's (90) fells one at close range."
         }
       },
       {

@@ -1490,6 +1490,13 @@
                 "ragdollProfile": {
                   "version": 1,
                   "totalMass": 70,
+                  "selfCollision": true,
+                  "linearDamping": 0.02,
+                  "angularDamping": 0.2,
+                  "solverIterations": 20,
+                  "friction": 0.8,
+                  "restitution": 0.05,
+                  "footFriction": 2,
                   "parts": [
                     {
                       "name": "Pelvis",
@@ -1517,8 +1524,8 @@
                       "massFraction": 0.139,
                       "joint": {
                         "type": "cone",
-                        "swing": 15,
-                        "twist": 16,
+                        "swing": 25,
+                        "twist": 20,
                         "hingeMin": 0,
                         "hingeMax": 0,
                         "tilt": [0, 0]
@@ -1535,8 +1542,8 @@
                       "massFraction": 0.216,
                       "joint": {
                         "type": "cone",
-                        "swing": 19,
-                        "twist": 17,
+                        "swing": 20,
+                        "twist": 20,
                         "hingeMin": 0,
                         "hingeMax": 0
                       }
@@ -1550,8 +1557,8 @@
                       "massFraction": 0.081,
                       "joint": {
                         "type": "cone",
-                        "swing": 26,
-                        "twist": 26,
+                        "swing": 35,
+                        "twist": 40,
                         "hingeMin": 0,
                         "hingeMax": 0
                       }
@@ -1614,11 +1621,11 @@
                       "massFraction": 0.1,
                       "joint": {
                         "type": "cone",
-                        "swing": 58,
-                        "twist": 35,
+                        "swing": 65,
+                        "twist": 45,
                         "hingeMin": 0,
                         "hingeMax": 0,
-                        "tilt": [32, 0]
+                        "tilt": [25, 0]
                       }
                     },
                     {
@@ -1711,11 +1718,11 @@
                       "massFraction": 0.1,
                       "joint": {
                         "type": "cone",
-                        "swing": 58,
-                        "twist": 35,
+                        "swing": 65,
+                        "twist": 45,
                         "hingeMin": 0,
                         "hingeMax": 0,
-                        "tilt": [32, 0]
+                        "tilt": [25, 0]
                       }
                     },
                     {
@@ -1750,14 +1757,7 @@
                         "hingeMax": 0
                       }
                     }
-                  ],
-                  "selfCollision": true,
-                  "linearDamping": 0.02,
-                  "angularDamping": 0.2,
-                  "solverIterations": 20,
-                  "friction": 0.8,
-                  "restitution": 0.05,
-                  "footFriction": 2
+                  ]
                 },
                 "reactionSets": {
                   "version": 1,
@@ -1851,6 +1851,9 @@
                             "impulseOneFoot": 0.8,
                             "impulseAirborne": 0.5,
                             "duration": 1.4,
+                            "holdControl": 0.35,
+                            "holdRelease": 0.3,
+                            "reactTurn": 0.5,
                             "painLean": 0.25,
                             "shockSpin": 0.3,
                             "gutFold": 0.45,
@@ -1874,6 +1877,7 @@
                             "maxSteps": 4,
                             "tire": 0.7,
                             "assist": 1,
+                            "yawDamp": 0.25,
                             "firstStep": 0.12,
                             "crossMax": 0.08,
                             "stanceStiffness": 1.2,
@@ -2013,7 +2017,7 @@
                             "blendTime": 0.25
                           },
                           "clips": {
-                            "faceUp": "Stand Up"
+                            "faceUp": "Getting Up"
                           }
                         }
                       }
@@ -14895,7 +14899,7 @@
                   "roundsPerMinute": 76,
                   "pellets": 9,
                   "range": 60,
-                  "impulse": 27,
+                  "impulse": 90,
                   "damage": 12,
                   "magazine": 6,
                   "reserveRounds": 36,

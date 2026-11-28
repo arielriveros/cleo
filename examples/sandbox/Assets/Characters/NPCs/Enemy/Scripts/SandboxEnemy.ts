@@ -9,7 +9,7 @@ const CLAIMS = new WeakMap<object, Map<string, Node>>()
 /**
  * A Sandbox enemy (the red NPC): it patrols a part of the map with a weapon, shoots the player on sight, and takes
  * cover when shot at. Attach to the **Character** node of the Enemy template (SandboxNpc's senses, the player's body,
- * animations and weapons underneath). Its AI Controller thinks with the **Enemy Brain** (Characters/NPCs/AI), whose
+ * animations and weapons underneath). Its AI Controller thinks with the **Enemy Brain** (Characters/NPCs/Enemy), whose
  * states are:
  *
  *   patrol    walks the nav mesh route nearest where it was placed (the NavMesh node's routes), its weapon at the

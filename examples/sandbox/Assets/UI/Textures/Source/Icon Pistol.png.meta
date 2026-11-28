@@ -1,0 +1,35 @@
+{
+  "cleo": 1,
+  "guid": "Icon Pistol.png",
+  "kind": "image",
+  "created": 1795880307298,
+  "record": {
+    "id": "Icon Pistol.png",
+    "name": "Icon Pistol.png",
+    "mime": "image/png",
+    "width": 0,
+    "height": 0,
+    "byteSize": 0,
+    "origin": "import",
+    "created": 1795880307276
+  },
+  "importer": {
+    "mime": "image/png",
+    "config": {
+      "flipY": false,
+      "usage": "color",
+      "wrapping": "clamp",
+      "wrapU": "clamp",
+      "wrapV": "clamp",
+      "wrapW": "clamp",
+      "mipMap": true,
+      "mipMapFilter": "linear",
+      "minFilter": "linear",
+      "magFilter": "linear",
+      "anisotropy": 1,
+      "precision": "low",
+      "format": "rgba8unorm",
+      "target": "texture2D"
+    }
+  }
+}

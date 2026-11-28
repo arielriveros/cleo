@@ -36,7 +36,7 @@ import { useProjectScripts } from 'cleo/testing';
 const PROJECT = EXAMPLE;
 const present = dataReady();
 const sandbox = present ? await readThisExample() : null;
-// The class scripts import each other (SandboxPlayer and the NPCs build on '@/Characters/Mannequin/Scripts/SandboxCharacter'):
+// The class scripts import each other (SandboxPlayer and the NPCs build on '@/Characters/Base/Scripts/SandboxCharacter'):
 // every script of the project registered as a module, as Play registers them.
 if (present) useProjectScripts(EXAMPLE);
 const read = (...parts: string[]) => sandbox!.read(...parts);
@@ -1529,8 +1529,8 @@ describe.skipIf(!present)('the Sandbox example project', { timeout: 300_000 }, (
         const scriptOf = (t: any) => library('scripts').find(s => s.id === characterOf(t).variables.__scriptId.value)?.name;
         expect(['Sandbox Character', 'Player', 'Civilian', 'Enemy'].map(n => scriptOf(templates.get(n)))).toEqual(['SandboxCharacter', 'SandboxPlayer', 'SandboxCivilian', 'SandboxEnemy']);
         const source = (name: string) => library('scripts').find(s => s.name === name).source as string;
-        expect(source('SandboxPlayer')).toMatch(/import SandboxCharacterNode from '@\/Characters\/Mannequin\/Scripts\/SandboxCharacter'[\s\S]*class SandboxPlayerNode extends SandboxCharacterNode/);
-        expect(source('SandboxNpc')).toMatch(/import SandboxCharacterNode from '@\/Characters\/Mannequin\/Scripts\/SandboxCharacter'[\s\S]*class SandboxNpcNode extends SandboxCharacterNode/);
+        expect(source('SandboxPlayer')).toMatch(/import SandboxCharacterNode from '@\/Characters\/Base\/Scripts\/SandboxCharacter'[\s\S]*class SandboxPlayerNode extends SandboxCharacterNode/);
+        expect(source('SandboxNpc')).toMatch(/import SandboxCharacterNode from '@\/Characters\/Base\/Scripts\/SandboxCharacter'[\s\S]*class SandboxNpcNode extends SandboxCharacterNode/);
         for (const name of ['SandboxCivilian', 'SandboxEnemy']) expect(source(name), name).toMatch(/import SandboxNpcNode from '@\/Characters\/NPCs\/Scripts\/SandboxNpc'[\s\S]*extends SandboxNpcNode/);
         // The player's model, machine and reactions everywhere: its rig's reaction set on every skin, getting up on
         // Mixamo's Stand Up (a body on its front or side rolls onto its back first), 0.6 s after it comes to rest.
@@ -1563,7 +1563,7 @@ describe.skipIf(!present)('the Sandbox example project', { timeout: 300_000 }, (
         for (const name of ['Player', 'Sandbox Character', 'Civilian', 'Enemy'])
             expect(mannequin(templates.get(name)).model.material.config.receiveDecals, name).toBe(false);
         // The brains: an AI Controller each, possessing its Character, seeing as far and as wide as its script, and
-        // thinking with its AI Brain asset (Characters/NPCs/AI): a behaviour machine whose states the scripts answer.
+        // thinking with its AI Brain asset (Characters/NPCs/Civilian and /Enemy): a behaviour machine whose states the scripts answer.
         const brains = new Map(library('aiBrains').map((b: any) => [b.id, b]));
         for (const [name, range, fov, brainName] of [['Civilian', 16, 150, 'Civilian Brain'], ['Enemy', 24, 120, 'Enemy Brain']] as const) {
             const t = templates.get(name);
@@ -1847,9 +1847,27 @@ describe.skipIf(!present)('the Sandbox example project', { timeout: 300_000 }, (
     /** Where the left hand's joint is in a weapon's frame: the support hand on it. */
     const leftOnWeapon = (p: ReturnType<typeof play>, socket: string) =>
         vec3.transformMat4(vec3.create(), mat4.getTranslation(vec3.create(), jointMatrix(p, 'LeftHand')), mat4.invert(mat4.create(), weaponFrame(p, socket))!);
-    /** Take out `weapon` (1 the pistol, 2 the rifle, 3 the shotgun): tap Equip until it is up. */
+    /** The mouse's way to each slot of the weapon wheel (screen y down): none up, the pistol right, the rifle down, the shotgun left. */
+    const WHEEL_WAY = [[0, -1], [1, 0], [0, 1], [-1, 0]];
+    /**
+     * Pick `weapon` (0 none, 1 the pistol, 2 the rifle, 3 the shotgun) off the weapon wheel: Equip held until it
+     * opens, the mouse moved toward the weapon's slot, Equip let go. The hands then go to it (not waited for here).
+     */
+    const pickOffWheel = (p: ReturnType<typeof play>, weapon: number) => {
+        input.press('Equip');
+        p.run(0.3);
+        expect(p.player.weaponWheelOpen).toBe(true);
+        const [x, y] = WHEEL_WAY[weapon];
+        input.setVector('Look', x * 120, y * 120);
+        p.run(FRAME * 2);
+        input.setVector('Look', 0, 0);
+        input.release('Equip');
+        p.run(FRAME);
+        expect(p.player.weaponWheelOpen).toBe(false);
+    };
+    /** Take out `weapon` (1 the pistol, 2 the rifle, 3 the shotgun) off the weapon wheel, and wait until it is up. */
     const equip = (p: ReturnType<typeof play>, weapon: number) => {
-        for (let k = 0; k < 4 && p.player.weapon !== weapon; k++) { input.tap('Equip'); p.run(0.7); }
+        if (p.player.weapon !== weapon) { pickOffWheel(p, weapon); p.run(0.7); }
         expect(p.player.weapon).toBe(weapon);
     };
 
@@ -1901,14 +1919,14 @@ describe.skipIf(!present)('the Sandbox example project', { timeout: 300_000 }, (
         }
     });
 
-    it('takes out the pistol, then the rifle, then the shotgun, then puts it away, a tap of Equip each', () => {
+    it('takes out the pistol, the rifle and the shotgun off the weapon wheel, and puts it away on its top slot', () => {
         const p = play(OPEN);
         p.run(0.5);
         const shown = () => ['Pistol Grip', 'Rifle Grip', 'Shotgun Grip'].map(n => (p.scene.findNode(n) as Node).visible);
         const weights = () => [p.player.pistolWeight, p.player.rifleWeight, p.player.shotgunWeight];
         expect(p.player.weapon).toBe(0);
         expect(shown()).toEqual([false, false, false]);
-        input.tap('Equip');
+        pickOffWheel(p, 1);
         p.run(0.7);
         expect(p.player.weapon).toBe(1);
         expect(p.player.pistolWeight).toBe(1);
@@ -1917,13 +1935,13 @@ describe.skipIf(!present)('the Sandbox example project', { timeout: 300_000 }, (
         expect(p.animator.currentStateName).toBe('Pistol Idle');
         expect(shown()).toEqual([true, false, false]);
         expect(p.animator.layerStateName('Pistol')).toBe('Carry');
-        input.tap('Equip');
+        pickOffWheel(p, 2);
         p.run(0.9);
         expect(p.player.weapon).toBe(2);
         expect(weights()).toEqual([0, 1, 0]);
         expect(shown()).toEqual([false, true, false]);
         expect([p.player.stance, p.animator.currentStateName]).toEqual([2, 'Rifle Idle']);
-        input.tap('Equip');
+        pickOffWheel(p, 3);
         p.run(0.9);
         expect(p.player.weapon).toBe(3);
         expect(weights()).toEqual([0, 0, 1]);
@@ -1931,12 +1949,87 @@ describe.skipIf(!present)('the Sandbox example project', { timeout: 300_000 }, (
         // The shotgun moves as the rifle does.
         expect([p.player.stance, p.animator.currentStateName]).toEqual([2, 'Rifle Idle']);
         expect(p.animator.layerStateName('Shotgun')).toBe('Carry');
-        input.tap('Equip');
+        pickOffWheel(p, 0);
         p.run(0.7);
         expect(p.player.weapon).toBe(0);
         expect(weights()).toEqual([0, 0, 0]);
         expect(shown()).toEqual([false, false, false]);
         expect([p.player.stance, p.animator.currentStateName]).toEqual([0, 'Idle']);
+    });
+
+    it('opens the weapon wheel on Equip held: the camera stops turning, the trigger rests, and letting go takes out what it points at', () => {
+        const p = play(OPEN);
+        p.run(0.5);
+        equip(p, 2);
+        const wheel = p.scene.findNode('Weapon Wheel') as Node & Record<string, any>;
+        const gun = p.scene.findNode('Rifle Grip') as Node & Record<string, any>;
+        expect(wheel.visible).toBe(false);
+        input.press('Equip');
+        p.run(0.1);
+        // Not yet: a short press is a tap.
+        expect(p.player.weaponWheelOpen).toBe(false);
+        p.run(0.2);
+        expect(p.player.weaponWheelOpen).toBe(true);
+        expect(wheel.isOpen).toBe(true);
+        // It opens on the weapon in the hands, and shows each weapon's name and what it has left.
+        expect(wheel.highlighted).toBe(2);
+        const slot = (name: string, part: string) => (wheel.getChildByName(name)[0] as Node).getChildByName(part)[0] as Node & Record<string, any>;
+        expect(slot('Slot Rifle', 'Label').text).toBe(gun.displayName);
+        expect(slot('Slot Rifle', 'Ammo').text).toBe(`${gun.ammo} / ${gun.reserve}`);
+        expect(slot('Slot Rifle', 'Icon').textureId).toBeTruthy();
+        p.run(0.2);
+        expect(wheel.visible).toBe(true);
+        // Look points the wheel, not the camera; Fire held fires nothing.
+        const yaw = p.rigs[0].yaw, pitch = p.rigs[0].pitch, ammo = gun.ammo;
+        input.setVector('Look', -60, 0);
+        input.press('Fire');
+        p.run(0.3);
+        expect(p.rigs[0].yaw).toBe(yaw);
+        expect(p.rigs[0].pitch).toBe(pitch);
+        expect(gun.ammo).toBe(ammo);
+        expect(wheel.highlighted).toBe(3);
+        // Back toward the middle a little: the slot lit stays lit until the pointer is out at another.
+        input.setVector('Look', 20, 0);
+        p.run(FRAME * 2);
+        expect(wheel.highlighted).toBe(3);
+        input.setVector('Look', 0, 0);
+        input.release('Fire');
+        input.release('Equip');
+        p.run(FRAME);
+        expect(p.player.weaponWheelOpen).toBe(false);
+        expect(p.controller().driveAimTarget).toBe(true);
+        p.run(0.9);
+        expect(p.player.weapon).toBe(3);
+        expect(wheel.visible).toBe(false);
+        // The camera turns again.
+        input.setVector('Look', 30, 0);
+        p.run(0.1);
+        input.setVector('Look', 0, 0);
+        expect(p.rigs[0].yaw).not.toBe(yaw);
+    });
+
+    it('swaps back to the last weapon on a tap of Equip', () => {
+        const p = play(OPEN);
+        p.run(0.5);
+        // At first, a tap takes out the pistol.
+        input.tap('Equip');
+        p.run(0.7);
+        expect(p.player.weapon).toBe(1);
+        expect(p.player.weaponWheelOpen).toBe(false);
+        equip(p, 3);
+        input.tap('Equip');
+        p.run(0.9);
+        expect(p.player.weapon).toBe(1);
+        input.tap('Equip');
+        p.run(0.9);
+        expect(p.player.weapon).toBe(3);
+        // The wheel to nothing, then a tap: the shotgun again.
+        pickOffWheel(p, 0);
+        p.run(0.7);
+        expect(p.player.weapon).toBe(0);
+        input.tap('Equip');
+        p.run(0.9);
+        expect(p.player.weapon).toBe(3);
     });
 
     it('holds its weapons in Mixamo’s hands: each set’s clips, the aim’s directions variants of its mocap aim', () => {
@@ -2507,12 +2600,12 @@ describe.skipIf(!present)('the Sandbox example project', { timeout: 300_000 }, (
         input.setMove(0, 1);
         p.run(1.5);
         expect(p.animator.currentStateName).toBe('Locomotion');
-        for (const [taps, to] of [[1, 'Pistol Locomotion'], [1, 'Rifle Locomotion'], [2, 'Locomotion']] as const) {
+        for (const [weapon, to] of [[1, 'Pistol Locomotion'], [2, 'Rifle Locomotion'], [0, 'Locomotion']] as const) {
             const from = p.animator.currentStateName;
-            for (let k = 0; k < taps; k++) { input.tap('Equip'); p.run(0.12); }
+            pickOffWheel(p, weapon);
             const seen = new Set<string>();
             const slide = footSlide(p, 1.6, undefined, () => seen.add(p.animator.currentStateName));
-            // Straight across, never through a stop or a stand (the shotgun on the way back down is the rifle's set).
+            // Straight across, never through a stop or a stand.
             expect([...seen].every(n => /Locomotion$/.test(n)), `${from} -> ${to}: ${[...seen]}`).toBe(true);
             expect(p.animator.currentStateName).toBe(to);
             expect(slide, `${from} -> ${to}: foot slide`).toBeLessThan(0.35);
@@ -2931,7 +3024,7 @@ describe.skipIf(!present)('the Sandbox example project', { timeout: 300_000 }, (
         p.run(0.1);
         expect(Math.abs(wrap(p.yawOf(p.player) - rig.yaw))).toBeLessThan(2);
         // The weapon changes: its viewmodel comes up.
-        input.tap('Equip');
+        pickOffWheel(p, 3);
         p.run(0.5);
         expect(p.player.weapon).toBe(3);
         expect(shown()).toEqual([false, false, true]);

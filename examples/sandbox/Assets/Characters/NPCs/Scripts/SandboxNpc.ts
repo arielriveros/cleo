@@ -1,7 +1,7 @@
 import { setMoveWorld } from 'cleo'
 import type { ControllerNode, Node } from 'cleo'
 import { attribute, eventListener, onEvent } from 'cleo/decorators'
-import SandboxCharacterNode from '@/Characters/Mannequin/Scripts/SandboxCharacter'
+import SandboxCharacterNode from '@/Characters/Base/Scripts/SandboxCharacter'
 
 /** What set an NPC off: a shot heard, one that nearly hit it, one that hit it, or a car. */
 export type ThreatKind = 'shot' | 'nearMiss' | 'hit' | 'vehicle'
@@ -20,7 +20,7 @@ export type Gait = 'stand' | 'walk' | 'jog' | 'sprint'
  *      ├─ Weapons, Sounds   (an enemy's)
  *      └─ AI Controller     possesses the Character, sees, walks the nav mesh, and thinks with its AI Brain
  *
- * THE BRAIN is the AI Controller's: an AI Brain asset (Characters/NPCs/AI: Civilian Brain, Enemy Brain), a behaviour
+ * THE BRAIN is the AI Controller's: an AI Brain asset (Civilian Brain, Enemy Brain: each in its variant's folder, Characters/NPCs/Civilian and /Enemy), a behaviour
  * machine. Its states set the controller's goal (stand, walk the nav mesh to a point, keep away from the player...),
  * and its transitions decide when to change, on the controller's senses (the player in sight, how far, how long since
  * it was seen: the blackboard's `target` is the player, on foot) and on what this script measures (the getters under
